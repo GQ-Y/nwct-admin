@@ -1,18 +1,38 @@
-
-import React, { useState } from 'react';
-import { Card, Button, Input, Badge } from '../components/UI';
+import React, { useState, useEffect } from 'react';
+import { Card, Button, SearchInput, Select, Badge, Pagination } from '../components/UI';
 import { mockDevices } from '../data';
 import { Device } from '../types';
-import { Search, RefreshCw, Smartphone, Monitor, Server, Camera } from 'lucide-react';
+import { RefreshCw, Smartphone, Monitor, Server, Camera, Radar } from 'lucide-react';
 import { useLanguage } from '../contexts/LanguageContext';
 
 export const Devices: React.FC = () => {
   const { t } = useLanguage();
   const [searchTerm, setSearchTerm] = useState('');
+  const [filterType, setFilterType] = useState('all');
   const [view, setView] = useState<'list' | 'detail'>('list');
   const [selectedDevice, setSelectedDevice] = useState<Device | null>(null);
+  const [isScanning, setIsScanning] = useState(false);
+  const [isScanningPorts, setIsScanningPorts] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 10;
 
-  const filtered = mockDevices.filter(d => d.name.toLowerCase().includes(searchTerm.toLowerCase()) || d.ip.includes(searchTerm));
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm, filterType]);
+
+  const filtered = mockDevices.filter(d => {
+    const matchesSearch = d.name.toLowerCase().includes(searchTerm.toLowerCase()) || d.ip.includes(searchTerm);
+    const matchesType = filterType === 'all' || 
+                        (filterType === 'online' && d.status === 'online') || 
+                        (filterType === 'offline' && d.status === 'offline');
+    return matchesSearch && matchesType;
+  });
+
+  const totalPages = Math.ceil(filtered.length / itemsPerPage);
+  const currentDevices = filtered.slice(
+    (currentPage - 1) * itemsPerPage,
+    currentPage * itemsPerPage
+  );
 
   const getIcon = (type: string) => {
     switch(type) {
@@ -22,6 +42,30 @@ export const Devices: React.FC = () => {
       default: return <Monitor size={18} />;
     }
   };
+
+  const handleScan = () => {
+    if (isScanning) return;
+    setIsScanning(true);
+    // Simulate network scan
+    setTimeout(() => {
+      setIsScanning(false);
+    }, 2000);
+  };
+
+  const handleScanPorts = () => {
+    if (isScanningPorts) return;
+    setIsScanningPorts(true);
+    setTimeout(() => {
+        setIsScanningPorts(false);
+        // In a real app, this would update the ports list
+    }, 3000);
+  }
+
+  const filterOptions = [
+    { label: t('devices.all_types'), value: 'all' },
+    { label: t('common.online'), value: 'online' },
+    { label: t('common.offline'), value: 'offline' }
+  ];
 
   if (view === 'detail' && selectedDevice) {
     return (
@@ -65,7 +109,15 @@ export const Devices: React.FC = () => {
                 <div style={{ textAlign: 'center', color: '#999', padding: 20 }}>{t('devices.no_ports')}</div>
               )}
               <div style={{ marginTop: 16, textAlign: 'right' }}>
-                <Button variant="outline" style={{ fontSize: 13 }}>{t('devices.scan_ports')}</Button>
+                <Button 
+                    variant="outline" 
+                    style={{ fontSize: 13 }} 
+                    onClick={handleScanPorts}
+                    disabled={isScanningPorts}
+                >
+                    <Radar size={16} className={isScanningPorts ? 'animate-spin' : ''} />
+                    {isScanningPorts ? t('devices.scanning') : t('devices.scan_ports')}
+                </Button>
               </div>
            </Card>
         </div>
@@ -75,25 +127,24 @@ export const Devices: React.FC = () => {
 
   return (
     <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 24 }}>
-         <div style={{ display: 'flex', gap: 12 }}>
-            <div style={{ position: 'relative' }}>
-              <Search size={16} style={{ position: 'absolute', left: 10, top: 10, color: '#999' }} />
-              <Input 
-                placeholder={t('common.search')}
-                style={{ paddingLeft: 36, width: 300 }} 
-                value={searchTerm}
-                onChange={e => setSearchTerm(e.target.value)}
-              />
-            </div>
-            <select className="input" style={{ width: 120 }}>
-               <option>{t('devices.all_types')}</option>
-               <option>{t('common.online')}</option>
-               <option>{t('common.offline')}</option>
-            </select>
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 24, alignItems: 'center' }}>
+         <div style={{ display: 'flex', gap: 16, flex: 1 }}>
+            <SearchInput 
+              placeholder={t('common.search')}
+              width={320} 
+              value={searchTerm}
+              onChange={e => setSearchTerm(e.target.value)}
+            />
+            <Select 
+              width={160} 
+              options={filterOptions}
+              value={filterType}
+              onChange={setFilterType}
+            />
          </div>
-         <Button>
-           <RefreshCw size={16} /> {t('devices.scan_network')}
+         <Button onClick={handleScan} disabled={isScanning}>
+           <RefreshCw size={18} className={isScanning ? 'animate-spin' : ''} /> 
+           {isScanning ? t('devices.scanning') : t('devices.scan_network')}
          </Button>
       </div>
 
@@ -111,7 +162,7 @@ export const Devices: React.FC = () => {
             </tr>
           </thead>
           <tbody>
-            {filtered.map(d => (
+            {currentDevices.map(d => (
               <tr key={d.ip}>
                 <td style={{ color: '#666' }}>{getIcon(d.type)}</td>
                 <td style={{ fontWeight: 500 }}>{d.name}</td>
@@ -128,6 +179,18 @@ export const Devices: React.FC = () => {
             ))}
           </tbody>
         </table>
+        {totalPages > 1 && (
+          <Pagination
+            currentPage={currentPage}
+            totalPages={totalPages}
+            onPageChange={setCurrentPage}
+            texts={{
+              prev: t('common.prev_page'),
+              next: t('common.next_page'),
+              info: `${t('common.page')} ${currentPage} ${t('common.of')} ${totalPages}`
+            }}
+          />
+        )}
       </Card>
     </div>
   );

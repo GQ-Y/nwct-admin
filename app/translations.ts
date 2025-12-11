@@ -19,6 +19,13 @@ export const translations = {
       scan: 'Scan',
       start: 'Start',
       stop: 'Stop',
+      prev_page: 'Previous',
+      next_page: 'Next',
+      page: 'Page',
+      of: 'of',
+      connect: 'Connect',
+      disconnect: 'Disconnect',
+      confirm: 'Confirm'
     },
     login: {
       title: 'Admin Login',
@@ -58,6 +65,7 @@ export const translations = {
     devices: {
       all_types: 'All Types',
       scan_network: 'Scan Network',
+      scanning: 'Scanning...',
       name: 'Name',
       ip: 'IP Address',
       mac: 'MAC',
@@ -90,9 +98,13 @@ export const translations = {
       firmware: 'Firmware',
       uptime: 'Uptime',
       reboot: 'Reboot System',
+      reboot_desc: 'Restart the device safely',
       logs: 'System Logs',
       export: 'Export',
-      clear: 'Clear'
+      clear: 'Clear',
+      actions: 'System Actions',
+      factory_reset: 'Factory Reset',
+      factory_reset_desc: 'Clear all data and settings'
     },
     services: {
       nps_conn: 'NPS Connection',
@@ -100,6 +112,8 @@ export const translations = {
       save_config: 'Save Config',
       tunnel_stats: 'Tunnel Stats',
       active_tunnels: 'Active Tunnels',
+      clients_online: 'Clients Online',
+      total_traffic: 'Total Traffic',
       tunnels_list: 'Tunnels List',
       id: 'ID',
       local: 'Local',
@@ -166,6 +180,13 @@ export const translations = {
       scan: '扫描',
       start: '开始',
       stop: '停止',
+      prev_page: '上一页',
+      next_page: '下一页',
+      page: '第',
+      of: '页 / 共',
+      connect: '连接',
+      disconnect: '断开',
+      confirm: '确认'
     },
     login: {
       title: '管理员登录',
@@ -205,6 +226,7 @@ export const translations = {
     devices: {
       all_types: '所有类型',
       scan_network: '扫描网络',
+      scanning: '扫描中...',
       name: '名称',
       ip: 'IP 地址',
       mac: 'MAC 地址',
@@ -237,9 +259,13 @@ export const translations = {
       firmware: '固件版本',
       uptime: '运行时间',
       reboot: '重启系统',
+      reboot_desc: '安全重启设备',
       logs: '系统日志',
       export: '导出',
-      clear: '清空'
+      clear: '清空',
+      actions: '系统操作',
+      factory_reset: '恢复出厂设置',
+      factory_reset_desc: '清除所有数据和设置'
     },
     services: {
       nps_conn: 'NPS 连接',
@@ -247,6 +273,8 @@ export const translations = {
       save_config: '保存配置',
       tunnel_stats: '隧道统计',
       active_tunnels: '活跃隧道',
+      clients_online: '在线客户端',
+      total_traffic: '总流量',
       tunnels_list: '隧道列表',
       id: 'ID',
       local: '本地地址',

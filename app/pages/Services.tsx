@@ -1,12 +1,16 @@
-
-import React from 'react';
+import React, { useState } from 'react';
 import { Card, Button, Input, Badge } from '../components/UI';
 import { mockMqttMessages, mockTunnels } from '../data';
-import { Pause, Save } from 'lucide-react';
+import { Pause, Play, Save, Activity, Users, ArrowUp, ArrowDown, RefreshCw } from 'lucide-react';
 import { useLanguage } from '../contexts/LanguageContext';
 
 export const NPSPage: React.FC = () => {
   const { t } = useLanguage();
+  const [isConnected, setIsConnected] = useState(true);
+
+  const toggleConnection = () => {
+    setIsConnected(!isConnected);
+  };
 
   return (
     <div>
@@ -14,28 +18,75 @@ export const NPSPage: React.FC = () => {
         <Card title={t('services.nps_conn')}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24 }}>
              <div style={{ display: 'flex', gap: 16 }}>
-               <div style={{ width: 12, height: 12, borderRadius: '50%', background: '#52c41a', marginTop: 6 }} />
+               <div style={{ 
+                 width: 12, 
+                 height: 12, 
+                 borderRadius: '50%', 
+                 background: isConnected ? '#52c41a' : '#ff4d4f', 
+                 marginTop: 6,
+                 boxShadow: isConnected ? '0 0 10px rgba(82, 196, 26, 0.4)' : '0 0 10px rgba(255, 77, 79, 0.4)'
+               }} />
                <div>
-                 <div style={{ fontSize: 18, fontWeight: 600 }}>{t('common.connected')}</div>
+                 <div style={{ fontSize: 18, fontWeight: 600 }}>{isConnected ? t('common.connected') : t('common.disconnected')}</div>
                  <div style={{ color: '#666' }}>server.nps.host:8024</div>
                </div>
              </div>
-             <Button variant="outline"><Pause size={16} /> {t('common.disconnected')}</Button>
+             <Button 
+                variant={isConnected ? "outline" : "primary"} 
+                onClick={toggleConnection}
+                style={isConnected ? { color: '#ff4d4f', borderColor: '#ff4d4f' } : {}}
+             >
+                {isConnected ? <Pause size={16} /> : <Play size={16} />} 
+                {isConnected ? t('common.disconnect') : t('common.connect')}
+             </Button>
           </div>
-          <div style={{ background: '#f5f5f5', padding: 16, borderRadius: 6 }}>
-            <div style={{ fontSize: 12, color: '#666', marginBottom: 8 }}>{t('services.config')}</div>
+          <div style={{ background: '#f5f5f5', padding: 20, borderRadius: 12 }}>
+            <div style={{ fontSize: 13, color: '#666', marginBottom: 12, fontWeight: 500 }}>{t('services.config')}</div>
             <div className="grid-2">
               <Input defaultValue="server.nps.host:8024" />
               <Input defaultValue="my-vkey-token" type="password" />
             </div>
-            <Button style={{ marginTop: 12 }} variant="primary"><Save size={16} /> {t('services.save_config')}</Button>
+            <Button style={{ marginTop: 16 }} variant="primary"><Save size={16} /> {t('services.save_config')}</Button>
           </div>
         </Card>
         
-        <Card title={t('services.tunnel_stats')}>
-           <div style={{ fontSize: 32, fontWeight: 600, color: '#1890ff' }}>3</div>
-           <div style={{ color: '#666' }}>{t('services.active_tunnels')}</div>
-        </Card>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+             <Card title={t('services.tunnel_stats')}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div>
+                        <div style={{ fontSize: 36, fontWeight: 700, color: 'var(--primary)' }}>3</div>
+                        <div style={{ color: 'var(--text-secondary)' }}>{t('services.active_tunnels')}</div>
+                    </div>
+                    <div style={{ width: 48, height: 48, borderRadius: '50%', background: 'rgba(10, 89, 247, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <Activity size={24} color="var(--primary)" />
+                    </div>
+                </div>
+             </Card>
+
+             <div className="grid-2" style={{ gap: 24 }}>
+                 <Card style={{ marginBottom: 0 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <div>
+                            <div style={{ fontSize: 24, fontWeight: 700, color: '#52c41a' }}>12</div>
+                            <div style={{ color: 'var(--text-secondary)', fontSize: 13 }}>{t('services.clients_online') || 'Clients Online'}</div>
+                        </div>
+                         <Users size={20} color="#52c41a" />
+                    </div>
+                 </Card>
+                 <Card style={{ marginBottom: 0 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <div>
+                            <div style={{ fontSize: 24, fontWeight: 700, color: '#faad14' }}>2.4G</div>
+                            <div style={{ color: 'var(--text-secondary)', fontSize: 13 }}>{t('services.total_traffic') || 'Total Traffic'}</div>
+                        </div>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                            <ArrowUp size={12} color="#faad14" />
+                            <ArrowDown size={12} color="#faad14" />
+                        </div>
+                    </div>
+                 </Card>
+             </div>
+        </div>
       </div>
 
       <Card title={t('services.tunnels_list')}>
@@ -60,6 +111,18 @@ export const NPSPage: React.FC = () => {
 
 export const MQTTPage: React.FC = () => {
   const { t } = useLanguage();
+  const [connectionState, setConnectionState] = useState<'connected' | 'disconnected' | 'connecting'>('connected');
+
+  const handleReconnect = () => {
+    if (connectionState === 'connected') {
+        setConnectionState('disconnected');
+    } else {
+        setConnectionState('connecting');
+        setTimeout(() => {
+            setConnectionState('connected');
+        }, 2000);
+    }
+  };
 
   return (
     <div>
@@ -73,9 +136,22 @@ export const MQTTPage: React.FC = () => {
                <div><label style={{ display: 'block', marginBottom: 8 }}>{t('services.user')}</label><Input defaultValue="admin" /></div>
                <div><label style={{ display: 'block', marginBottom: 8 }}>{t('services.pass')}</label><Input type="password" /></div>
             </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-               <Badge status="online" text={t('common.connected')} />
-               <Button>{t('services.reconnect')}</Button>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+               <Badge 
+                  status={connectionState === 'connected' ? 'online' : connectionState === 'connecting' ? 'warn' : 'offline'} 
+                  text={connectionState === 'connected' ? t('common.connected') : connectionState === 'connecting' ? t('common.loading') : t('common.disconnected')} 
+               />
+               <Button onClick={handleReconnect} disabled={connectionState === 'connecting'}>
+                  {connectionState === 'connecting' ? (
+                      <>
+                        <RefreshCw size={16} className="animate-spin" /> {t('common.loading')}
+                      </>
+                  ) : connectionState === 'connected' ? (
+                      t('services.reconnect')
+                  ) : (
+                      t('common.connect')
+                  )}
+               </Button>
             </div>
          </Card>
          <Card title={t('services.publish')}>
