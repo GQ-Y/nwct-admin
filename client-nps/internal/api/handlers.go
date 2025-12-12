@@ -724,24 +724,73 @@ func (s *Server) handleTraceroute(c *gin.Context) {
 // handleSpeedTest 处理网速测试请求
 func (s *Server) handleSpeedTest(c *gin.Context) {
 	var req struct {
+		// mode:
+		// - web: 访问网站测速（DNS/TCP/TLS/TTFB/Total），默认
+		// - download: 下载带宽测速（旧逻辑）
+		Mode          string `json:"mode"`
+		URL           string `json:"url"`
+		Method        string `json:"method"` // GET(默认)/HEAD
+		Count         int    `json:"count"`
+		Timeout       int    `json:"timeout"` // 秒
+		DownloadBytes int64  `json:"download_bytes"`
+
+		// 旧字段兼容（download 模式使用）
 		Server   string `json:"server"`
 		TestType string `json:"test_type"`
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
 		// 允许空请求体
-		req.TestType = "all"
-		req.Server = "default"
+		req.Mode = "web"
 	}
 
-	// 使用toolkit的网速测试
-	result, err := toolkit.SpeedTest(req.Server, req.TestType)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, models.ErrorResponse(500, err.Error()))
+	mode := strings.TrimSpace(req.Mode)
+	if mode == "" {
+		mode = "web"
+	}
+
+	switch mode {
+	case "download":
+		// 使用toolkit的下载测速（兼容旧面板/脚本）
+		if req.TestType == "" {
+			req.TestType = "download"
+		}
+		if req.Server == "" {
+			req.Server = "default"
+		}
+		result, err := toolkit.SpeedTest(req.Server, req.TestType)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, models.ErrorResponse(500, err.Error()))
+			return
+		}
+		c.JSON(http.StatusOK, models.SuccessResponse(result))
+		return
+	case "web":
+		fallthrough
+	default:
+		if req.Count <= 0 {
+			req.Count = 3
+		}
+		if req.Timeout <= 0 {
+			req.Timeout = 8
+		}
+		// 兼容：如果 url 为空但 server 有值，把 server 当作 url
+		targetURL := strings.TrimSpace(req.URL)
+		if targetURL == "" {
+			targetURL = strings.TrimSpace(req.Server)
+		}
+		method := strings.TrimSpace(req.Method)
+		if method == "" {
+			method = "GET"
+		}
+		result, err := toolkit.WebSpeedTestWithOptions(targetURL, method, req.Count, time.Duration(req.Timeout)*time.Second, req.DownloadBytes)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, models.ErrorResponse(500, err.Error()))
+			return
+		}
+		c.JSON(http.StatusOK, models.SuccessResponse(result))
 		return
 	}
-
-	c.JSON(http.StatusOK, models.SuccessResponse(result))
 }
 
 // handlePortScan 处理端口扫描请求

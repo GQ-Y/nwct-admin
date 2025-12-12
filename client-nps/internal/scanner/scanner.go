@@ -1,13 +1,16 @@
 package scanner
 
 import (
+	"bytes"
 	"database/sql"
+	"encoding/binary"
 	"fmt"
 	"net"
 	"nwct/client-nps/internal/database"
 	"nwct/client-nps/internal/logger"
 	"nwct/client-nps/internal/realtime"
 	"nwct/client-nps/internal/toolkit"
+	"strings"
 	"sync"
 	"time"
 )
@@ -469,11 +472,171 @@ func getDeviceName(ip string) string {
 	// 尝试反向DNS查询
 	names, err := net.LookupAddr(ip)
 	if err == nil && len(names) > 0 {
-		return names[0]
+		return strings.TrimSuffix(names[0], ".")
 	}
 
-	// TODO: NetBIOS查询
-	// TODO: mDNS查询
+	// NetBIOS (NBNS) 节点状态查询（UDP/137），对 Windows/部分NAS 很有效
+	if name, err := nbnsNodeStatusName(ip, 800*time.Millisecond); err == nil && name != "" {
+		return name
+	}
 
 	return ""
+}
+
+// nbnsNodeStatusName 通过 NBNS Node Status (0x21) 获取设备 NetBIOS 名称
+func nbnsNodeStatusName(ip string, timeout time.Duration) (string, error) {
+	// 构造 NBNS 请求
+	// Header: TransactionID(2) Flags(2) QDCount(2)=1 ANCount(2)=0 NSCount(2)=0 ARCount(2)=0
+	// Question: QNAME(ENCODED "*") QTYPE=0x0021 QCLASS=0x0001
+	txid := uint16(time.Now().UnixNano() & 0xffff)
+	var buf bytes.Buffer
+	_ = binary.Write(&buf, binary.BigEndian, txid)
+	_ = binary.Write(&buf, binary.BigEndian, uint16(0x0000))
+	_ = binary.Write(&buf, binary.BigEndian, uint16(0x0001))
+	_ = binary.Write(&buf, binary.BigEndian, uint16(0x0000))
+	_ = binary.Write(&buf, binary.BigEndian, uint16(0x0000))
+	_ = binary.Write(&buf, binary.BigEndian, uint16(0x0000))
+
+	// QNAME: 0x20 + 32 bytes netbios-encoded name + 0x00
+	// 对于 Node Status，name 为 "*" (0x2A) + 15 spaces
+	encoded := encodeNetBIOSName("*")
+	buf.WriteByte(0x20)
+	buf.Write(encoded)
+	buf.WriteByte(0x00)
+
+	_ = binary.Write(&buf, binary.BigEndian, uint16(0x0021)) // NBSTAT
+	_ = binary.Write(&buf, binary.BigEndian, uint16(0x0001)) // IN
+
+	raddr, err := net.ResolveUDPAddr("udp4", net.JoinHostPort(ip, "137"))
+	if err != nil {
+		return "", err
+	}
+	conn, err := net.DialUDP("udp4", nil, raddr)
+	if err != nil {
+		return "", err
+	}
+	defer conn.Close()
+	_ = conn.SetDeadline(time.Now().Add(timeout))
+
+	if _, err := conn.Write(buf.Bytes()); err != nil {
+		return "", err
+	}
+
+	resp := make([]byte, 1500)
+	n, err := conn.Read(resp)
+	if err != nil {
+		return "", err
+	}
+	resp = resp[:n]
+	if len(resp) < 12 {
+		return "", fmt.Errorf("nbns响应过短")
+	}
+
+	// 简单校验 txid
+	if binary.BigEndian.Uint16(resp[0:2]) != txid {
+		// 不严格：有些设备可能不回同 txid，这里不直接失败
+	}
+
+	// 跳过 header
+	off := 12
+	// 跳过 question qname（0x20 + 32 + 0x00）+ qtype/qclass
+	if off+1 > len(resp) {
+		return "", fmt.Errorf("nbns响应异常")
+	}
+	// 解析 qname：压缩指针(0xC0) 或 label(0x20)
+	if resp[off]&0xC0 == 0xC0 {
+		off += 2
+	} else {
+		// label length
+		l := int(resp[off])
+		off++
+		off += l
+		off++ // 0x00
+	}
+	off += 4 // qtype+qclass
+	if off+2 > len(resp) {
+		return "", fmt.Errorf("nbns响应异常")
+	}
+
+	// Answer section：我们只解析第一个 RR
+	// NAME: pointer
+	if off+2 > len(resp) {
+		return "", fmt.Errorf("nbns响应异常")
+	}
+	if resp[off]&0xC0 == 0xC0 {
+		off += 2
+	} else {
+		// 极少数情况：非压缩 name，这里粗略跳过
+		l := int(resp[off])
+		off++
+		off += l
+		off++
+	}
+	if off+10 > len(resp) {
+		return "", fmt.Errorf("nbns RR 过短")
+	}
+	rrType := binary.BigEndian.Uint16(resp[off : off+2])
+	off += 2
+	_ = rrType
+	off += 2 // class
+	off += 4 // ttl
+	rdlen := int(binary.BigEndian.Uint16(resp[off : off+2]))
+	off += 2
+	if off+rdlen > len(resp) {
+		return "", fmt.Errorf("nbns RDATA 过短")
+	}
+	rdata := resp[off : off+rdlen]
+
+	// Node Status RDATA: NumNames(1) + NameEntry(18)*N + ...
+	if len(rdata) < 1 {
+		return "", fmt.Errorf("nbns RDATA 过短")
+	}
+	num := int(rdata[0])
+	pos := 1
+	best := ""
+	for i := 0; i < num; i++ {
+		if pos+18 > len(rdata) {
+			break
+		}
+		nameBytes := rdata[pos : pos+15]
+		suffix := rdata[pos+15]
+		flags := binary.BigEndian.Uint16(rdata[pos+16 : pos+18])
+		pos += 18
+
+		name := strings.TrimSpace(string(nameBytes))
+		// 选取常见的工作站服务名：suffix 0x00 且非 group
+		isGroup := (flags & 0x8000) != 0
+		if suffix == 0x00 && !isGroup && name != "" {
+			best = name
+			break
+		}
+		// 备用：记录第一个非空
+		if best == "" && name != "" {
+			best = name
+		}
+	}
+	return best, nil
+}
+
+// encodeNetBIOSName 将一个名字编码成 NetBIOS 32 字节表示（RFC1002）
+func encodeNetBIOSName(name string) []byte {
+	// 取 16 字节：name(<=15) + suffix(1)；这里 suffix 0x00，name 用空格填充
+	raw := make([]byte, 16)
+	for i := range raw {
+		raw[i] = ' '
+	}
+	n := []byte(name)
+	if len(n) > 15 {
+		n = n[:15]
+	}
+	copy(raw, n)
+	raw[15] = 0x00
+
+	out := make([]byte, 32)
+	for i := 0; i < 16; i++ {
+		b := raw[i]
+		out[i*2] = 'A' + ((b >> 4) & 0x0F)
+		out[i*2+1] = 'A' + (b & 0x0F)
+	}
+	return out
 }
