@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"nwct/client-nps/internal/database"
 	"nwct/client-nps/internal/logger"
+	"nwct/client-nps/internal/scanner"
 	"nwct/client-nps/internal/toolkit"
 	"nwct/client-nps/models"
 	"nwct/client-nps/utils"
@@ -247,14 +248,29 @@ func (s *Server) handleNetworkStatus(c *gin.Context) {
 
 // handleDevicesList 处理获取设备列表请求
 func (s *Server) handleDevicesList(c *gin.Context) {
-	status := c.Query("status")
-	if status == "" {
-		status = "all"
+	devices, err := s.scanner.GetDevices()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse(500, err.Error()))
+		return
 	}
+
+	// 过滤
+	status := c.Query("status")
 	deviceType := c.Query("type")
+	filtered := []scanner.Device{}
+	for _, d := range devices {
+		if status != "" && status != "all" && d.Status != status {
+			continue
+		}
+		if deviceType != "" && d.Type != deviceType {
+			continue
+		}
+		filtered = append(filtered, d)
+	}
+
+	// 分页
 	page := 1
 	pageSize := 20
-
 	if p := c.Query("page"); p != "" {
 		fmt.Sscanf(p, "%d", &page)
 	}
@@ -262,17 +278,20 @@ func (s *Server) handleDevicesList(c *gin.Context) {
 		fmt.Sscanf(ps, "%d", &pageSize)
 	}
 
-	offset := (page - 1) * pageSize
+	start := (page - 1) * pageSize
+	end := start + pageSize
+	if end > len(filtered) {
+		end = len(filtered)
+	}
 
-	devices, total, err := database.GetDevices(s.db, status, deviceType, pageSize, offset)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, models.ErrorResponse(500, err.Error()))
-		return
+	var pagedDevices []scanner.Device
+	if start < len(filtered) {
+		pagedDevices = filtered[start:end]
 	}
 
 	// 转换为JSON格式
-	deviceList := make([]gin.H, len(devices))
-	for i, d := range devices {
+	deviceList := make([]gin.H, len(pagedDevices))
+	for i, d := range pagedDevices {
 		deviceList[i] = gin.H{
 			"ip":         d.IP,
 			"mac":        d.MAC,
@@ -281,14 +300,15 @@ func (s *Server) handleDevicesList(c *gin.Context) {
 			"type":       d.Type,
 			"os":         d.OS,
 			"status":     d.Status,
-			"last_seen":  d.LastSeen.Format(time.RFC3339),
-			"first_seen": d.FirstSeen.Format(time.RFC3339),
+			"open_ports": d.OpenPorts,
+			"last_seen":  d.LastSeen,
+			"first_seen": d.FirstSeen,
 		}
 	}
 
 	c.JSON(http.StatusOK, models.SuccessResponse(gin.H{
 		"devices":   deviceList,
-		"total":     total,
+		"total":     len(filtered),
 		"page":      page,
 		"page_size": pageSize,
 	}))
@@ -297,17 +317,67 @@ func (s *Server) handleDevicesList(c *gin.Context) {
 // handleDeviceDetail 处理获取设备详情请求
 func (s *Server) handleDeviceDetail(c *gin.Context) {
 	ip := c.Param("ip")
-	// TODO: 从数据库查询设备详情
+	
+	detail, err := s.scanner.GetDeviceDetail(ip)
+	if err != nil {
+		c.JSON(http.StatusNotFound, models.ErrorResponse(404, "设备不存在"))
+		return
+	}
+
+	// 转换为JSON格式
+	portList := make([]gin.H, len(detail.Ports))
+	for i, p := range detail.Ports {
+		portList[i] = gin.H{
+			"port":     p.Port,
+			"protocol": p.Protocol,
+			"service":  p.Service,
+			"version":  p.Version,
+			"status":   p.Status,
+		}
+	}
 
 	c.JSON(http.StatusOK, models.SuccessResponse(gin.H{
-		"ip":   ip,
-		"name": "",
+		"ip":         detail.IP,
+		"mac":        detail.MAC,
+		"name":       detail.Name,
+		"vendor":     detail.Vendor,
+		"type":       detail.Type,
+		"os":         detail.OS,
+		"status":     detail.Status,
+		"open_ports": portList,
+		"last_seen":  detail.LastSeen,
+		"first_seen": detail.FirstSeen,
+		"history":    detail.History,
 	}))
 }
 
 // handleScanStart 处理启动扫描请求
 func (s *Server) handleScanStart(c *gin.Context) {
-	// TODO: 启动设备扫描
+	var req struct {
+		Subnet  string `json:"subnet"`
+		Timeout int    `json:"timeout"`
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		// 允许空请求体，使用默认值
+	}
+
+	// 如果没有指定网段，尝试自动检测
+	if req.Subnet == "" {
+		netStatus, err := s.netManager.GetNetworkStatus()
+		if err == nil && netStatus.IP != "" {
+			// 从IP计算网段（简化：假设/24）
+			req.Subnet = netStatus.IP + "/24"
+		} else {
+			req.Subnet = "192.168.1.0/24" // 默认网段
+		}
+	}
+
+	if err := s.scanner.StartScan(req.Subnet); err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse(500, err.Error()))
+		return
+	}
+
 	c.JSON(http.StatusOK, models.SuccessResponse(gin.H{
 		"scan_id": "scan_001",
 		"status":  "running",
@@ -316,18 +386,24 @@ func (s *Server) handleScanStart(c *gin.Context) {
 
 // handleScanStop 处理停止扫描请求
 func (s *Server) handleScanStop(c *gin.Context) {
-	// TODO: 停止设备扫描
+	if err := s.scanner.StopScan(); err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse(500, err.Error()))
+		return
+	}
+
 	c.JSON(http.StatusOK, models.SuccessResponse(nil))
 }
 
 // handleScanStatus 处理获取扫描状态请求
 func (s *Server) handleScanStatus(c *gin.Context) {
-	// TODO: 获取扫描状态
+	status := s.scanner.GetScanStatus()
+	
 	c.JSON(http.StatusOK, models.SuccessResponse(gin.H{
-		"status":       "stopped",
-		"progress":     0,
-		"scanned_count": 0,
-		"found_count":  0,
+		"status":        status.Status,
+		"progress":      status.Progress,
+		"scanned_count": status.ScannedCount,
+		"found_count":   status.FoundCount,
+		"start_time":    status.StartTime.Format(time.RFC3339),
 	}))
 }
 
@@ -374,11 +450,21 @@ func (s *Server) handleTraceroute(c *gin.Context) {
 		return
 	}
 
-	// TODO: 实现Traceroute
-	c.JSON(http.StatusOK, models.SuccessResponse(gin.H{
-		"target": req.Target,
-		"hops":   []gin.H{},
-	}))
+	if req.MaxHops <= 0 {
+		req.MaxHops = 30
+	}
+	if req.Timeout <= 0 {
+		req.Timeout = 5
+	}
+
+	// 使用toolkit的Traceroute实现
+	result, err := toolkit.Traceroute(req.Target, req.MaxHops, time.Duration(req.Timeout)*time.Second)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse(500, err.Error()))
+		return
+	}
+
+	c.JSON(http.StatusOK, models.SuccessResponse(result))
 }
 
 // handleSpeedTest 处理网速测试请求
@@ -391,15 +477,17 @@ func (s *Server) handleSpeedTest(c *gin.Context) {
 	if err := c.ShouldBindJSON(&req); err != nil {
 		// 允许空请求体
 		req.TestType = "all"
+		req.Server = "default"
 	}
 
-	// TODO: 实现网速测试
-	_ = req
-	c.JSON(http.StatusOK, models.SuccessResponse(gin.H{
-		"upload_speed":   0,
-		"download_speed": 0,
-		"latency":        0,
-	}))
+	// 使用toolkit的网速测试
+	result, err := toolkit.SpeedTest(req.Server, req.TestType)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse(500, err.Error()))
+		return
+	}
+
+	c.JSON(http.StatusOK, models.SuccessResponse(result))
 }
 
 // handlePortScan 处理端口扫描请求

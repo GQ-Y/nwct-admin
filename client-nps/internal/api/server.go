@@ -6,6 +6,7 @@ import (
 	"nwct/client-nps/internal/mqtt"
 	"nwct/client-nps/internal/network"
 	"nwct/client-nps/internal/nps"
+	"nwct/client-nps/internal/scanner"
 
 	"github.com/gin-gonic/gin"
 )
@@ -20,17 +21,22 @@ type Server struct {
 	netManager network.Manager
 	npsClient  nps.Client
 	mqttClient mqtt.Client
+	scanner    scanner.Scanner
 	router     *gin.Engine
 }
 
 // NewServer 创建API服务器
 func NewServer(cfg *config.Config, db *sql.DB, netManager network.Manager, npsClient nps.Client, mqttClient mqtt.Client) *Server {
+	// 初始化扫描器
+	deviceScanner := scanner.NewScanner(db)
+
 	server := &Server{
 		config:     cfg,
 		db:         db,
 		netManager: netManager,
 		npsClient:  npsClient,
 		mqttClient: mqttClient,
+		scanner:    deviceScanner,
 	}
 
 	// 初始化路由

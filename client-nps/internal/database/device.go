@@ -2,11 +2,15 @@ package database
 
 import (
 	"database/sql"
+	"fmt"
 	"time"
 )
 
 // SaveDevice 保存或更新设备
 func SaveDevice(db *sql.DB, device *Device) error {
+	if db == nil {
+		return fmt.Errorf("数据库未初始化")
+	}
 	now := time.Now()
 	
 	// 检查设备是否存在
