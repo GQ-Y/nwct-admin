@@ -48,6 +48,7 @@ type Interface struct {
 type NetworkStatus struct {
 	CurrentInterface string  `json:"current_interface"`
 	IP               string  `json:"ip"`
+	Gateway          string  `json:"gateway"`
 	Status           string  `json:"status"` // connected, disconnected
 	UploadSpeed      float64 `json:"upload_speed"`
 	DownloadSpeed    float64 `json:"download_speed"`
@@ -186,6 +187,11 @@ func (nm *networkManager) GetNetworkStatus() (*NetworkStatus, error) {
 
 	// 测试网络延迟（ping网关或DNS）
 	if status.Status == "connected" {
+		// 读取默认网关（用于 traceroute 默认目标）
+		if gw, err := nm.getDefaultGateway(); err == nil {
+			status.Gateway = gw
+		}
+
 		// 尝试ping 8.8.8.8测试连通性
 		latency, err := nm.testLatency("8.8.8.8")
 		if err == nil {
@@ -194,6 +200,39 @@ func (nm *networkManager) GetNetworkStatus() (*NetworkStatus, error) {
 	}
 
 	return status, nil
+}
+
+func (nm *networkManager) getDefaultGateway() (string, error) {
+	switch runtime.GOOS {
+	case "darwin":
+		out, err := nm.runCmd(3*time.Second, "route", "-n", "get", "default")
+		if err != nil {
+			return "", err
+		}
+		// gateway: 192.168.1.1
+		for _, line := range strings.Split(out, "\n") {
+			line = strings.TrimSpace(line)
+			if strings.HasPrefix(line, "gateway:") {
+				return strings.TrimSpace(strings.TrimPrefix(line, "gateway:")), nil
+			}
+		}
+		return "", fmt.Errorf("未找到默认网关")
+	case "linux":
+		out, err := nm.runCmd(3*time.Second, "ip", "route", "show", "default")
+		if err != nil {
+			return "", err
+		}
+		// default via 192.168.1.1 dev eth0 ...
+		fields := strings.Fields(out)
+		for i := 0; i < len(fields)-1; i++ {
+			if fields[i] == "via" {
+				return fields[i+1], nil
+			}
+		}
+		return "", fmt.Errorf("未找到默认网关")
+	default:
+		return "", fmt.Errorf("不支持的系统: %s", runtime.GOOS)
+	}
 }
 
 // TestConnection 测试网络连接

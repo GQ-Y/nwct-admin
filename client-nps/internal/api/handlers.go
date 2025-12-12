@@ -694,14 +694,13 @@ func (s *Server) handlePing(c *gin.Context) {
 // handleTraceroute 处理Traceroute请求
 func (s *Server) handleTraceroute(c *gin.Context) {
 	var req struct {
-		Target  string `json:"target" binding:"required"`
+		Target  string `json:"target"`
 		MaxHops int    `json:"max_hops"`
 		Timeout int    `json:"timeout"`
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, models.ErrorResponse(400, "参数错误: "+err.Error()))
-		return
+		// 允许空请求体（将自动使用网关作为目标）
 	}
 
 	if req.MaxHops <= 0 {
@@ -711,8 +710,20 @@ func (s *Server) handleTraceroute(c *gin.Context) {
 		req.Timeout = 5
 	}
 
+	target := strings.TrimSpace(req.Target)
+	if target == "" {
+		st, err := s.netManager.GetNetworkStatus()
+		if err == nil && st != nil && strings.TrimSpace(st.Gateway) != "" {
+			target = strings.TrimSpace(st.Gateway)
+		}
+	}
+	if target == "" {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse(400, "未指定target，且无法获取默认网关"))
+		return
+	}
+
 	// 使用toolkit的Traceroute实现
-	result, err := toolkit.Traceroute(req.Target, req.MaxHops, time.Duration(req.Timeout)*time.Second)
+	result, err := toolkit.Traceroute(target, req.MaxHops, time.Duration(req.Timeout)*time.Second)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse(500, err.Error()))
 		return
