@@ -9,15 +9,15 @@ import (
 
 // Config 应用配置
 type Config struct {
-	Initialized bool          `json:"initialized"`
-	Device      DeviceConfig  `json:"device"`
-	Network     NetworkConfig `json:"network"`
+	Initialized bool            `json:"initialized"`
+	Device      DeviceConfig    `json:"device"`
+	Network     NetworkConfig   `json:"network"`
 	NPSServer   NPSServerConfig `json:"nps_server"`
-	MQTT        MQTTConfig    `json:"mqtt"`
-	Scanner     ScannerConfig `json:"scanner"`
-	Server      ServerConfig  `json:"server"`
-	Database    DatabaseConfig `json:"database"`
-	Auth        AuthConfig    `json:"auth"`
+	MQTT        MQTTConfig      `json:"mqtt"`
+	Scanner     ScannerConfig   `json:"scanner"`
+	Server      ServerConfig    `json:"server"`
+	Database    DatabaseConfig  `json:"database"`
+	Auth        AuthConfig      `json:"auth"`
 }
 
 // DeviceConfig 设备配置
@@ -34,7 +34,10 @@ type NetworkConfig struct {
 	Netmask   string `json:"netmask"`
 	Gateway   string `json:"gateway"`
 	DNS       string `json:"dns"`
-	WiFi      WiFiConfig `json:"wifi"`
+	// WiFi 旧的单个WiFi配置（保留用于从旧配置迁移）
+	WiFi WiFiConfig `json:"wifi"`
+	// WiFiProfiles 记忆的多个WiFi配置（用于自动连接）
+	WiFiProfiles []WiFiProfile `json:"wifi_profiles"`
 }
 
 // WiFiConfig WiFi配置
@@ -44,10 +47,23 @@ type WiFiConfig struct {
 	Security string `json:"security"` // WPA2, WPA, WEP, Open
 }
 
+// WiFiProfile 记忆的WiFi配置（类似电脑的“已保存网络”）
+type WiFiProfile struct {
+	SSID        string `json:"ssid"`
+	Password    string `json:"password"` // 暂存明文；如需加密可后续引入密钥
+	Security    string `json:"security"`
+	AutoConnect bool   `json:"auto_connect"`
+	Priority    int    `json:"priority"` // 越大越优先
+
+	LastSuccessAt string `json:"last_success_at,omitempty"`
+	LastTriedAt   string `json:"last_tried_at,omitempty"`
+	LastError     string `json:"last_error,omitempty"`
+}
+
 // NPSServerConfig NPS服务端配置
 type NPSServerConfig struct {
-	Server   string `json:"server"`   // host:port
-	VKey     string `json:"vkey"`     // 验证密钥
+	Server   string `json:"server"` // host:port
+	VKey     string `json:"vkey"`   // 验证密钥
 	ClientID string `json:"client_id"`
 }
 
@@ -63,10 +79,10 @@ type MQTTConfig struct {
 
 // ScannerConfig 扫描器配置
 type ScannerConfig struct {
-	AutoScan    bool `json:"auto_scan"`
-	ScanInterval int `json:"scan_interval"` // 秒
-	Timeout     int  `json:"timeout"`        // 秒
-	Concurrency int  `json:"concurrency"`    // 并发数
+	AutoScan     bool `json:"auto_scan"`
+	ScanInterval int  `json:"scan_interval"` // 秒
+	Timeout      int  `json:"timeout"`       // 秒
+	Concurrency  int  `json:"concurrency"`   // 并发数
 }
 
 // ServerConfig 服务器配置
@@ -130,7 +146,7 @@ func GetConfigPath() string {
 // LoadConfig 加载配置
 func LoadConfig() (*Config, error) {
 	configPath := GetConfigPath()
-	
+
 	// 如果配置文件不存在，返回默认配置
 	if _, err := os.Stat(configPath); os.IsNotExist(err) {
 		cfg := DefaultConfig()
@@ -156,13 +172,72 @@ func LoadConfig() (*Config, error) {
 		return nil, err
 	}
 
+	// 迁移：如果旧的 wifi 配置存在，但 profiles 为空，则自动迁移为一个 profile
+	if cfg.Network.WiFiProfiles == nil {
+		cfg.Network.WiFiProfiles = []WiFiProfile{}
+	}
+	if cfg.Network.WiFi.SSID != "" && len(cfg.Network.WiFiProfiles) == 0 {
+		cfg.Network.WiFiProfiles = append(cfg.Network.WiFiProfiles, WiFiProfile{
+			SSID:        cfg.Network.WiFi.SSID,
+			Password:    cfg.Network.WiFi.Password,
+			Security:    cfg.Network.WiFi.Security,
+			AutoConnect: true,
+			Priority:    10,
+		})
+		// 不强制清空旧字段，避免用户困惑；但保存时会同时存在
+		_ = cfg.Save()
+	}
+
 	return &cfg, nil
+}
+
+// UpsertWiFiProfile 新增或更新一个 WiFiProfile（按 SSID 唯一）
+func (c *Config) UpsertWiFiProfile(p WiFiProfile) {
+	if c.Network.WiFiProfiles == nil {
+		c.Network.WiFiProfiles = []WiFiProfile{}
+	}
+	for i := range c.Network.WiFiProfiles {
+		if c.Network.WiFiProfiles[i].SSID == p.SSID {
+			c.Network.WiFiProfiles[i] = p
+			return
+		}
+	}
+	c.Network.WiFiProfiles = append(c.Network.WiFiProfiles, p)
+}
+
+// DeleteWiFiProfile 删除一个 WiFiProfile（按 SSID）
+func (c *Config) DeleteWiFiProfile(ssid string) bool {
+	if c.Network.WiFiProfiles == nil {
+		return false
+	}
+	out := c.Network.WiFiProfiles[:0]
+	removed := false
+	for _, p := range c.Network.WiFiProfiles {
+		if p.SSID == ssid {
+			removed = true
+			continue
+		}
+		out = append(out, p)
+	}
+	c.Network.WiFiProfiles = out
+	return removed
+}
+
+// MaxWiFiPriority 返回当前已保存 WiFiProfiles 中的最大 priority
+func (c *Config) MaxWiFiPriority() int {
+	max := 0
+	for _, p := range c.Network.WiFiProfiles {
+		if p.Priority > max {
+			max = p.Priority
+		}
+	}
+	return max
 }
 
 // Save 保存配置
 func (c *Config) Save() error {
 	configPath := GetConfigPath()
-	
+
 	// 创建配置目录
 	dir := filepath.Dir(configPath)
 	if err := os.MkdirAll(dir, 0755); err != nil {
@@ -182,11 +257,10 @@ func (c *Config) Validate() error {
 	if c.Server.Port <= 0 || c.Server.Port > 65535 {
 		return fmt.Errorf("服务器端口无效: %d", c.Server.Port)
 	}
-	
+
 	if c.Database.Path == "" {
 		return fmt.Errorf("数据库路径不能为空")
 	}
-	
+
 	return nil
 }
-

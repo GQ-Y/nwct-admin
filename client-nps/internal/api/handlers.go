@@ -3,8 +3,10 @@ package api
 import (
 	"fmt"
 	"net/http"
+	"nwct/client-nps/config"
 	"nwct/client-nps/internal/database"
 	"nwct/client-nps/internal/logger"
+	"nwct/client-nps/internal/network"
 	"nwct/client-nps/internal/scanner"
 	"nwct/client-nps/internal/toolkit"
 	"nwct/client-nps/models"
@@ -16,6 +18,14 @@ import (
 	"github.com/shirou/gopsutil/v3/cpu"
 	"github.com/shirou/gopsutil/v3/mem"
 )
+
+func nowRFC3339() string {
+	return time.Now().Format(time.RFC3339)
+}
+
+func normalizeSSID(v string) string {
+	return strings.TrimSpace(v)
+}
 
 // handleLogin 处理登录请求
 func (s *Server) handleLogin(c *gin.Context) {
@@ -206,9 +216,12 @@ func (s *Server) handleNetworkInterfaces(c *gin.Context) {
 // handleWiFiConnect 处理WiFi连接请求
 func (s *Server) handleWiFiConnect(c *gin.Context) {
 	var req struct {
-		SSID     string `json:"ssid" binding:"required"`
-		Password string `json:"password"`
-		Security string `json:"security"`
+		SSID        string `json:"ssid" binding:"required"`
+		Password    string `json:"password"`
+		Security    string `json:"security"`
+		Save        bool   `json:"save"`
+		AutoConnect *bool  `json:"auto_connect"`
+		Priority    *int   `json:"priority"`
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -216,9 +229,58 @@ func (s *Server) handleWiFiConnect(c *gin.Context) {
 		return
 	}
 
-	if err := s.netManager.ConfigureWiFi(strings.TrimSpace(req.SSID), strings.TrimSpace(req.Password)); err != nil {
+	ssid := normalizeSSID(req.SSID)
+	pass := strings.TrimSpace(req.Password)
+	if err := s.netManager.ConfigureWiFi(ssid, pass); err != nil {
+		// 保存失败信息到 profile（如果用户要求 save）
+		if req.Save {
+			p := config.WiFiProfile{
+				SSID:        ssid,
+				Password:    pass,
+				Security:    strings.TrimSpace(req.Security),
+				AutoConnect: true,
+				Priority:    10,
+				LastTriedAt: nowRFC3339(),
+				LastError:   err.Error(),
+			}
+			if req.AutoConnect != nil {
+				p.AutoConnect = *req.AutoConnect
+			}
+			if req.Priority != nil {
+				p.Priority = *req.Priority
+			}
+			s.config.UpsertWiFiProfile(p)
+			_ = s.config.Save()
+		}
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse(500, err.Error()))
 		return
+	}
+
+	// 连接成功：按需保存
+	if req.Save {
+		priority := 10
+		// 如果用户没有显式指定 priority，则采用“连接成功自动置顶”策略
+		if req.Priority == nil {
+			priority = s.config.MaxWiFiPriority() + 1
+		} else {
+			priority = *req.Priority
+		}
+
+		p := config.WiFiProfile{
+			SSID:          ssid,
+			Password:      pass,
+			Security:      strings.TrimSpace(req.Security),
+			AutoConnect:   true,
+			Priority:      priority,
+			LastTriedAt:   nowRFC3339(),
+			LastSuccessAt: nowRFC3339(),
+			LastError:     "",
+		}
+		if req.AutoConnect != nil {
+			p.AutoConnect = *req.AutoConnect
+		}
+		s.config.UpsertWiFiProfile(p)
+		_ = s.config.Save()
 	}
 
 	c.JSON(http.StatusOK, models.SuccessResponse(gin.H{
@@ -226,9 +288,113 @@ func (s *Server) handleWiFiConnect(c *gin.Context) {
 	}))
 }
 
+// handleWiFiProfilesList 获取已保存WiFi列表
+func (s *Server) handleWiFiProfilesList(c *gin.Context) {
+	list := s.config.Network.WiFiProfiles
+	if list == nil {
+		list = []config.WiFiProfile{}
+	}
+	// 出于安全考虑：不返回密码
+	out := make([]gin.H, 0, len(list))
+	for _, p := range list {
+		out = append(out, gin.H{
+			"ssid":            p.SSID,
+			"security":        p.Security,
+			"auto_connect":    p.AutoConnect,
+			"priority":        p.Priority,
+			"last_success_at": p.LastSuccessAt,
+			"last_tried_at":   p.LastTriedAt,
+			"last_error":      p.LastError,
+		})
+	}
+	c.JSON(http.StatusOK, models.SuccessResponse(gin.H{"profiles": out}))
+}
+
+// handleWiFiProfilesUpsert 新增/更新已保存WiFi（用于“手动输入SSID+密码并记忆”）
+func (s *Server) handleWiFiProfilesUpsert(c *gin.Context) {
+	var req struct {
+		SSID        string `json:"ssid" binding:"required"`
+		Password    string `json:"password"`
+		Security    string `json:"security"`
+		AutoConnect *bool  `json:"auto_connect"`
+		Priority    *int   `json:"priority"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse(400, "参数错误: "+err.Error()))
+		return
+	}
+
+	ssid := normalizeSSID(req.SSID)
+	if ssid == "" {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse(400, "ssid 不能为空"))
+		return
+	}
+
+	p := config.WiFiProfile{
+		SSID:        ssid,
+		Password:    strings.TrimSpace(req.Password),
+		Security:    strings.TrimSpace(req.Security),
+		AutoConnect: true,
+		Priority:    10,
+	}
+	if req.AutoConnect != nil {
+		p.AutoConnect = *req.AutoConnect
+	}
+	if req.Priority != nil {
+		p.Priority = *req.Priority
+	}
+
+	// 保留旧状态字段（如果存在）
+	for _, old := range s.config.Network.WiFiProfiles {
+		if old.SSID == ssid {
+			p.LastSuccessAt = old.LastSuccessAt
+			p.LastTriedAt = old.LastTriedAt
+			p.LastError = old.LastError
+			// 如果这次没有给 password，则保留旧 password
+			if p.Password == "" {
+				p.Password = old.Password
+			}
+			break
+		}
+	}
+
+	s.config.UpsertWiFiProfile(p)
+	if err := s.config.Save(); err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse(500, "保存失败: "+err.Error()))
+		return
+	}
+	c.JSON(http.StatusOK, models.SuccessResponse(gin.H{"message": "保存成功"}))
+}
+
+// handleWiFiProfilesDelete 删除已保存WiFi
+func (s *Server) handleWiFiProfilesDelete(c *gin.Context) {
+	var req struct {
+		SSID string `json:"ssid" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse(400, "参数错误: "+err.Error()))
+		return
+	}
+	ssid := normalizeSSID(req.SSID)
+	if ssid == "" {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse(400, "ssid 不能为空"))
+		return
+	}
+	if !s.config.DeleteWiFiProfile(ssid) {
+		c.JSON(http.StatusNotFound, models.ErrorResponse(404, "未找到该ssid"))
+		return
+	}
+	if err := s.config.Save(); err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse(500, "保存失败: "+err.Error()))
+		return
+	}
+	c.JSON(http.StatusOK, models.SuccessResponse(gin.H{"message": "删除成功"}))
+}
+
 // handleWiFiScan 处理WiFi扫描请求
 func (s *Server) handleWiFiScan(c *gin.Context) {
-	networks, err := s.netManager.ScanWiFi()
+	allow := strings.EqualFold(c.Query("allow_redacted"), "true") || c.Query("allow_redacted") == "1"
+	networks, err := s.netManager.ScanWiFi(network.ScanWiFiOptions{AllowRedacted: allow})
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse(500, err.Error()))
 		return

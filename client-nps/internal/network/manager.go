@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net"
-	"nwct/client-nps/config"
 	"nwct/client-nps/internal/logger"
 	"os/exec"
 	"runtime"
@@ -16,9 +15,14 @@ import (
 type Manager interface {
 	GetInterfaces() ([]Interface, error)
 	ConfigureWiFi(ssid, password string) error
-	ScanWiFi() ([]WiFiNetwork, error)
+	ScanWiFi(opts ScanWiFiOptions) ([]WiFiNetwork, error)
 	GetNetworkStatus() (*NetworkStatus, error)
 	TestConnection(target string) error
+}
+
+// ScanWiFiOptions WiFi扫描选项
+type ScanWiFiOptions struct {
+	AllowRedacted bool `json:"allow_redacted"`
 }
 
 // WiFiNetwork WiFi网络信息
@@ -52,7 +56,6 @@ type NetworkStatus struct {
 
 // networkManager 网络管理器实现
 type networkManager struct {
-	config *config.Config
 }
 
 // NewManager 创建网络管理器
@@ -130,12 +133,12 @@ func (nm *networkManager) ConfigureWiFi(ssid, password string) error {
 }
 
 // ScanWiFi 扫描WiFi网络
-func (nm *networkManager) ScanWiFi() ([]WiFiNetwork, error) {
+func (nm *networkManager) ScanWiFi(opts ScanWiFiOptions) ([]WiFiNetwork, error) {
 	switch runtime.GOOS {
 	case "linux":
 		return nm.scanWiFiLinuxNmcli()
 	case "darwin":
-		return nm.scanWiFiDarwinAirport()
+		return nm.scanWiFiDarwinAirport(opts.AllowRedacted)
 	default:
 		return nil, fmt.Errorf("当前系统不支持WiFi扫描: %s", runtime.GOOS)
 	}

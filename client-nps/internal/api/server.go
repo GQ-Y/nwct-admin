@@ -75,6 +75,9 @@ func (s *Server) initRouter() {
 
 		// 网络管理
 		api.GET("/network/interfaces", s.authMiddleware(), s.handleNetworkInterfaces)
+		api.GET("/network/wifi/profiles", s.authMiddleware(), s.handleWiFiProfilesList)
+		api.POST("/network/wifi/profiles", s.authMiddleware(), s.handleWiFiProfilesUpsert)
+		api.DELETE("/network/wifi/profiles", s.authMiddleware(), s.handleWiFiProfilesDelete)
 		api.POST("/network/wifi/connect", s.authMiddleware(), s.handleWiFiConnect)
 		api.GET("/network/wifi/scan", s.authMiddleware(), s.handleWiFiScan)
 		api.GET("/network/status", s.authMiddleware(), s.handleNetworkStatus)
