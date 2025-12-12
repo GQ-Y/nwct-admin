@@ -6,6 +6,7 @@ import (
 	"nwct/client-nps/config"
 	"nwct/client-nps/internal/database"
 	"nwct/client-nps/internal/logger"
+	"nwct/client-nps/internal/realtime"
 	"sync"
 	"time"
 
@@ -264,12 +265,21 @@ func (c *mqttClient) publishStatus(status string) {
 
 // logMessage 记录MQTT消息日志（在goroutine中调用）
 func (c *mqttClient) logMessage(direction, topic string, payload []byte, qos int, status string) {
+	// payload 可能很大，实时推送/落库都做截断，避免爆内存/撑爆 ws
+	payloadStr := string(payload)
+	const maxLen = 2048
+	truncated := false
+	if len(payloadStr) > maxLen {
+		payloadStr = payloadStr[:maxLen]
+		truncated = true
+	}
+
 	log := database.MQTTLog{
 		Timestamp: time.Now(),
 		Direction: direction,
 		Topic:     topic,
 		QoS:       qos,
-		Payload:   string(payload),
+		Payload:   payloadStr,
 		Status:    status,
 	}
 
@@ -284,5 +294,17 @@ func (c *mqttClient) logMessage(direction, topic string, payload []byte, qos int
 	)
 	if err != nil {
 		logger.Error("保存MQTT日志失败: %v", err)
+		return
 	}
+
+	// 推送“新增一条MQTT日志”
+	realtime.Default().Broadcast("mqtt_log_new", map[string]interface{}{
+		"timestamp":  log.Timestamp.Format(time.RFC3339),
+		"direction":  log.Direction,
+		"topic":      log.Topic,
+		"qos":        log.QoS,
+		"payload":    log.Payload,
+		"truncated":  truncated,
+		"status":     log.Status,
+	})
 }

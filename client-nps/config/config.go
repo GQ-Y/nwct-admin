@@ -65,6 +65,11 @@ type NPSServerConfig struct {
 	Server   string `json:"server"` // host:port
 	VKey     string `json:"vkey"`   // 验证密钥
 	ClientID string `json:"client_id"`
+
+	// NPS 客户端进程（npc）管理参数：默认使用系统 PATH 中的 `npc`
+	NPCPath       string   `json:"npc_path,omitempty"`
+	NPCConfigPath string   `json:"npc_config_path,omitempty"`
+	NPCArgs       []string `json:"npc_args,omitempty"`
 }
 
 // MQTTConfig MQTT配置

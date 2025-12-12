@@ -18,6 +18,13 @@ import (
 	"nwct/client-nps/internal/mqtt"
 	"nwct/client-nps/internal/network"
 	"nwct/client-nps/internal/nps"
+	"nwct/client-nps/internal/realtime"
+	"nwct/client-nps/internal/scanner"
+
+	"github.com/shirou/gopsutil/v3/cpu"
+	"github.com/shirou/gopsutil/v3/disk"
+	"github.com/shirou/gopsutil/v3/host"
+	"github.com/shirou/gopsutil/v3/mem"
 )
 
 func autoConnectWiFi(cfg *config.Config, netManager network.Manager) {
@@ -120,11 +127,52 @@ func main() {
 	// 启动时自动连接已保存WiFi（类似电脑记忆网络）
 	autoConnectWiFi(cfg, netManager)
 
+	// 系统状态心跳（WebSocket实时推送）
+	go func() {
+		ticker := time.NewTicker(10 * time.Second)
+		defer ticker.Stop()
+		for {
+			uptimeSec, _ := host.Uptime()
+			diskUsage := 0.0
+			if du, err := disk.Usage("/"); err == nil && du != nil {
+				diskUsage = du.UsedPercent
+			}
+			cpuUsage := 0.0
+			if v, err := cpu.Percent(0, false); err == nil && len(v) > 0 {
+				cpuUsage = v[0]
+			}
+			memUsage := 0.0
+			if m, err := mem.VirtualMemory(); err == nil && m != nil {
+				memUsage = m.UsedPercent
+			}
+			netStatus, _ := netManager.GetNetworkStatus()
+
+			realtime.Default().Broadcast("system_status", map[string]interface{}{
+				"device_id":    cfg.Device.ID,
+				"uptime":       uptimeSec,
+				"cpu_usage":    cpuUsage,
+				"memory_usage": memUsage,
+				"disk_usage":   diskUsage,
+				"network": map[string]interface{}{
+					"interface": netStatus.CurrentInterface,
+					"ip":        netStatus.IP,
+					"status":    netStatus.Status,
+				},
+			})
+
+			<-ticker.C
+		}
+	}()
+
 	// 初始化NPS客户端
 	npsClient := nps.NewClient(&cfg.NPSServer)
 
 	// 初始化MQTT客户端
 	mqttClient := mqtt.NewClient(&cfg.MQTT)
+	// 给 MQTT 命令处理注入依赖（scan/config_update 需要）
+	mqtt.SetGlobalConfig(cfg)
+	mqtt.SetGlobalNetManager(netManager)
+	mqtt.SetGlobalScanner(scanner.NewScanner(db))
 
 	// 初始化HTTP API服务器
 	apiServer := api.NewServer(cfg, db, netManager, npsClient, mqttClient)

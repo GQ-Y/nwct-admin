@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bufio"
 	"fmt"
 	"net/http"
 	"nwct/client-nps/config"
@@ -11,11 +12,18 @@ import (
 	"nwct/client-nps/internal/toolkit"
 	"nwct/client-nps/models"
 	"nwct/client-nps/utils"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/shirou/gopsutil/v3/cpu"
+	"github.com/shirou/gopsutil/v3/disk"
+	"github.com/shirou/gopsutil/v3/host"
 	"github.com/shirou/gopsutil/v3/mem"
 )
 
@@ -144,14 +152,30 @@ func (s *Server) handleSystemInfo(c *gin.Context) {
 	// 获取网络状态
 	netStatus, _ := s.netManager.GetNetworkStatus()
 
+	// uptime（秒）
+	uptimeSec := uint64(0)
+	startTime := ""
+	if up, err := host.Uptime(); err == nil {
+		uptimeSec = up
+	}
+	if bt, err := host.BootTime(); err == nil && bt > 0 {
+		startTime = time.Unix(int64(bt), 0).Format(time.RFC3339)
+	}
+
+	// disk usage（根目录）
+	diskUsage := 0.0
+	if du, err := disk.Usage("/"); err == nil && du != nil {
+		diskUsage = du.UsedPercent
+	}
+
 	info := gin.H{
 		"device_id":        s.config.Device.ID,
 		"firmware_version": "1.0.0",
-		"uptime":           0, // TODO: 计算运行时间
-		"start_time":       time.Now().Format(time.RFC3339),
+		"uptime":           uptimeSec,
+		"start_time":       startTime,
 		"cpu_usage":        cpuUsage,
 		"memory_usage":     memoryUsage,
-		"disk_usage":       0.0, // TODO: 获取磁盘使用率
+		"disk_usage":       diskUsage,
 		"network": gin.H{
 			"interface": netStatus.CurrentInterface,
 			"ip":        netStatus.IP,
@@ -172,8 +196,30 @@ func (s *Server) handleSystemRestart(c *gin.Context) {
 		req.Type = "soft"
 	}
 
-	// TODO: 实现重启逻辑
 	logger.Info("收到重启请求，类型: %s", req.Type)
+
+	// 为了让 API 立即返回，重启命令放到 goroutine
+	go func(t string) {
+		var cmd *exec.Cmd
+		if t == "soft" {
+			// soft：重启本进程（由外部守护进程拉起），此处先退出
+			time.Sleep(500 * time.Millisecond)
+			os.Exit(0)
+			return
+		}
+
+		// hard：调用系统重启命令（可能需要 root 权限）
+		switch runtime.GOOS {
+		case "linux":
+			cmd = exec.Command("shutdown", "-r", "now")
+		case "darwin":
+			cmd = exec.Command("shutdown", "-r", "now")
+		default:
+			logger.Error("不支持的系统重启平台: %s", runtime.GOOS)
+			return
+		}
+		_ = cmd.Run()
+	}(req.Type)
 
 	c.JSON(http.StatusOK, models.SuccessResponse(gin.H{
 		"message": "重启命令已发送",
@@ -182,14 +228,51 @@ func (s *Server) handleSystemRestart(c *gin.Context) {
 
 // handleSystemLogs 处理获取系统日志请求
 func (s *Server) handleSystemLogs(c *gin.Context) {
-	// TODO: 从日志文件读取日志
-	logs := []gin.H{
-		{
-			"timestamp": time.Now().Format(time.RFC3339),
-			"level":     "info",
-			"module":    "system",
-			"message":   "系统启动",
-		},
+	// query: lines=200
+	lines := 200
+	if v := strings.TrimSpace(c.Query("lines")); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 2000 {
+			lines = n
+		}
+	}
+
+	// 推断日志路径：优先 NWCT_LOG_DIR，否则 /var/log/nwct，否则 /tmp/nwct
+	logDir := os.Getenv("NWCT_LOG_DIR")
+	if logDir == "" {
+		logDir = "/var/log/nwct"
+	}
+	logPath := filepath.Join(logDir, "system.log")
+	if _, err := os.Stat(logPath); err != nil {
+		alt := filepath.Join(os.TempDir(), "nwct", "system.log")
+		if _, err2 := os.Stat(alt); err2 == nil {
+			logPath = alt
+		}
+	}
+
+	f, err := os.Open(logPath)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse(500, "读取日志失败: "+err.Error()))
+		return
+	}
+	defer f.Close()
+
+	// 简单 tail：全量扫描，保留最后 N 行（日志文件通常不大；后续可优化为 seek）
+	buf := make([]string, 0, lines)
+	sc := bufio.NewScanner(f)
+	for sc.Scan() {
+		buf = append(buf, sc.Text())
+		if len(buf) > lines {
+			buf = buf[len(buf)-lines:]
+		}
+	}
+	if err := sc.Err(); err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse(500, "读取日志失败: "+err.Error()))
+		return
+	}
+
+	logs := make([]gin.H, 0, len(buf))
+	for _, line := range buf {
+		logs = append(logs, gin.H{"line": line})
 	}
 
 	c.JSON(http.StatusOK, models.SuccessResponse(gin.H{
@@ -197,6 +280,7 @@ func (s *Server) handleSystemLogs(c *gin.Context) {
 		"total":     len(logs),
 		"page":      1,
 		"page_size": 50,
+		"source":    logPath,
 	}))
 }
 
@@ -736,9 +820,12 @@ func (s *Server) handleNPSStatus(c *gin.Context) {
 // handleNPSConnect 处理NPS连接请求
 func (s *Server) handleNPSConnect(c *gin.Context) {
 	var req struct {
-		Server   string `json:"server" binding:"required"`
-		VKey     string `json:"vkey" binding:"required"`
-		ClientID string `json:"client_id" binding:"required"`
+		Server        string   `json:"server" binding:"required"`
+		VKey          string   `json:"vkey" binding:"required"`
+		ClientID      string   `json:"client_id" binding:"required"`
+		NPCPath       string   `json:"npc_path"`
+		NPCConfigPath string   `json:"npc_config_path"`
+		NPCArgs       []string `json:"npc_args"`
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -750,6 +837,15 @@ func (s *Server) handleNPSConnect(c *gin.Context) {
 	s.config.NPSServer.Server = req.Server
 	s.config.NPSServer.VKey = req.VKey
 	s.config.NPSServer.ClientID = req.ClientID
+	if strings.TrimSpace(req.NPCPath) != "" {
+		s.config.NPSServer.NPCPath = strings.TrimSpace(req.NPCPath)
+	}
+	if strings.TrimSpace(req.NPCConfigPath) != "" {
+		s.config.NPSServer.NPCConfigPath = strings.TrimSpace(req.NPCConfigPath)
+	}
+	if req.NPCArgs != nil {
+		s.config.NPSServer.NPCArgs = req.NPCArgs
+	}
 
 	if err := s.npsClient.Connect(); err != nil {
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse(500, err.Error()))
@@ -892,12 +988,27 @@ func (s *Server) handleMQTTLogs(c *gin.Context) {
 // handleConfigGet 处理获取配置请求
 func (s *Server) handleConfigGet(c *gin.Context) {
 	// 隐藏敏感信息
+	// 注意：network 里包含 wifi_profiles（内含密码），这里必须做脱敏
+	net := gin.H{
+		"interface": s.config.Network.Interface,
+		"ip_mode":   s.config.Network.IPMode,
+		"ip":        s.config.Network.IP,
+		"netmask":   s.config.Network.Netmask,
+		"gateway":   s.config.Network.Gateway,
+		"dns":       s.config.Network.DNS,
+		"wifi": gin.H{
+			"ssid":     s.config.Network.WiFi.SSID,
+			"password": "***",
+			"security": s.config.Network.WiFi.Security,
+		},
+	}
+
 	config := gin.H{
 		"device": gin.H{
 			"device_id": s.config.Device.ID,
 			"name":      s.config.Device.Name,
 		},
-		"network": s.config.Network,
+		"network": net,
 		"nps_server": gin.H{
 			"server":    s.config.NPSServer.Server,
 			"vkey":      "***",
@@ -918,31 +1029,44 @@ func (s *Server) handleConfigGet(c *gin.Context) {
 
 // handleConfigUpdate 处理更新配置请求
 func (s *Server) handleConfigUpdate(c *gin.Context) {
-	var req map[string]interface{}
-
+	var req config.Config
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, models.ErrorResponse(400, "参数错误: "+err.Error()))
 		return
 	}
 
-	// TODO: 更新配置（根据req更新s.config）
-	_ = req
+	// 允许更新的字段：device/network/nps_server/mqtt/scanner/server/database/initialized
+	// 安全：不允许通过该接口直接写入 password_hash
+	s.config.Device = req.Device
+	s.config.Network = req.Network
+	s.config.NPSServer = req.NPSServer
+	s.config.MQTT = req.MQTT
+	s.config.Scanner = req.Scanner
+	s.config.Server = req.Server
+	s.config.Database = req.Database
+	s.config.Initialized = req.Initialized
 
+	if err := s.config.Validate(); err != nil {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse(400, "配置校验失败: "+err.Error()))
+		return
+	}
 	if err := s.config.Save(); err != nil {
-		c.JSON(http.StatusInternalServerError, models.ErrorResponse(500, err.Error()))
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse(500, "保存失败: "+err.Error()))
 		return
 	}
 
-	c.JSON(http.StatusOK, models.SuccessResponse(nil))
+	c.JSON(http.StatusOK, models.SuccessResponse(gin.H{"message": "更新成功"}))
 }
 
 // handleConfigInit 处理初始化配置请求
 func (s *Server) handleConfigInit(c *gin.Context) {
 	var req struct {
-		Network       map[string]interface{} `json:"network"`
-		NPSServer     map[string]interface{} `json:"nps_server"`
-		MQTT          map[string]interface{} `json:"mqtt"`
-		AdminPassword string                 `json:"admin_password" binding:"required"`
+		Device        *config.DeviceConfig    `json:"device"`
+		Network       *config.NetworkConfig   `json:"network"`
+		NPSServer     *config.NPSServerConfig `json:"nps_server"`
+		MQTT          *config.MQTTConfig      `json:"mqtt"`
+		Scanner       *config.ScannerConfig   `json:"scanner"`
+		AdminPassword string                  `json:"admin_password" binding:"required"`
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -950,8 +1074,22 @@ func (s *Server) handleConfigInit(c *gin.Context) {
 		return
 	}
 
-	// 更新配置
-	// TODO: 解析并更新各个配置项
+	// 更新配置（仅覆盖传入部分）
+	if req.Device != nil {
+		s.config.Device = *req.Device
+	}
+	if req.Network != nil {
+		s.config.Network = *req.Network
+	}
+	if req.NPSServer != nil {
+		s.config.NPSServer = *req.NPSServer
+	}
+	if req.MQTT != nil {
+		s.config.MQTT = *req.MQTT
+	}
+	if req.Scanner != nil {
+		s.config.Scanner = *req.Scanner
+	}
 
 	// 设置管理员密码
 	hash, err := utils.HashPassword(req.AdminPassword)
@@ -964,6 +1102,10 @@ func (s *Server) handleConfigInit(c *gin.Context) {
 	// 标记为已初始化
 	s.config.Initialized = true
 
+	if err := s.config.Validate(); err != nil {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse(400, "配置校验失败: "+err.Error()))
+		return
+	}
 	if err := s.config.Save(); err != nil {
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse(500, "保存配置失败"))
 		return
@@ -981,12 +1123,29 @@ func (s *Server) handleConfigInitStatus(c *gin.Context) {
 
 // handleConfigExport 处理导出配置请求
 func (s *Server) handleConfigExport(c *gin.Context) {
-	// TODO: 导出配置文件
-	c.JSON(http.StatusOK, models.SuccessResponse(nil))
+	c.JSON(http.StatusOK, models.SuccessResponse(s.config))
 }
 
 // handleConfigImport 处理导入配置请求
 func (s *Server) handleConfigImport(c *gin.Context) {
-	// TODO: 导入配置文件
-	c.JSON(http.StatusOK, models.SuccessResponse(nil))
+	var req config.Config
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse(400, "参数错误: "+err.Error()))
+		return
+	}
+
+	// 安全：不允许导入覆盖 password_hash（必须走改密接口）
+	req.Auth.PasswordHash = s.config.Auth.PasswordHash
+
+	if err := req.Validate(); err != nil {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse(400, "配置校验失败: "+err.Error()))
+		return
+	}
+
+	*s.config = req
+	if err := s.config.Save(); err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse(500, "保存失败: "+err.Error()))
+		return
+	}
+	c.JSON(http.StatusOK, models.SuccessResponse(gin.H{"message": "导入成功"}))
 }

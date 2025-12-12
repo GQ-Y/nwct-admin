@@ -6,6 +6,7 @@ import (
 	"net"
 	"nwct/client-nps/internal/database"
 	"nwct/client-nps/internal/logger"
+	"nwct/client-nps/internal/realtime"
 	"nwct/client-nps/internal/toolkit"
 	"sync"
 	"time"
@@ -107,6 +108,10 @@ func (ds *deviceScanner) StartScan(subnet string) error {
 	ds.scanStatus.FoundCount = 0
 	ds.mu.Unlock()
 
+	realtime.Default().Broadcast("scan_started", map[string]interface{}{
+		"subnet": subnet,
+	})
+
 	// 在goroutine中执行扫描
 	go ds.performScan(subnet)
 
@@ -120,7 +125,17 @@ func (ds *deviceScanner) performScan(subnet string) {
 		ds.scanning = false
 		ds.scanStatus.Status = "completed"
 		ds.scanStatus.Progress = 100
+		found := ds.scanStatus.FoundCount
+		scanned := ds.scanStatus.ScannedCount
 		ds.mu.Unlock()
+
+		realtime.Default().Broadcast("scan_done", map[string]interface{}{
+			"subnet":        subnet,
+			"status":        "completed",
+			"progress":      100,
+			"scanned_count": scanned,
+			"found_count":   found,
+		})
 	}()
 
 	logger.Info("开始扫描网段: %s", subnet)
@@ -131,13 +146,35 @@ func (ds *deviceScanner) performScan(subnet string) {
 		logger.Error("ARP扫描失败: %v", err)
 		// 继续使用简化方法
 	}
+	total := len(arpDevices)
 
 	// 2. 处理发现的设备
+	lastPush := time.Now()
 	for _, arpDevice := range arpDevices {
 		ds.mu.Lock()
 		ds.scanStatus.FoundCount++
 		ds.scanStatus.ScannedCount++
+		if total > 0 {
+			ds.scanStatus.Progress = int(float64(ds.scanStatus.ScannedCount) / float64(total) * 100.0)
+			if ds.scanStatus.Progress > 99 {
+				ds.scanStatus.Progress = 99
+			}
+		}
+		st := *ds.scanStatus
 		ds.mu.Unlock()
+
+		// 节流推送（最多 2s 一次）
+		if time.Since(lastPush) >= 2*time.Second {
+			realtime.Default().Broadcast("scan_progress", map[string]interface{}{
+				"subnet":        subnet,
+				"status":        st.Status,
+				"progress":      st.Progress,
+				"scanned_count": st.ScannedCount,
+				"found_count":   st.FoundCount,
+				"start_time":    st.StartTime.Format(time.RFC3339),
+			})
+			lastPush = time.Now()
+		}
 
 		// 识别设备
 		device := ds.identifyDevice(arpDevice.IP, arpDevice.MAC)
@@ -157,6 +194,18 @@ func (ds *deviceScanner) performScan(subnet string) {
 
 		if err := database.SaveDevice(ds.db, dbDevice); err != nil {
 			logger.Error("保存设备失败: %v", err)
+		} else {
+			// 设备列表变化推送（upsert）
+			realtime.Default().Broadcast("device_upsert", map[string]interface{}{
+				"ip":        dbDevice.IP,
+				"mac":       dbDevice.MAC,
+				"name":      dbDevice.Name,
+				"vendor":    dbDevice.Vendor,
+				"type":      dbDevice.Type,
+				"os":        dbDevice.OS,
+				"status":    dbDevice.Status,
+				"last_seen": dbDevice.LastSeen.Format(time.RFC3339),
+			})
 		}
 
 		// 端口扫描（异步，避免阻塞）
@@ -196,6 +245,7 @@ func (ds *deviceScanner) identifyDevice(ip, mac string) *Device {
 // scanPorts 扫描设备端口
 func (ds *deviceScanner) scanPorts(ip string) {
 	commonPorts := []int{22, 23, 80, 443, 3389, 8080, 3306, 5432}
+	updated := 0
 	
 	for _, port := range commonPorts {
 		result, err := toolkit.PortScan(ip, []int{port}, 2*time.Second, "tcp")
@@ -212,8 +262,17 @@ func (ds *deviceScanner) scanPorts(ip string) {
 				Version:  portInfo.Version,
 				Status:   portInfo.Status,
 			}
-			database.SaveDevicePort(ds.db, ip, dbPort)
+			if err := database.SaveDevicePort(ds.db, ip, dbPort); err == nil {
+				updated++
+			}
 		}
+	}
+
+	if updated > 0 {
+		realtime.Default().Broadcast("device_ports_updated", map[string]interface{}{
+			"ip":      ip,
+			"updated": updated,
+		})
 	}
 }
 
