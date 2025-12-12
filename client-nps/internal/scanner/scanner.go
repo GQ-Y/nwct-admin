@@ -2,6 +2,7 @@ package scanner
 
 import (
 	"bytes"
+	"context"
 	"database/sql"
 	"encoding/binary"
 	"fmt"
@@ -144,6 +145,31 @@ func (ds *deviceScanner) performScan(subnet string) {
 
 	logger.Info("开始扫描网段: %s", subnet)
 
+	// 0. SSDP/UPnP 发现（用于补充 friendlyName/model/manufacturer）
+	// 这一步不会阻塞扫描太久：超时短，失败不影响主流程
+	ssdpMap := map[string]*fingerprint.SSDPDevice{}
+	{
+		// 发现阶段 2s，但留足时间抓取描述 XML 做信息补全
+		ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
+		defer cancel()
+		if m, err := fingerprint.SSDPDiscover(ctx, 2*time.Second); err == nil && m != nil {
+			ssdpMap = m
+		}
+	}
+	logger.Info("SSDP发现设备数: %d", len(ssdpMap))
+	if len(ssdpMap) > 0 {
+		n := 0
+		for ip, d := range ssdpMap {
+			// 仅打印少量，避免刷屏
+			logger.Info("SSDP设备: ip=%s location=%s server=%s usn=%s st=%s friendly=%s manufacturer=%s model=%s deviceType=%s",
+				ip, d.Location, d.Server, d.USN, d.ST, d.FriendlyName, d.Manufacturer, d.ModelName, d.DeviceType)
+			n++
+			if n >= 5 {
+				break
+			}
+		}
+	}
+
 	// 1. ARP扫描
 	arpDevices, err := ARPScan(subnet, 30*time.Second)
 	if err != nil {
@@ -183,6 +209,28 @@ func (ds *deviceScanner) performScan(subnet string) {
 		// 识别设备
 		device := ds.identifyDevice(arpDevice.IP, arpDevice.MAC)
 
+		// SSDP/UPnP 补充信息（名称/厂商/类型）
+		if adv := ssdpMap[arpDevice.IP]; adv != nil {
+			if device.Name == "" {
+				if adv.FriendlyName != "" {
+					device.Name = adv.FriendlyName
+				} else if adv.ModelName != "" {
+					device.Name = adv.ModelName
+				}
+			}
+			if device.Vendor == "" || strings.EqualFold(device.Vendor, "unknown") {
+				if adv.Manufacturer != "" {
+					device.Vendor = adv.Manufacturer
+				}
+			}
+			// 仅在当前类型不够明确时用 SSDP 的 deviceType 做辅助判断
+			if device.Type == "" || device.Type == "unknown" || device.Type == "network_device" {
+				if t := mapDeviceTypeFromUPnP(adv.DeviceType); t != "" {
+					device.Type = t
+				}
+			}
+		}
+
 		// 保存到数据库
 		dbDevice := &database.Device{
 			IP:        device.IP,
@@ -219,6 +267,30 @@ func (ds *deviceScanner) performScan(subnet string) {
 	}
 
 	logger.Info("扫描完成，发现 %d 个设备", len(arpDevices))
+}
+
+func mapDeviceTypeFromUPnP(deviceType string) string {
+	s := strings.ToLower(strings.TrimSpace(deviceType))
+	if s == "" {
+		return ""
+	}
+	// 常见网关/路由器
+	if strings.Contains(s, "internetgatewaydevice") || strings.Contains(s, "wanconnectiondevice") || strings.Contains(s, "wandevice") {
+		return "router"
+	}
+	// 媒体设备
+	if strings.Contains(s, "mediaserver") || strings.Contains(s, "mediareceiver") || strings.Contains(s, "renderer") {
+		return "media_device"
+	}
+	// 打印机
+	if strings.Contains(s, "printer") {
+		return "printer"
+	}
+	// 摄像头（不少厂商会用自定义 deviceType，这里先做一个保守匹配）
+	if strings.Contains(s, "camera") || strings.Contains(s, "ipcamera") {
+		return "camera"
+	}
+	return ""
 }
 
 // identifyDevice 识别设备
