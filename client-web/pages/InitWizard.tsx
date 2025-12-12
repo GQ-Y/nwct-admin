@@ -1,13 +1,20 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Check, Wifi, Globe, Lock, Server, ArrowLeft, ArrowRight } from 'lucide-react';
-import { Button, Input, Card } from '../components/UI';
+import { Button, Input, Card, Alert } from '../components/UI';
 import { useLanguage } from '../contexts/LanguageContext';
+import { api } from '../lib/api';
+import { useAuth } from '../contexts/AuthContext';
 
 export const InitWizard: React.FC = () => {
   const navigate = useNavigate();
   const { t } = useLanguage();
+  const { refreshInitStatus } = useAuth();
   const [currentStep, setCurrentStep] = useState(0);
+  const [adminPass, setAdminPass] = useState('');
+  const [adminPass2, setAdminPass2] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState('');
 
   const steps = [
     { title: t('wizard.step_welcome'), icon: <Globe size={20} /> },
@@ -20,9 +27,26 @@ export const InitWizard: React.FC = () => {
   const next = () => setCurrentStep(c => Math.min(c + 1, steps.length - 1));
   const prev = () => setCurrentStep(c => Math.max(c - 1, 0));
   
-  const finish = () => {
-    localStorage.setItem('isInitialized', 'true');
-    navigate('/dashboard');
+  const finish = async () => {
+    setError('');
+    if (!adminPass || adminPass.length < 4) {
+      setError('管理员密码至少 4 位');
+      return;
+    }
+    if (adminPass !== adminPass2) {
+      setError('两次输入的密码不一致');
+      return;
+    }
+    setSubmitting(true);
+    try {
+      await api.configInit(adminPass);
+      await refreshInitStatus();
+      navigate('/dashboard');
+    } catch (e: any) {
+      setError(e?.message || '初始化失败');
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const renderContent = () => {
@@ -97,13 +121,22 @@ export const InitWizard: React.FC = () => {
         return (
           <div style={{ maxWidth: 480, margin: '0 auto' }}>
             <h3 style={{ marginBottom: 32, textAlign: 'center', fontSize: '24px' }}>{t('wizard.admin_security')}</h3>
+            {error && <Alert type="error">{error}</Alert>}
             <div style={{ marginBottom: 24 }}>
               <label style={{ display: 'block', marginBottom: 10, fontWeight: 500 }}>{t('wizard.new_pass')}</label>
-              <Input type="password" />
+              <Input
+                type="password"
+                value={adminPass}
+                onChange={(e) => setAdminPass((e.target as HTMLInputElement).value)}
+              />
             </div>
             <div style={{ marginBottom: 24 }}>
               <label style={{ display: 'block', marginBottom: 10, fontWeight: 500 }}>{t('wizard.confirm_pass')}</label>
-              <Input type="password" />
+              <Input
+                type="password"
+                value={adminPass2}
+                onChange={(e) => setAdminPass2((e.target as HTMLInputElement).value)}
+              />
             </div>
           </div>
         );
@@ -115,7 +148,10 @@ export const InitWizard: React.FC = () => {
              </div>
              <h2 style={{ fontSize: '28px', marginBottom: '16px' }}>{t('wizard.setup_complete')}</h2>
              <p style={{ margin: '0 auto 40px', color: 'var(--text-secondary)', maxWidth: 400 }}>{t('wizard.setup_desc')}</p>
-             <Button onClick={finish} style={{ padding: '0 48px', height: '56px' }}>{t('wizard.go_dashboard')}</Button>
+             {error && <Alert type="error">{error}</Alert>}
+             <Button onClick={finish} disabled={submitting} style={{ padding: '0 48px', height: '56px' }}>
+               {submitting ? t('common.loading') : t('wizard.go_dashboard')}
+             </Button>
            </div>
          );
       default: return null;

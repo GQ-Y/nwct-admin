@@ -1,12 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import { Card, Button, SearchInput, Select, Badge, Pagination } from '../components/UI';
-import { mockDevices } from '../data';
 import { Device } from '../types';
 import { RefreshCw, Smartphone, Monitor, Server, Camera, Radar } from 'lucide-react';
 import { useLanguage } from '../contexts/LanguageContext';
+import { api } from '../lib/api';
+import { useRealtime } from '../contexts/RealtimeContext';
 
 export const Devices: React.FC = () => {
   const { t } = useLanguage();
+  const rt = useRealtime();
+  const [devices, setDevices] = useState<Device[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterType, setFilterType] = useState('all');
   const [view, setView] = useState<'list' | 'detail'>('list');
@@ -16,11 +19,54 @@ export const Devices: React.FC = () => {
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 10;
 
+  const refreshDevices = async () => {
+    const res = await api.devices();
+    const mapped: Device[] = (res.devices || []).map((d: any) => ({
+      ip: d.ip,
+      mac: d.mac,
+      name: d.name || d.ip,
+      vendor: d.vendor || 'Unknown',
+      type: (d.type || 'pc') as any,
+      status: (d.status || 'offline') as any,
+      lastSeen: d.last_seen || '',
+      ports: d.open_ports || [],
+    }));
+    setDevices(mapped);
+  };
+
+  useEffect(() => {
+    refreshDevices().catch(() => {});
+  }, []);
+
+  // realtime upsert/status update: merge into list
+  useEffect(() => {
+    const map = rt.devicesByIp;
+    if (!map) return;
+    setDevices((prev) => {
+      const byIp = new Map(prev.map((d) => [d.ip, d]));
+      Object.keys(map).forEach((ip) => {
+        const cur = byIp.get(ip) || ({} as any);
+        const patch = map[ip] || {};
+        byIp.set(ip, {
+          ip,
+          mac: patch.mac ?? cur.mac ?? '',
+          name: patch.name ?? cur.name ?? ip,
+          vendor: patch.vendor ?? cur.vendor ?? 'Unknown',
+          type: (patch.type ?? cur.type ?? 'pc') as any,
+          status: (patch.status ?? cur.status ?? 'offline') as any,
+          lastSeen: patch.last_seen ?? cur.lastSeen ?? '',
+          ports: cur.ports,
+        });
+      });
+      return Array.from(byIp.values());
+    });
+  }, [rt.devicesByIp]);
+
   useEffect(() => {
     setCurrentPage(1);
   }, [searchTerm, filterType]);
 
-  const filtered = mockDevices.filter(d => {
+  const filtered = devices.filter(d => {
     const matchesSearch = d.name.toLowerCase().includes(searchTerm.toLowerCase()) || d.ip.includes(searchTerm);
     const matchesType = filterType === 'all' || 
                         (filterType === 'online' && d.status === 'online') || 
@@ -46,10 +92,9 @@ export const Devices: React.FC = () => {
   const handleScan = () => {
     if (isScanning) return;
     setIsScanning(true);
-    // Simulate network scan
-    setTimeout(() => {
-      setIsScanning(false);
-    }, 2000);
+    api.scanStart()
+      .then(() => refreshDevices())
+      .finally(() => setIsScanning(false));
   };
 
   const handleScanPorts = () => {

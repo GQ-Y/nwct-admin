@@ -1,12 +1,27 @@
 
-import React from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Card, ProgressBar, Badge } from '../components/UI';
-import { mockStats } from '../data';
 import { Activity, HardDrive, Cpu, Network } from 'lucide-react';
 import { useLanguage } from '../contexts/LanguageContext';
+import { api } from '../lib/api';
+import { useRealtime } from '../contexts/RealtimeContext';
 
 export const Dashboard: React.FC = () => {
   const { t } = useLanguage();
+  const rt = useRealtime();
+  const [fallbackInfo, setFallbackInfo] = useState<any>(null);
+  const sys = rt.systemStatus || fallbackInfo;
+
+  useEffect(() => {
+    api.systemInfo()
+      .then((d) => setFallbackInfo(d))
+      .catch(() => {});
+  }, []);
+
+  const cpu = useMemo(() => Number(sys?.cpu_usage ?? 0), [sys]);
+  const mem = useMemo(() => Number(sys?.memory_usage ?? 0), [sys]);
+  const disk = useMemo(() => Number(sys?.disk_usage ?? 0), [sys]);
+  const netIp = sys?.network?.ip ?? '-';
 
   return (
     <div>
@@ -19,10 +34,10 @@ export const Dashboard: React.FC = () => {
             <div style={{ padding: 12, background: 'rgba(24, 144, 255, 0.1)', borderRadius: 8, color: 'var(--primary)' }}><Cpu /></div>
             <div>
                <div style={{ color: '#8c8c8c', fontSize: 12 }}>{t('dashboard.cpu')}</div>
-               <div style={{ fontSize: 24, fontWeight: 600 }}>{mockStats.cpu}%</div>
+               <div style={{ fontSize: 24, fontWeight: 600 }}>{cpu.toFixed(1)}%</div>
             </div>
           </div>
-          <div style={{ marginTop: 16 }}><ProgressBar value={mockStats.cpu} color={mockStats.cpu > 80 ? '#f5222d' : '#1890ff'} /></div>
+          <div style={{ marginTop: 16 }}><ProgressBar value={cpu} color={cpu > 80 ? '#f5222d' : '#1890ff'} /></div>
         </Card>
         
         <Card className="dashboard-stat">
@@ -30,10 +45,10 @@ export const Dashboard: React.FC = () => {
              <div style={{ padding: 12, background: 'rgba(114, 46, 209, 0.1)', borderRadius: 8, color: '#722ed1' }}><Activity /></div>
             <div>
                <div style={{ color: '#8c8c8c', fontSize: 12 }}>{t('dashboard.memory')}</div>
-               <div style={{ fontSize: 24, fontWeight: 600 }}>{mockStats.memory}%</div>
+               <div style={{ fontSize: 24, fontWeight: 600 }}>{mem.toFixed(1)}%</div>
             </div>
           </div>
-          <div style={{ marginTop: 16 }}><ProgressBar value={mockStats.memory} color="#722ed1" /></div>
+          <div style={{ marginTop: 16 }}><ProgressBar value={mem} color="#722ed1" /></div>
         </Card>
 
         <Card className="dashboard-stat">
@@ -41,10 +56,10 @@ export const Dashboard: React.FC = () => {
              <div style={{ padding: 12, background: 'rgba(82, 196, 26, 0.1)', borderRadius: 8, color: '#52c41a' }}><HardDrive /></div>
             <div>
                <div style={{ color: '#8c8c8c', fontSize: 12 }}>{t('dashboard.storage')}</div>
-               <div style={{ fontSize: 24, fontWeight: 600 }}>{mockStats.storage}%</div>
+               <div style={{ fontSize: 24, fontWeight: 600 }}>{disk.toFixed(1)}%</div>
             </div>
           </div>
-          <div style={{ marginTop: 16 }}><ProgressBar value={mockStats.storage} color="#52c41a" /></div>
+          <div style={{ marginTop: 16 }}><ProgressBar value={disk} color="#52c41a" /></div>
         </Card>
 
         <Card className="dashboard-stat">
@@ -52,11 +67,11 @@ export const Dashboard: React.FC = () => {
              <div style={{ padding: 12, background: 'rgba(250, 173, 20, 0.1)', borderRadius: 8, color: '#faad14' }}><Network /></div>
             <div>
                <div style={{ color: '#8c8c8c', fontSize: 12 }}>{t('dashboard.net_io')}</div>
-               <div style={{ fontSize: 24, fontWeight: 600 }}>{mockStats.netIn}M</div>
+               <div style={{ fontSize: 18, fontWeight: 600 }}>{netIp}</div>
             </div>
           </div>
           <div style={{ marginTop: 16, fontSize: 12, color: '#8c8c8c' }}>
-            Up: {mockStats.netOut} MB/s
+            WS: {rt.connected ? t('common.online') : t('common.offline')}
           </div>
         </Card>
       </div>
@@ -66,11 +81,11 @@ export const Dashboard: React.FC = () => {
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', padding: '12px', background: '#f9f9f9', borderRadius: 4 }}>
               <span>{t('dashboard.nps_client')}</span>
-              <Badge status="online" text={t('common.connected')} />
+              <Badge status={rt.npsStatus?.connected ? 'online' : 'offline'} text={rt.npsStatus?.connected ? t('common.connected') : t('common.disconnected')} />
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between', padding: '12px', background: '#f9f9f9', borderRadius: 4 }}>
               <span>{t('dashboard.mqtt_broker')}</span>
-              <Badge status="online" text={t('common.connected')} />
+              <Badge status={rt.mqttLogNew ? 'online' : 'warn'} text={t('common.online')} />
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between', padding: '12px', background: '#f9f9f9', borderRadius: 4 }}>
               <span>{t('dashboard.web_server')}</span>

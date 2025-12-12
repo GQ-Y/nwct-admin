@@ -2,6 +2,7 @@ import React from 'react';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { LayoutDashboard, Server, Activity, Settings, Box, Globe, Shield, Languages, LogOut } from 'lucide-react';
 import { useLanguage } from '../contexts/LanguageContext';
+import { useAuth } from '../contexts/AuthContext';
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -11,9 +12,10 @@ export const MainLayout: React.FC<LayoutProps> = ({ children }) => {
   const navigate = useNavigate();
   const location = useLocation();
   const { t, language, setLanguage } = useLanguage();
+  const { logout } = useAuth();
 
   const handleLogout = () => {
-    localStorage.removeItem('isAuthenticated');
+    logout();
     navigate('/login');
   };
 

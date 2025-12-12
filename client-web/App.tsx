@@ -10,14 +10,18 @@ import { Tools } from './pages/Tools';
 import { System } from './pages/System';
 import { NPSPage, MQTTPage } from './pages/Services';
 import { LanguageProvider } from './contexts/LanguageContext';
+import { AuthProvider, useAuth } from './contexts/AuthContext';
+import { RealtimeProvider } from './contexts/RealtimeContext';
 
 // Protected Route Wrapper
 const ProtectedRoute = () => {
-  const isAuthenticated = localStorage.getItem('isAuthenticated') === 'true';
-  return isAuthenticated ? (
-    <MainLayout>
-      <Outlet />
-    </MainLayout>
+  const { token } = useAuth();
+  return token ? (
+    <RealtimeProvider enabled={true}>
+      <MainLayout>
+        <Outlet />
+      </MainLayout>
+    </RealtimeProvider>
   ) : (
     <Navigate to="/login" replace />
   );
@@ -26,23 +30,25 @@ const ProtectedRoute = () => {
 export const App: React.FC = () => {
   return (
     <LanguageProvider>
-      <BrowserRouter>
-        <Routes>
-          <Route path="/login" element={<Login />} />
-          <Route path="/init" element={<InitWizard />} />
-          
-          {/* Protected Routes */}
-          <Route element={<ProtectedRoute />}>
-            <Route path="/" element={<Navigate to="/dashboard" replace />} />
-            <Route path="/dashboard" element={<Dashboard />} />
-            <Route path="/devices" element={<Devices />} />
-            <Route path="/tools" element={<Tools />} />
-            <Route path="/system" element={<System />} />
-            <Route path="/nps" element={<NPSPage />} />
-            <Route path="/mqtt" element={<MQTTPage />} />
-          </Route>
-        </Routes>
-      </BrowserRouter>
+      <AuthProvider>
+        <BrowserRouter>
+          <Routes>
+            <Route path="/login" element={<Login />} />
+            <Route path="/init" element={<InitWizard />} />
+            
+            {/* Protected Routes */}
+            <Route element={<ProtectedRoute />}>
+              <Route path="/" element={<Navigate to="/dashboard" replace />} />
+              <Route path="/dashboard" element={<Dashboard />} />
+              <Route path="/devices" element={<Devices />} />
+              <Route path="/tools" element={<Tools />} />
+              <Route path="/system" element={<System />} />
+              <Route path="/nps" element={<NPSPage />} />
+              <Route path="/mqtt" element={<MQTTPage />} />
+            </Route>
+          </Routes>
+        </BrowserRouter>
+      </AuthProvider>
     </LanguageProvider>
   );
 };

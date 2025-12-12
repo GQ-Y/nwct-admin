@@ -3,31 +3,30 @@ import { useNavigate } from 'react-router-dom';
 import { Shield, Languages } from 'lucide-react';
 import { Button, Input, Alert } from '../components/UI';
 import { useLanguage } from '../contexts/LanguageContext';
+import { useAuth } from '../contexts/AuthContext';
 
 export const Login: React.FC = () => {
   const navigate = useNavigate();
   const { t, language, setLanguage } = useLanguage();
+  const { login, initialized } = useAuth();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [username, setUsername] = useState('admin');
+  const [password, setPassword] = useState('admin');
 
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setError('');
-    
-    // Simulate API call
-    setTimeout(() => {
+    try {
+      await login(username, password);
+      const isInit = initialized === true;
+      navigate(isInit ? '/dashboard' : '/init');
+    } catch (e: any) {
+      setError(e?.message || '登录失败');
+    } finally {
       setLoading(false);
-      localStorage.setItem('isAuthenticated', 'true');
-      
-      // Check if first time (mock)
-      const isFirstTime = localStorage.getItem('isInitialized') !== 'true';
-      if (isFirstTime) {
-        navigate('/init');
-      } else {
-        navigate('/dashboard');
-      }
-    }, 800);
+    }
   };
 
   return (
@@ -98,11 +97,25 @@ export const Login: React.FC = () => {
         <form onSubmit={handleLogin}>
           <div style={{ marginBottom: '24px' }}>
             <label style={{ display: 'block', marginBottom: '10px', fontWeight: 600, color: 'var(--text-primary)' }}>{t('login.username')}</label>
-            <Input type="text" placeholder="admin" required style={{ padding: '16px 20px' }} />
+            <Input
+              type="text"
+              placeholder="admin"
+              required
+              style={{ padding: '16px 20px' }}
+              value={username}
+              onChange={(e) => setUsername((e.target as HTMLInputElement).value)}
+            />
           </div>
           <div style={{ marginBottom: '32px' }}>
             <label style={{ display: 'block', marginBottom: '10px', fontWeight: 600, color: 'var(--text-primary)' }}>{t('login.password')}</label>
-            <Input type="password" placeholder="••••••" required style={{ padding: '16px 20px' }} />
+            <Input
+              type="password"
+              placeholder="••••••"
+              required
+              style={{ padding: '16px 20px' }}
+              value={password}
+              onChange={(e) => setPassword((e.target as HTMLInputElement).value)}
+            />
           </div>
           
           <div style={{ display: 'flex', alignItems: 'center', marginBottom: '32px' }}>
