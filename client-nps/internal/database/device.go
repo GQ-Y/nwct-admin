@@ -48,6 +48,41 @@ func SaveDevice(db *sql.DB, device *Device) error {
 	return err
 }
 
+// UpdateDeviceStatus 更新设备在线状态，并写入历史
+func UpdateDeviceStatus(db *sql.DB, ip string, status string) error {
+	if db == nil {
+		return fmt.Errorf("数据库未初始化")
+	}
+	now := time.Now()
+	_, err := db.Exec(`
+		UPDATE devices
+		SET status = ?, last_seen = ?, updated_at = ?
+		WHERE ip = ?
+	`, status, now, now, ip)
+	if err != nil {
+		return err
+	}
+	_, err = db.Exec(`
+		INSERT INTO device_history (device_ip, status, timestamp)
+		VALUES (?, ?, ?)
+	`, ip, status, now)
+	return err
+}
+
+// TouchDeviceLastSeen 仅刷新 last_seen（用于设备仍在线时的心跳刷新）
+func TouchDeviceLastSeen(db *sql.DB, ip string) error {
+	if db == nil {
+		return fmt.Errorf("数据库未初始化")
+	}
+	now := time.Now()
+	_, err := db.Exec(`
+		UPDATE devices
+		SET last_seen = ?, updated_at = ?
+		WHERE ip = ?
+	`, now, now, ip)
+	return err
+}
+
 // GetDevice 获取设备
 func GetDevice(db *sql.DB, ip string) (*Device, error) {
 	device := &Device{}

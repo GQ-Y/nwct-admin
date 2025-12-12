@@ -18,6 +18,7 @@ import (
 	"nwct/client-nps/internal/mqtt"
 	"nwct/client-nps/internal/network"
 	"nwct/client-nps/internal/nps"
+	"nwct/client-nps/internal/probe"
 	"nwct/client-nps/internal/realtime"
 	"nwct/client-nps/internal/scanner"
 
@@ -163,6 +164,14 @@ func main() {
 			<-ticker.C
 		}
 	}()
+
+	// 设备在线/离线探测器（状态变化推送）
+	probeCtx, probeCancel := context.WithCancel(context.Background())
+	defer probeCancel()
+	probe.StartDeviceMonitor(probeCtx, db, probe.MonitorOptions{
+		Interval: 60 * time.Second,
+		Timeout:  1 * time.Second,
+	})
 
 	// 初始化NPS客户端
 	npsClient := nps.NewClient(&cfg.NPSServer)
