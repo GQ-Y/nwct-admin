@@ -83,6 +83,10 @@ export const api = {
     }),
 
   systemInfo: () => request<any>("/api/v1/system/info"),
+  systemLogs: (lines: number = 200) =>
+    request<any>(`/api/v1/system/logs?lines=${encodeURIComponent(String(lines))}`),
+  systemRestart: (type: "soft" | "hard" = "soft") =>
+    request<any>("/api/v1/system/restart", { method: "POST", body: JSON.stringify({ type }) }),
 
   devices: () => request<{ devices: any[]; total: number }>("/api/v1/devices"),
   deviceDetail: (ip: string) => request<any>(`/api/v1/devices/${encodeURIComponent(ip)}`),
@@ -90,8 +94,38 @@ export const api = {
     request<any>("/api/v1/devices/scan/start", { method: "POST", body: "{}" }),
 
   npsStatus: () => request<any>("/api/v1/nps/status"),
+  npsConnect: (req: {
+    server: string;
+    vkey: string;
+    client_id: string;
+    npc_path?: string;
+    npc_config_path?: string;
+    npc_args?: string[];
+  }) => request<any>("/api/v1/nps/connect", { method: "POST", body: JSON.stringify(req) }),
+  npsDisconnect: () => request<any>("/api/v1/nps/disconnect", { method: "POST", body: "{}" }),
+  npsTunnels: () => request<{ tunnels: any[] }>("/api/v1/nps/tunnels"),
+
   mqttStatus: () => request<any>("/api/v1/mqtt/status"),
-  mqttLogs: () => request<any>("/api/v1/mqtt/logs"),
+  mqttConnect: (req: {
+    server: string;
+    port: number;
+    username?: string;
+    password?: string;
+    client_id: string;
+    tls?: boolean;
+  }) => request<any>("/api/v1/mqtt/connect", { method: "POST", body: JSON.stringify(req) }),
+  mqttDisconnect: () => request<any>("/api/v1/mqtt/disconnect", { method: "POST", body: "{}" }),
+  mqttPublish: (req: { topic: string; payload: string }) =>
+    request<any>("/api/v1/mqtt/publish", { method: "POST", body: JSON.stringify(req) }),
+  mqttLogs: (params?: { topic?: string; direction?: string; page?: number; page_size?: number }) => {
+    const q = new URLSearchParams();
+    if (params?.topic) q.set("topic", params.topic);
+    if (params?.direction) q.set("direction", params.direction);
+    if (params?.page) q.set("page", String(params.page));
+    if (params?.page_size) q.set("page_size", String(params.page_size));
+    const qs = q.toString();
+    return request<any>(`/api/v1/mqtt/logs${qs ? `?${qs}` : ""}`);
+  },
 };
 
 

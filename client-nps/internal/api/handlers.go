@@ -1004,6 +1004,28 @@ func (s *Server) handleMQTTDisconnect(c *gin.Context) {
 	c.JSON(http.StatusOK, models.SuccessResponse(nil))
 }
 
+// handleMQTTPublish 处理MQTT发布消息请求
+func (s *Server) handleMQTTPublish(c *gin.Context) {
+	var req struct {
+		Topic   string `json:"topic" binding:"required"`
+		Payload string `json:"payload"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse(400, "参数错误: "+err.Error()))
+		return
+	}
+	topic := strings.TrimSpace(req.Topic)
+	if topic == "" {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse(400, "topic 不能为空"))
+		return
+	}
+	if err := s.mqttClient.Publish(topic, req.Payload); err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse(500, err.Error()))
+		return
+	}
+	c.JSON(http.StatusOK, models.SuccessResponse(nil))
+}
+
 // handleMQTTLogs 处理获取MQTT日志请求
 func (s *Server) handleMQTTLogs(c *gin.Context) {
 	topic := c.Query("topic")

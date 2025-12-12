@@ -548,6 +548,11 @@ func getDeviceName(ip string) string {
 		return name
 	}
 
+	// mDNS 反向解析（PTR in-addr.arpa），对 Apple/iOS/IoT 的 `.local` 名称很有效
+	if name, err := fingerprint.MDNSReverseLookup(ip, 600*time.Millisecond); err == nil && name != "" {
+		return name
+	}
+
 	return ""
 }
 

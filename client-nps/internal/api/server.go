@@ -106,6 +106,7 @@ func (s *Server) initRouter() {
 		api.GET("/mqtt/status", s.authMiddleware(), s.handleMQTTStatus)
 		api.POST("/mqtt/connect", s.authMiddleware(), s.handleMQTTConnect)
 		api.POST("/mqtt/disconnect", s.authMiddleware(), s.handleMQTTDisconnect)
+		api.POST("/mqtt/publish", s.authMiddleware(), s.handleMQTTPublish)
 		api.GET("/mqtt/logs", s.authMiddleware(), s.handleMQTTLogs)
 
 		// 配置管理

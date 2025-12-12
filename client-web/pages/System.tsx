@@ -1,17 +1,66 @@
-import React, { useState } from 'react';
-import { Card, Button, Badge, Alert } from '../components/UI';
-import { mockLogs } from '../data';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Card, Button, Badge, Alert, Input } from '../components/UI';
 import { RefreshCw, Download, Trash2, Power, RotateCcw } from 'lucide-react';
 import { useLanguage } from '../contexts/LanguageContext';
+import { api } from '../lib/api';
+import { useRealtime } from '../contexts/RealtimeContext';
 
 export const System: React.FC = () => {
   const { t } = useLanguage();
+  const rt = useRealtime();
   const [showResetConfirm, setShowResetConfirm] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [lines, setLines] = useState(200);
+  const [logs, setLogs] = useState<string[]>([]);
+  const [source, setSource] = useState<string>("");
+
+  const sys = rt.systemStatus;
+  const ip = sys?.network?.ip ?? "-";
+  const uptimeSec = Number(sys?.uptime ?? 0);
+  const uptimeText = useMemo(() => {
+    if (!uptimeSec) return "-";
+    const d = Math.floor(uptimeSec / 86400);
+    const h = Math.floor((uptimeSec % 86400) / 3600);
+    const m = Math.floor((uptimeSec % 3600) / 60);
+    if (d > 0) return `${d} days, ${h} hours`;
+    if (h > 0) return `${h} hours, ${m} min`;
+    return `${m} min`;
+  }, [uptimeSec]);
 
   const handleFactoryReset = () => {
     // In a real app, this would trigger the reset process
     alert('Factory reset triggered');
     setShowResetConfirm(false);
+  };
+
+  const refreshLogs = async () => {
+    setLoading(true);
+    try {
+      const d = await api.systemLogs(lines);
+      setLogs((d?.logs || []).map((x: any) => x?.line).filter(Boolean));
+      setSource(d?.source || "");
+    } catch (e: any) {
+      alert(e?.message || String(e));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    refreshLogs();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const reboot = async () => {
+    setLoading(true);
+    try {
+      await api.systemRestart("soft");
+      alert("已发送重启请求（soft）");
+    } catch (e: any) {
+      alert(e?.message || String(e));
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -29,11 +78,11 @@ export const System: React.FC = () => {
             </div>
             <div style={{ display: 'table-row' }}>
                 <div style={{ display: 'table-cell', padding: '12px 8px', color: '#666', borderBottom: '1px solid #f0f0f0' }}>{t('system.uptime')}</div>
-                <div style={{ display: 'table-cell', padding: '12px 8px', fontWeight: 500, borderBottom: '1px solid #f0f0f0', textAlign: 'right' }}>15 days, 4 hours</div>
+                <div style={{ display: 'table-cell', padding: '12px 8px', fontWeight: 500, borderBottom: '1px solid #f0f0f0', textAlign: 'right' }}>{uptimeText}</div>
             </div>
             <div style={{ display: 'table-row' }}>
                 <div style={{ display: 'table-cell', padding: '12px 8px', color: '#666' }}>{t('devices.ip')}</div>
-                <div style={{ display: 'table-cell', padding: '12px 8px', fontWeight: 500, textAlign: 'right' }}>192.168.1.100</div>
+                <div style={{ display: 'table-cell', padding: '12px 8px', fontWeight: 500, textAlign: 'right' }}>{ip}</div>
             </div>
             </div>
         </Card>
@@ -45,7 +94,7 @@ export const System: React.FC = () => {
                         <div style={{ fontWeight: 500 }}>{t('system.reboot')}</div>
                         <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>{t('system.reboot_desc')}</div>
                     </div>
-                    <Button variant="outline" style={{ color: 'var(--text-primary)' }}>
+                    <Button variant="outline" style={{ color: 'var(--text-primary)' }} onClick={reboot} disabled={loading}>
                         <Power size={16} /> {t('system.reboot')}
                     </Button>
                 </div>
@@ -70,22 +119,31 @@ export const System: React.FC = () => {
         </Card>
       </div>
 
-      <Card title={t('system.logs')} extra={<Button variant="ghost" style={{ padding: 4 }}><RefreshCw size={16}/></Button>}>
+      <Card
+        title={t('system.logs')}
+        extra={
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <div style={{ width: 120 }}>
+              <Input value={String(lines)} onChange={(e) => setLines(Number((e.target as any).value) || 200)} />
+            </div>
+            <Button variant="ghost" style={{ padding: 4 }} onClick={refreshLogs} disabled={loading}>
+              <RefreshCw size={16} />
+            </Button>
+          </div>
+        }
+      >
+        {source ? <div style={{ fontSize: 12, color: "#888", marginBottom: 8 }}>source: {source}</div> : null}
         <div style={{ maxHeight: 500, overflowY: 'auto' }}>
-          {mockLogs.map(log => (
-            <div key={log.id} style={{ padding: '16px 0', borderBottom: '1px solid #f0f0f0', fontSize: 13 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
-                <span style={{ color: '#999', fontFamily: 'monospace' }}>{log.timestamp}</span>
-                <Badge status={log.level === 'error' ? 'error' : log.level === 'warn' ? 'warn' : 'success'} text={log.level.toUpperCase()} />
-              </div>
-              <div style={{ fontWeight: 600, marginBottom: 4, color: 'var(--text-primary)' }}>[{log.module}]</div>
-              <div style={{ color: 'var(--text-secondary)', lineHeight: 1.5 }}>{log.message}</div>
+          {logs.map((line, idx) => (
+            <div key={idx} style={{ padding: "8px 0", borderBottom: "1px solid #f0f0f0", fontSize: 12 }}>
+              <div style={{ fontFamily: "monospace", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{line}</div>
             </div>
           ))}
+          {logs.length === 0 ? <div style={{ color: "#888", padding: 12 }}>暂无日志</div> : null}
         </div>
         <div style={{ marginTop: 20, display: 'flex', gap: 12, paddingTop: 16, borderTop: '1px solid #f0f0f0' }}>
-          <Button variant="outline" style={{ flex: 1 }}><Download size={16} /> {t('system.export')}</Button>
-          <Button variant="outline" style={{ flex: 1 }}><Trash2 size={16} /> {t('system.clear')}</Button>
+          <Button variant="outline" style={{ flex: 1 }} disabled><Download size={16} /> {t('system.export')}</Button>
+          <Button variant="outline" style={{ flex: 1 }} disabled><Trash2 size={16} /> {t('system.clear')}</Button>
         </div>
       </Card>
     </div>
