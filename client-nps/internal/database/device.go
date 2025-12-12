@@ -109,6 +109,9 @@ func GetDevice(db *sql.DB, ip string) (*Device, error) {
 func GetDevices(db *sql.DB, status, deviceType string, limit, offset int) ([]Device, int, error) {
 	query := "SELECT ip, mac, name, vendor, type, os, status, first_seen, last_seen FROM devices WHERE 1=1"
 	args := []interface{}{}
+	// 过滤无意义的广播/占位 MAC（避免 UI 出现 192.168.x.255 / FF:FF:FF:FF:FF:FF 等记录）
+	query += " AND mac != ?"
+	args = append(args, "FF:FF:FF:FF:FF:FF")
 
 	if status != "" && status != "all" {
 		query += " AND status = ?"
@@ -145,6 +148,8 @@ func GetDevices(db *sql.DB, status, deviceType string, limit, offset int) ([]Dev
 	// 获取总数
 	countQuery := "SELECT COUNT(*) FROM devices WHERE 1=1"
 	countArgs := []interface{}{}
+	countQuery += " AND mac != ?"
+	countArgs = append(countArgs, "FF:FF:FF:FF:FF:FF")
 	if status != "" && status != "all" {
 		countQuery += " AND status = ?"
 		countArgs = append(countArgs, status)

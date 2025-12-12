@@ -11,11 +11,13 @@ function getApiBase(): string {
 
   // dev 默认后端端口（与你目前的运行方式一致）
   if (typeof window !== "undefined") {
-    const isVite = window.location.port === "5173" || window.location.port === "5174";
-    if (isVite) return "http://localhost:18080";
+    const isDevServer =
+      window.location.port === "3000" || window.location.port === "5173" || window.location.port === "5174";
+    if (isDevServer) return "http://localhost:8080";
+    // 生产环境同域部署（例如 Nginx 反代到 /api/v1），则直接用当前 origin
     return window.location.origin;
   }
-  return "http://localhost:18080";
+  return "http://localhost:8080";
 }
 
 export const API_BASE = getApiBase();

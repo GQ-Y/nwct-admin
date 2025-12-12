@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"nwct/client-nps/internal/database"
+	"nwct/client-nps/internal/fingerprint"
 	"nwct/client-nps/internal/logger"
 	"nwct/client-nps/internal/realtime"
 	"nwct/client-nps/internal/toolkit"
@@ -26,16 +27,16 @@ type Scanner interface {
 
 // Device 设备信息
 type Device struct {
-	IP        string   `json:"ip"`
-	MAC       string   `json:"mac"`
-	Name      string   `json:"name"`
-	Vendor    string   `json:"vendor"`
-	Type      string   `json:"type"`
-	OS        string   `json:"os"`
-	Status    string   `json:"status"`
-	OpenPorts []int    `json:"open_ports"`
-	LastSeen  string   `json:"last_seen"`
-	FirstSeen string   `json:"first_seen"`
+	IP        string `json:"ip"`
+	MAC       string `json:"mac"`
+	Name      string `json:"name"`
+	Vendor    string `json:"vendor"`
+	Type      string `json:"type"`
+	OS        string `json:"os"`
+	Status    string `json:"status"`
+	OpenPorts []int  `json:"open_ports"`
+	LastSeen  string `json:"last_seen"`
+	FirstSeen string `json:"first_seen"`
 }
 
 // DeviceDetail 设备详情
@@ -71,10 +72,10 @@ type ScanStatus struct {
 
 // deviceScanner 设备扫描器实现
 type deviceScanner struct {
-	scanning    bool
-	scanStatus  *ScanStatus
-	mu          sync.RWMutex
-	db          *sql.DB
+	scanning   bool
+	scanStatus *ScanStatus
+	mu         sync.RWMutex
+	db         *sql.DB
 }
 
 var (
@@ -249,7 +250,7 @@ func (ds *deviceScanner) identifyDevice(ip, mac string) *Device {
 func (ds *deviceScanner) scanPorts(ip string) {
 	commonPorts := []int{22, 23, 80, 443, 3389, 8080, 3306, 5432}
 	updated := 0
-	
+
 	for _, port := range commonPorts {
 		result, err := toolkit.PortScan(ip, []int{port}, 2*time.Second, "tcp")
 		if err != nil {
@@ -391,29 +392,24 @@ func (ds *deviceScanner) GetScanStatus() *ScanStatus {
 
 // identifyVendor 识别厂商（基于MAC地址OUI）
 func identifyVendor(mac string) string {
-	// 简化的OUI识别（实际应该使用完整的OUI数据库）
+	// 优先使用离线 OUI 库（IEEE oui.txt，支持本地缓存/可选自动下载）
+	if v := fingerprint.DefaultOUI().Lookup(mac); v != "" {
+		return v
+	}
+
+	// 保底：常见虚拟网卡 OUI
 	ouiMap := map[string]string{
 		"00:50:56": "VMware",
-		"00:0c:29": "VMware",
-		"00:1b:21": "Intel",
-		"00:1e:67": "Intel",
-		"00:25:90": "Apple",
-		"00:23:12": "Apple",
-		"00:1a:79": "Apple",
-		"00:1e:c2": "Apple",
-		"00:26:4a": "Apple",
-		"00:26:bb": "Apple",
+		"00:0C:29": "VMware",
 		"08:00:27": "VirtualBox",
 		"52:54:00": "QEMU",
 	}
-
 	if len(mac) >= 8 {
-		oui := mac[:8]
+		oui := strings.ToUpper(mac[:8])
 		if vendor, ok := ouiMap[oui]; ok {
 			return vendor
 		}
 	}
-
 	return "Unknown"
 }
 

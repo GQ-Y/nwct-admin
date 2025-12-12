@@ -1,8 +1,15 @@
 package scanner
 
 import (
+	"bufio"
+	"context"
 	"fmt"
 	"net"
+	"os"
+	"os/exec"
+	"regexp"
+	"runtime"
+	"strings"
 	"time"
 
 	"github.com/google/gopacket"
@@ -103,29 +110,56 @@ func ARPScan(subnet string, timeout time.Duration) ([]ARPDevice, error) {
 
 // arpScanSimple 简化的ARP扫描（当没有抓包权限时）
 func arpScanSimple(ipnet *net.IPNet, timeout time.Duration) ([]ARPDevice, error) {
-	// 使用ping方式发现设备（简化实现）
-	devices := []ARPDevice{}
+	// 无 pcap 权限时的兜底：
+	// 1) 并发 ICMP ping sweep 填充 ARP 表
+	// 2) 读取系统 ARP 表，回收子网内的 IP/MAC
 
-	ip := ipnet.IP
-	for ipnet.Contains(ip) {
+	// 枚举子网内 IP（/24 通常 254 个）
+	ips := make([]string, 0, 512)
+	for ip := ipnet.IP.Mask(ipnet.Mask); ipnet.Contains(ip); inc(ip) {
 		if isNetworkOrBroadcast(ip, ipnet) {
-			inc(ip)
 			continue
 		}
-
-		// 尝试连接常见端口来判断设备是否在线
-		if isHostAlive(ip.String()) {
-			// 尝试获取MAC地址（通过ARP表）
-			mac := getMACFromARPTable(ip.String())
-			devices = append(devices, ARPDevice{
-				IP:  ip.String(),
-				MAC: mac,
-			})
-		}
-
-		inc(ip)
+		ips = append(ips, ip.String())
 	}
 
+	// 并发 ping sweep（不要求全部成功，只为尽可能填充 ARP 表）
+	workers := 64
+	if len(ips) < workers {
+		workers = len(ips)
+	}
+	if workers <= 0 {
+		return []ARPDevice{}, nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	ch := make(chan string)
+	for i := 0; i < workers; i++ {
+		go func() {
+			for ip := range ch {
+				_ = pingOnce(ctx, ip)
+			}
+		}()
+	}
+	for _, ip := range ips {
+		select {
+		case <-ctx.Done():
+			close(ch)
+			goto done
+		case ch <- ip:
+		}
+	}
+	close(ch)
+
+done:
+	// 读取 ARP 表（批量），返回子网内的 IP/MAC
+	entries, _ := getARPTableEntries(ipnet)
+	devices := make([]ARPDevice, 0, len(entries))
+	for ip, mac := range entries {
+		devices = append(devices, ARPDevice{IP: ip, MAC: mac})
+	}
 	return devices, nil
 }
 
@@ -239,25 +273,160 @@ func broadcastAddr(ipnet *net.IPNet) net.IP {
 
 // isHostAlive 检查主机是否存活
 func isHostAlive(ip string) bool {
-	conn, err := net.DialTimeout("tcp", ip+":80", 1*time.Second)
-	if err == nil {
-		conn.Close()
-		return true
-	}
-
-	conn, err = net.DialTimeout("tcp", ip+":22", 1*time.Second)
-	if err == nil {
-		conn.Close()
-		return true
-	}
-
-	return false
+	// 仅用于扫描兜底：用系统 ping 做 ICMP 探测（更通用）
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+	defer cancel()
+	return pingOnce(ctx, ip) == nil
 }
 
 // getMACFromARPTable 从ARP表获取MAC地址（简化实现）
 func getMACFromARPTable(ip string) string {
-	// TODO: 读取系统ARP表
-	// Linux: /proc/net/arp
-	// macOS: arp -a
-	return ""
+	entries, err := getARPTableEntries(nil)
+	if err != nil {
+		return ""
+	}
+	return entries[ip]
 }
+
+func pingOnce(ctx context.Context, ip string) error {
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "darwin":
+		// -W: waittime (ms) on macOS
+		cmd = exec.CommandContext(ctx, "ping", "-c", "1", "-W", "1000", ip)
+	default:
+		// Linux: -W timeout (sec)
+		cmd = exec.CommandContext(ctx, "ping", "-c", "1", "-W", "1", ip)
+	}
+	err := cmd.Run()
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	return err
+}
+
+func getARPTableEntries(ipnet *net.IPNet) (map[string]string, error) {
+	switch runtime.GOOS {
+	case "linux":
+		return readLinuxARPTable(ipnet)
+	case "darwin":
+		return readDarwinARPTable(ipnet)
+	default:
+		// best-effort
+		return map[string]string{}, nil
+	}
+}
+
+func readLinuxARPTable(ipnet *net.IPNet) (map[string]string, error) {
+	f, err := os.Open("/proc/net/arp")
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	sc := bufio.NewScanner(f)
+	out := map[string]string{}
+	first := true
+	for sc.Scan() {
+		line := strings.TrimSpace(sc.Text())
+		if line == "" {
+			continue
+		}
+		if first {
+			// skip header
+			first = false
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) < 4 {
+			continue
+		}
+		ip := fields[0]
+		mac := normalizeMAC(fields[3])
+		if mac == "" || mac == "00:00:00:00:00:00" || mac == "FF:FF:FF:FF:FF:FF" {
+			continue
+		}
+		if ipnet != nil {
+			nip := net.ParseIP(ip)
+			if nip == nil || !ipnet.Contains(nip) || isNetworkOrBroadcast(nip, ipnet) {
+				continue
+			}
+		}
+		out[ip] = mac
+	}
+	if err := sc.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func readDarwinARPTable(ipnet *net.IPNet) (map[string]string, error) {
+	// arp -a 输出类似：
+	// ? (192.168.2.1) at 18:aa:0f:f7:9e:62 on en0 ifscope [ethernet]
+	b, err := exec.Command("arp", "-a").Output()
+	if err != nil {
+		return nil, err
+	}
+	reIP := regexp.MustCompile(`\((\d+\.\d+\.\d+\.\d+)\)`)
+	reMAC := regexp.MustCompile(`(?i)\bat\s+(([0-9a-f]{1,2}:){5}[0-9a-f]{1,2})\b`)
+
+	out := map[string]string{}
+	sc := bufio.NewScanner(strings.NewReader(string(b)))
+	for sc.Scan() {
+		line := sc.Text()
+		mip := reIP.FindStringSubmatch(line)
+		if len(mip) != 2 {
+			continue
+		}
+		ip := mip[1]
+		if ipnet != nil {
+			nip := net.ParseIP(ip)
+			if nip == nil || !ipnet.Contains(nip) || isNetworkOrBroadcast(nip, ipnet) {
+				continue
+			}
+		}
+		mmac := reMAC.FindStringSubmatch(line)
+		if len(mmac) != 3 {
+			continue
+		}
+		mac := normalizeMAC(mmac[1])
+		if mac == "" || mac == "00:00:00:00:00:00" || mac == "FF:FF:FF:FF:FF:FF" {
+			continue
+		}
+		out[ip] = mac
+	}
+	if err := sc.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func normalizeMAC(s string) string {
+	s = strings.TrimSpace(strings.ToLower(s))
+	s = strings.ReplaceAll(s, "-", ":")
+	parts := strings.Split(s, ":")
+	if len(parts) != 6 {
+		return ""
+	}
+	for i := range parts {
+		p := strings.TrimSpace(parts[i])
+		p = strings.TrimPrefix(p, "0x")
+		if p == "" {
+			return ""
+		}
+		if len(p) > 2 {
+			p = p[len(p)-2:]
+		}
+		if len(p) == 1 {
+			p = "0" + p
+		}
+		if !reHex2.MatchString(p) {
+			// reuse a local compiled regex to avoid importing fingerprint package
+			return ""
+		}
+		parts[i] = strings.ToUpper(p)
+	}
+	return strings.Join(parts, ":")
+}
+
+var reHex2 = regexp.MustCompile(`^[0-9a-f]{2}$`)
