@@ -19,13 +19,22 @@ var (
 
 // InitLogger 初始化日志系统
 func InitLogger() error {
-	logDir := "/var/log/nwct"
+	// 优先使用环境变量指定日志目录；否则使用默认 /var/log/nwct；
+	// 如果无权限（如 macOS 非root），自动降级到临时目录。
+	logDir := os.Getenv("NWCT_LOG_DIR")
+	if logDir == "" {
+		logDir = "/var/log/nwct"
+	}
 	if err := os.MkdirAll(logDir, 0755); err != nil {
-		return err
+		fallback := filepath.Join(os.TempDir(), "nwct")
+		if err2 := os.MkdirAll(fallback, 0755); err2 != nil {
+			return err
+		}
+		logDir = fallback
 	}
 
 	logPath := filepath.Join(logDir, "system.log")
-	
+
 	// 打开日志文件（追加模式）
 	file, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
 	if err != nil {
@@ -104,8 +113,10 @@ func RotateLog(maxSize int64) error {
 		logFile.Close()
 
 		// 重命名当前日志文件
-		oldPath := filepath.Join("/var/log/nwct", "system.log")
-		newPath := filepath.Join("/var/log/nwct", fmt.Sprintf("system.%s.log", time.Now().Format("20060102-150405")))
+		// 以当前 logFile 的目录为准，避免写死 /var/log/nwct
+		baseDir := filepath.Dir(logFile.Name())
+		oldPath := filepath.Join(baseDir, "system.log")
+		newPath := filepath.Join(baseDir, fmt.Sprintf("system.%s.log", time.Now().Format("20060102-150405")))
 		os.Rename(oldPath, newPath)
 
 		// 重新打开日志文件
@@ -125,4 +136,3 @@ func RotateLog(maxSize int64) error {
 
 	return nil
 }
-

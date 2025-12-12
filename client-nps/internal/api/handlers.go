@@ -9,6 +9,7 @@ import (
 	"nwct/client-nps/internal/toolkit"
 	"nwct/client-nps/models"
 	"nwct/client-nps/utils"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -134,13 +135,13 @@ func (s *Server) handleSystemInfo(c *gin.Context) {
 	netStatus, _ := s.netManager.GetNetworkStatus()
 
 	info := gin.H{
-		"device_id":       s.config.Device.ID,
+		"device_id":        s.config.Device.ID,
 		"firmware_version": "1.0.0",
-		"uptime":          0, // TODO: 计算运行时间
-		"start_time":      time.Now().Format(time.RFC3339),
-		"cpu_usage":       cpuUsage,
+		"uptime":           0, // TODO: 计算运行时间
+		"start_time":       time.Now().Format(time.RFC3339),
+		"cpu_usage":        cpuUsage,
 		"memory_usage":     memoryUsage,
-		"disk_usage":      0.0, // TODO: 获取磁盘使用率
+		"disk_usage":       0.0, // TODO: 获取磁盘使用率
 		"network": gin.H{
 			"interface": netStatus.CurrentInterface,
 			"ip":        netStatus.IP,
@@ -206,7 +207,7 @@ func (s *Server) handleNetworkInterfaces(c *gin.Context) {
 func (s *Server) handleWiFiConnect(c *gin.Context) {
 	var req struct {
 		SSID     string `json:"ssid" binding:"required"`
-		Password string `json:"password" binding:"required"`
+		Password string `json:"password"`
 		Security string `json:"security"`
 	}
 
@@ -215,7 +216,7 @@ func (s *Server) handleWiFiConnect(c *gin.Context) {
 		return
 	}
 
-	if err := s.netManager.ConfigureWiFi(req.SSID, req.Password); err != nil {
+	if err := s.netManager.ConfigureWiFi(strings.TrimSpace(req.SSID), strings.TrimSpace(req.Password)); err != nil {
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse(500, err.Error()))
 		return
 	}
@@ -227,8 +228,11 @@ func (s *Server) handleWiFiConnect(c *gin.Context) {
 
 // handleWiFiScan 处理WiFi扫描请求
 func (s *Server) handleWiFiScan(c *gin.Context) {
-	// TODO: 实现WiFi扫描
-	networks := []gin.H{}
+	networks, err := s.netManager.ScanWiFi()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse(500, err.Error()))
+		return
+	}
 
 	c.JSON(http.StatusOK, models.SuccessResponse(gin.H{
 		"networks": networks,
@@ -317,7 +321,7 @@ func (s *Server) handleDevicesList(c *gin.Context) {
 // handleDeviceDetail 处理获取设备详情请求
 func (s *Server) handleDeviceDetail(c *gin.Context) {
 	ip := c.Param("ip")
-	
+
 	detail, err := s.scanner.GetDeviceDetail(ip)
 	if err != nil {
 		c.JSON(http.StatusNotFound, models.ErrorResponse(404, "设备不存在"))
@@ -397,7 +401,7 @@ func (s *Server) handleScanStop(c *gin.Context) {
 // handleScanStatus 处理获取扫描状态请求
 func (s *Server) handleScanStatus(c *gin.Context) {
 	status := s.scanner.GetScanStatus()
-	
+
 	c.JSON(http.StatusOK, models.SuccessResponse(gin.H{
 		"status":        status.Status,
 		"progress":      status.Progress,
@@ -769,10 +773,10 @@ func (s *Server) handleConfigUpdate(c *gin.Context) {
 // handleConfigInit 处理初始化配置请求
 func (s *Server) handleConfigInit(c *gin.Context) {
 	var req struct {
-		Network    map[string]interface{} `json:"network"`
-		NPSServer  map[string]interface{} `json:"nps_server"`
-		MQTT       map[string]interface{} `json:"mqtt"`
-		AdminPassword string `json:"admin_password" binding:"required"`
+		Network       map[string]interface{} `json:"network"`
+		NPSServer     map[string]interface{} `json:"nps_server"`
+		MQTT          map[string]interface{} `json:"mqtt"`
+		AdminPassword string                 `json:"admin_password" binding:"required"`
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -820,5 +824,3 @@ func (s *Server) handleConfigImport(c *gin.Context) {
 	// TODO: 导入配置文件
 	c.JSON(http.StatusOK, models.SuccessResponse(nil))
 }
-
-

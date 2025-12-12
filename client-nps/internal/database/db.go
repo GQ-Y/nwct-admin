@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	_ "github.com/mattn/go-sqlite3"
 )
@@ -13,10 +14,21 @@ var db *sql.DB
 
 // InitDB 初始化数据库
 func InitDB(dbPath string) (*sql.DB, error) {
+	// 允许通过环境变量覆盖
+	if v := strings.TrimSpace(os.Getenv("NWCT_DB_PATH")); v != "" {
+		dbPath = v
+	}
+
 	// 创建数据库目录
 	dir := filepath.Dir(dbPath)
 	if err := os.MkdirAll(dir, 0755); err != nil {
-		return nil, err
+		// 如果无权限（如开发机），自动降级到临时目录
+		fallback := filepath.Join(os.TempDir(), "nwct", filepath.Base(dbPath))
+		fallbackDir := filepath.Dir(fallback)
+		if err2 := os.MkdirAll(fallbackDir, 0755); err2 != nil {
+			return nil, err
+		}
+		dbPath = fallback
 	}
 
 	// 打开数据库
@@ -122,4 +134,3 @@ func Close() error {
 	}
 	return nil
 }
-

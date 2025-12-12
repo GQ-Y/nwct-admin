@@ -1,10 +1,14 @@
 package network
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"nwct/client-nps/config"
 	"nwct/client-nps/internal/logger"
+	"os/exec"
+	"runtime"
+	"strings"
 	"time"
 )
 
@@ -12,14 +16,23 @@ import (
 type Manager interface {
 	GetInterfaces() ([]Interface, error)
 	ConfigureWiFi(ssid, password string) error
+	ScanWiFi() ([]WiFiNetwork, error)
 	GetNetworkStatus() (*NetworkStatus, error)
 	TestConnection(target string) error
+}
+
+// WiFiNetwork WiFi网络信息
+type WiFiNetwork struct {
+	SSID     string `json:"ssid"`
+	Signal   int    `json:"signal"`   // 0-100
+	Security string `json:"security"` // WPA2/WPA3/OPEN...
+	InUse    bool   `json:"in_use"`
 }
 
 // Interface 网络接口
 type Interface struct {
 	Name    string `json:"name"`
-	Type    string `json:"type"` // ethernet, wifi
+	Type    string `json:"type"`   // ethernet, wifi
 	Status  string `json:"status"` // up, down
 	IP      string `json:"ip"`
 	Netmask string `json:"netmask"`
@@ -104,10 +117,47 @@ func (nm *networkManager) GetInterfaces() ([]Interface, error) {
 
 // ConfigureWiFi 配置WiFi连接
 func (nm *networkManager) ConfigureWiFi(ssid, password string) error {
-	// TODO: 通过NetworkManager D-Bus或wpa_supplicant配置WiFi
-	// 这里先返回一个占位实现
 	logger.Info("配置WiFi连接: SSID=%s", ssid)
-	return fmt.Errorf("WiFi配置功能待实现（需要NetworkManager D-Bus或系统命令）")
+
+	switch runtime.GOOS {
+	case "linux":
+		return nm.connectWiFiLinuxNmcli(ssid, password)
+	case "darwin":
+		return nm.connectWiFiDarwinNetworksetup(ssid, password)
+	default:
+		return fmt.Errorf("当前系统不支持WiFi配置: %s", runtime.GOOS)
+	}
+}
+
+// ScanWiFi 扫描WiFi网络
+func (nm *networkManager) ScanWiFi() ([]WiFiNetwork, error) {
+	switch runtime.GOOS {
+	case "linux":
+		return nm.scanWiFiLinuxNmcli()
+	case "darwin":
+		return nm.scanWiFiDarwinAirport()
+	default:
+		return nil, fmt.Errorf("当前系统不支持WiFi扫描: %s", runtime.GOOS)
+	}
+}
+
+func (nm *networkManager) runCmd(timeout time.Duration, name string, args ...string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, name, args...)
+	out, err := cmd.CombinedOutput()
+	s := strings.TrimSpace(string(out))
+	if ctx.Err() == context.DeadlineExceeded {
+		return s, fmt.Errorf("命令超时: %s %v", name, args)
+	}
+	if err != nil {
+		if s != "" {
+			return s, fmt.Errorf("命令失败: %s %v: %v: %s", name, args, err, s)
+		}
+		return s, fmt.Errorf("命令失败: %s %v: %v", name, args, err)
+	}
+	return s, nil
 }
 
 // GetNetworkStatus 获取网络状态
