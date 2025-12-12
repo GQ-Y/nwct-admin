@@ -106,5 +106,3 @@ func isConnRefused(err error) bool {
 	msg := strings.ToLower(err.Error())
 	return strings.Contains(msg, "connection refused")
 }
-
-

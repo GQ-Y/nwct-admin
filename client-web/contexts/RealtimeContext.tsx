@@ -24,10 +24,38 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode; enabled: bo
   const [devicesByIp, setDevicesByIp] = useState<Record<string, any>>({});
 
   const wsRef = useRef<WebSocket | null>(null);
+  const retryRef = useRef<number | null>(null);
+  const attemptRef = useRef(0);
 
   useEffect(() => {
     if (!enabled) return;
-    const ws = openWebSocket((msg: RealtimeMessage) => {
+    let stopped = false;
+
+    const clearRetry = () => {
+      if (retryRef.current != null) {
+        window.clearTimeout(retryRef.current);
+        retryRef.current = null;
+      }
+    };
+
+    const scheduleReconnect = () => {
+      if (stopped) return;
+      clearRetry();
+      const attempt = Math.min(attemptRef.current, 6);
+      const delay = [500, 1000, 2000, 5000, 8000, 15000, 30000][attempt] || 30000;
+      attemptRef.current = attemptRef.current + 1;
+      retryRef.current = window.setTimeout(() => {
+        connect();
+      }, delay);
+    };
+
+    const connect = () => {
+      if (stopped) return;
+      try {
+        wsRef.current?.close();
+      } catch {}
+
+      const ws = openWebSocket((msg: RealtimeMessage) => {
       if (msg.type === "hello") {
         setLastHello(msg.data);
         return;
@@ -62,15 +90,30 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode; enabled: bo
             return;
         }
       }
-    });
-    wsRef.current = ws;
-    ws.onopen = () => setConnected(true);
-    ws.onclose = () => setConnected(false);
-    ws.onerror = () => setConnected(false);
+      });
+
+      wsRef.current = ws;
+      ws.onopen = () => {
+        attemptRef.current = 0;
+        setConnected(true);
+      };
+      ws.onclose = () => {
+        setConnected(false);
+        scheduleReconnect();
+      };
+      ws.onerror = () => {
+        setConnected(false);
+        // 有些浏览器会同时触发 onerror+onclose，避免在这里额外 close
+      };
+    };
+
+    connect();
 
     return () => {
+      stopped = true;
+      clearRetry();
       try {
-        ws.close();
+        wsRef.current?.close();
       } catch {}
       wsRef.current = null;
     };

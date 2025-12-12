@@ -628,6 +628,19 @@ func (s *Server) handleScanStart(c *gin.Context) {
 	}
 
 	if err := s.scanner.StartScan(req.Subnet); err != nil {
+		// 扫描已在进行中：返回当前状态（避免前端报错/重复点击导致 500）
+		if strings.Contains(err.Error(), "扫描已在进行中") || strings.Contains(err.Error(), "进行中") {
+			status := s.scanner.GetScanStatus()
+			c.JSON(http.StatusOK, models.SuccessResponse(gin.H{
+				"scan_id":       "scan_001",
+				"status":        status.Status,
+				"progress":      status.Progress,
+				"scanned_count": status.ScannedCount,
+				"found_count":   status.FoundCount,
+				"start_time":    status.StartTime.Format(time.RFC3339),
+			}))
+			return
+		}
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse(500, err.Error()))
 		return
 	}

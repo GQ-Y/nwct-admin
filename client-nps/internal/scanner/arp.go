@@ -177,7 +177,7 @@ func sendARPRequest(handle *pcap.Handle, srcIP net.IP, srcMAC net.HardwareAddr, 
 	if handle == nil {
 		return
 	}
-	
+
 	// 创建ARP请求包
 	eth := &layers.Ethernet{
 		SrcMAC:       srcMAC,
@@ -261,4 +261,3 @@ func getMACFromARPTable(ip string) string {
 	// macOS: arp -a
 	return ""
 }
-

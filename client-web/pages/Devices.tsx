@@ -94,6 +94,9 @@ export const Devices: React.FC = () => {
     setIsScanning(true);
     api.scanStart()
       .then(() => refreshDevices())
+      .catch(() => {
+        // 扫描重复触发时后端可能返回“扫描已在进行中”，这里无需打断 UI
+      })
       .finally(() => setIsScanning(false));
   };
 
