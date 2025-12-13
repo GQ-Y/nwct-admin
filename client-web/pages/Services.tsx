@@ -14,6 +14,7 @@ export const NPSPage: React.FC = () => {
   const [server, setServer] = useState('');
   const [vkey, setVKey] = useState('');
   const [clientId, setClientId] = useState('');
+  const [npcPath, setNpcPath] = useState('');
 
   const connected = useMemo(() => {
     const s = rt.npsStatus ?? status;
@@ -26,16 +27,7 @@ export const NPSPage: React.FC = () => {
   }, [rt.npsStatus, status, server]);
 
   useEffect(() => {
-    api.npsStatus()
-      .then((s) => {
-        setStatus(s);
-        if (!server) setServer(s?.server || '');
-        if (!clientId) setClientId(s?.client_id || '');
-      })
-      .catch(() => {});
-    api.npsTunnels()
-      .then((d) => setTunnels(d?.tunnels || []))
-      .catch(() => {});
+    refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -43,18 +35,53 @@ export const NPSPage: React.FC = () => {
     if (rt.npsStatus) setStatus(rt.npsStatus);
   }, [rt.npsStatus]);
 
+  const refresh = async () => {
+    try {
+      const s = await api.npsStatus();
+      setStatus(s);
+      if (!server) setServer(s?.server || '');
+      if (!clientId) setClientId(s?.client_id || '');
+      if (!npcPath) setNpcPath(s?.npc_path || '');
+      const tt = await api.npsTunnels();
+      setTunnels(tt?.tunnels || []);
+    } catch {
+      // ignore
+    }
+  };
+
   const onToggle = async () => {
     setLoading(true);
     try {
       if (connected) {
         await api.npsDisconnect();
       } else {
-        await api.npsConnect({ server: server.trim(), vkey: vkey.trim(), client_id: clientId.trim() });
+        const req = {
+          server: server.trim() || undefined,
+          vkey: vkey.trim() || undefined,
+          client_id: clientId.trim() || undefined,
+          npc_path: npcPath.trim() || undefined,
+        };
+        await api.npsConnect(req);
       }
       const s = await api.npsStatus();
       setStatus(s);
       const tt = await api.npsTunnels();
       setTunnels(tt?.tunnels || []);
+    } catch (e: any) {
+      alert(e?.message || String(e));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const installNpc = async () => {
+    setLoading(true);
+    try {
+      const res = await api.npsNpcInstall({});
+      setNpcPath(res?.path || '');
+      const s = await api.npsStatus();
+      setStatus(s);
+      alert(`npc 已安装: ${res?.path || ''}`);
     } catch (e: any) {
       alert(e?.message || String(e));
     } finally {
@@ -101,9 +128,32 @@ export const NPSPage: React.FC = () => {
               <div style={{ fontSize: 13, color: '#666', marginBottom: 8 }}>Client ID</div>
               <Input value={clientId} onChange={(e) => setClientId((e.target as any).value)} placeholder="client_id" />
             </div>
+            <div style={{ marginTop: 12 }}>
+              <div style={{ fontSize: 13, color: '#666', marginBottom: 8 }}>npc 路径</div>
+              <Input value={npcPath} onChange={(e) => setNpcPath((e.target as any).value)} placeholder="npc 可执行文件路径" />
+              <div style={{ marginTop: 8, display: "flex", gap: 8 }}>
+                <Button variant="outline" onClick={installNpc} disabled={loading}>
+                  一键安装 npc
+                </Button>
+                <Button variant="ghost" onClick={refresh} disabled={loading}>
+                  刷新
+                </Button>
+              </div>
+            </div>
             <Button style={{ marginTop: 16 }} variant="primary" onClick={onToggle} disabled={loading}>
               <Save size={16} /> {connected ? t('common.disconnect') : t('services.save_config')}
             </Button>
+            {status?.last_error ? (
+              <div style={{ marginTop: 12, color: "#b91c1c", fontSize: 12 }}>
+                last_error: {status.last_error}
+              </div>
+            ) : null}
+            {(status?.pid || status?.log_path) ? (
+              <div style={{ marginTop: 10, color: "#666", fontSize: 12 }}>
+                {status?.pid ? <div>pid: {status.pid}</div> : null}
+                {status?.log_path ? <div>npc.log: {status.log_path}</div> : null}
+              </div>
+            ) : null}
           </div>
         </Card>
         
@@ -195,6 +245,7 @@ export const MQTTPage: React.FC = () => {
     api.mqttStatus()
       .then((s) => {
         setStatus(s);
+        if (!username && s?.username) setUsername(String(s.username || ""));
         // 形如 "host:port"
         const sp = String(s?.server || "");
         if (!host && sp.includes(":")) {

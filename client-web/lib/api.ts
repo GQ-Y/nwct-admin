@@ -9,14 +9,12 @@ function getApiBase(): string {
   const env = (import.meta as any).env?.VITE_API_BASE as string | undefined;
   if (env && env.trim()) return env.trim().replace(/\/+$/, "");
 
-  // dev 默认后端端口（与你目前的运行方式一致）
-  if (typeof window !== "undefined") {
-    const isDevServer =
-      window.location.port === "3000" || window.location.port === "5173" || window.location.port === "5174";
-    if (isDevServer) return "http://localhost:8080";
-    // 生产环境同域部署（例如 Nginx 反代到 /api/v1），则直接用当前 origin
-    return window.location.origin;
-  }
+  // Vite dev 环境：无论端口是多少，都默认把 API 指向后端（避免误打到前端 origin 导致 404）
+  const isDev = Boolean((import.meta as any).env?.DEV);
+  if (isDev) return "http://localhost:8080";
+
+  // 生产环境同域部署（例如 Nginx 反代到 /api/v1），则直接用当前 origin
+  if (typeof window !== "undefined") return window.location.origin;
   return "http://localhost:8080";
 }
 
@@ -94,6 +92,8 @@ export const api = {
     request<any>("/api/v1/devices/scan/start", { method: "POST", body: "{}" }),
 
   npsStatus: () => request<any>("/api/v1/nps/status"),
+  npsNpcInstall: (req?: { version?: string; install_dir?: string }) =>
+    request<any>("/api/v1/nps/npc/install", { method: "POST", body: JSON.stringify(req || {}) }),
   npsConnect: (req: {
     server: string;
     vkey: string;

@@ -1,0 +1,14 @@
+services:
+  nps:
+    # 该镜像在 Docker Hub 可用，且标注支持 arm64
+    image: taygetus/nps:latest
+    container_name: nwct-nps
+    restart: unless-stopped
+    ports:
+      # Web 管理端口（避免与本项目后端 :8080 冲突）
+      - "19080:8080"
+      # npc 连接端口（bridge）
+      - "19024:8024"
+    volumes:
+      - ./conf:/conf
+

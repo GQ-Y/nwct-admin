@@ -98,6 +98,7 @@ func (s *Server) initRouter() {
 
 		// NPS管理
 		api.GET("/nps/status", s.authMiddleware(), s.handleNPSStatus)
+		api.POST("/nps/npc/install", s.authMiddleware(), s.handleNPCInstall)
 		api.POST("/nps/connect", s.authMiddleware(), s.handleNPSConnect)
 		api.POST("/nps/disconnect", s.authMiddleware(), s.handleNPSDisconnect)
 		api.GET("/nps/tunnels", s.authMiddleware(), s.handleNPSTunnels)

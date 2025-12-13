@@ -8,7 +8,7 @@ import { useAuth } from '../contexts/AuthContext';
 export const Login: React.FC = () => {
   const navigate = useNavigate();
   const { t, language, setLanguage } = useLanguage();
-  const { login, initialized } = useAuth();
+  const { login } = useAuth();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [username, setUsername] = useState('admin');
@@ -19,8 +19,7 @@ export const Login: React.FC = () => {
     setLoading(true);
     setError('');
     try {
-      await login(username, password);
-      const isInit = initialized === true;
+      const isInit = await login(username, password);
       navigate(isInit ? '/dashboard' : '/init');
     } catch (e: any) {
       setError(e?.message || '登录失败');

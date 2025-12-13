@@ -5,7 +5,9 @@ import (
 	"nwct/client-nps/config"
 	"nwct/client-nps/internal/logger"
 	"nwct/client-nps/internal/realtime"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"sync"
 	"time"
 )
@@ -27,6 +29,8 @@ type NPSStatus struct {
 	PID         int      `json:"pid"`
 	LastError   string   `json:"last_error,omitempty"`
 	Tunnels     []Tunnel `json:"tunnels"`
+	NPCPath     string   `json:"npc_path,omitempty"`
+	LogPath     string   `json:"log_path,omitempty"`
 }
 
 // Tunnel 隧道信息
@@ -48,6 +52,8 @@ type npsClient struct {
 	lastError   string
 
 	cmd *exec.Cmd
+
+	logPath string
 }
 
 // NewClient 创建NPS客户端
@@ -77,6 +83,10 @@ func (c *npsClient) Connect() error {
 	if npcPath == "" {
 		npcPath = "npc"
 	}
+	if _, err := exec.LookPath(npcPath); err != nil {
+		// 如果是显式路径也给出更清晰错误
+		return fmt.Errorf("未找到 npc 可执行文件: %s（可通过 /api/v1/nps/npc/install 一键安装，或设置 nps_server.npc_path）", npcPath)
+	}
 
 	args := make([]string, 0, 8)
 	if c.config.NPCConfigPath != "" {
@@ -93,9 +103,17 @@ func (c *npsClient) Connect() error {
 	logger.Info("启动NPS客户端(npc): %s %v", npcPath, args)
 	cmd := exec.Command(npcPath, args...)
 
-	// 输出交给父进程（可被 systemd/docker 收集）；后续可改成写入日志文件
-	cmd.Stdout = nil
-	cmd.Stderr = nil
+	// 将 npc 输出写入日志文件，便于 UI/排障
+	logDir := os.Getenv("NWCT_LOG_DIR")
+	if logDir == "" {
+		logDir = filepath.Join(os.TempDir(), "nwct")
+	}
+	_ = os.MkdirAll(logDir, 0o755)
+	c.logPath = filepath.Join(logDir, "npc.log")
+	if f, err := os.OpenFile(c.logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o666); err == nil {
+		cmd.Stdout = f
+		cmd.Stderr = f
+	}
 
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("启动 npc 失败: %v", err)
@@ -112,6 +130,8 @@ func (c *npsClient) Connect() error {
 		"connected_at": c.connectedAt.Format(time.RFC3339),
 		"pid":          cmd.Process.Pid,
 		"last_error":   "",
+		"npc_path":     npcPath,
+		"log_path":     c.logPath,
 	})
 
 	// 监控退出
@@ -135,6 +155,8 @@ func (c *npsClient) Connect() error {
 			"connected_at": "",
 			"pid":          0,
 			"last_error":   c.lastError,
+			"npc_path":     npcPath,
+			"log_path":     c.logPath,
 		})
 	}()
 	return nil
@@ -160,6 +182,8 @@ func (c *npsClient) Disconnect() error {
 		"connected_at": "",
 		"pid":          0,
 		"last_error":   "",
+		"npc_path":     c.config.NPCPath,
+		"log_path":     c.logPath,
 	})
 	return nil
 }
@@ -192,5 +216,7 @@ func (c *npsClient) GetStatus() (*NPSStatus, error) {
 		PID:         pid,
 		LastError:   c.lastError,
 		Tunnels:     []Tunnel{},
+		NPCPath:     c.config.NPCPath,
+		LogPath:     c.logPath,
 	}, nil
 }

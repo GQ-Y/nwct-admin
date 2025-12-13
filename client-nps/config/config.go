@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // Config 应用配置
@@ -120,7 +121,13 @@ func DefaultConfig() *Config {
 		},
 		NPSServer: NPSServerConfig{},
 		MQTT: MQTTConfig{
-			Port: 1883,
+			// 默认内置 MQTT 服务（可在 UI/API 中覆盖）
+			Server:   "mqtt.yingzhu.net",
+			Port:     1883,
+			Username: "nps",
+			Password: "nps",
+			// 默认 client_id 与设备 id 保持一致，方便追踪/鉴权
+			ClientID: "device_001",
 		},
 		Scanner: ScannerConfig{
 			AutoScan:     true,
@@ -177,6 +184,52 @@ func LoadConfig() (*Config, error) {
 		return nil, err
 	}
 
+	// 兼容补全：当配置文件是旧版本或字段缺失时，仅在“为空/零值”场景下补齐默认值
+	// 这样可以实现“内置默认 MQTT 服务”，同时不覆盖用户显式配置。
+	changed := false
+
+	// MQTT defaults
+	if strings.TrimSpace(cfg.MQTT.Server) == "" {
+		cfg.MQTT.Server = "mqtt.yingzhu.net"
+		changed = true
+	}
+	if cfg.MQTT.Port <= 0 {
+		cfg.MQTT.Port = 1883
+		changed = true
+	}
+	if strings.TrimSpace(cfg.MQTT.Username) == "" {
+		cfg.MQTT.Username = "nps"
+		changed = true
+	}
+	if strings.TrimSpace(cfg.MQTT.Password) == "" {
+		cfg.MQTT.Password = "nps"
+		changed = true
+	}
+	if strings.TrimSpace(cfg.MQTT.ClientID) == "" {
+		if strings.TrimSpace(cfg.Device.ID) != "" {
+			cfg.MQTT.ClientID = strings.TrimSpace(cfg.Device.ID)
+		} else {
+			cfg.MQTT.ClientID = "device_001"
+		}
+		changed = true
+	}
+
+	// NPS defaults（server/client_id 可默认，vkey 由用户填写或由“一键连接”自动创建）
+	if strings.TrimSpace(cfg.NPSServer.Server) == "" {
+		// 本地开发/测试默认走 docker 映射的 bridge 端口
+		cfg.NPSServer.Server = "127.0.0.1:19024"
+		changed = true
+	}
+	if strings.TrimSpace(cfg.NPSServer.ClientID) == "" {
+		id := strings.TrimSpace(cfg.Device.ID)
+		if id == "" {
+			id = "device_001"
+		}
+		id = strings.ReplaceAll(id, "_", "-")
+		cfg.NPSServer.ClientID = "nwct-" + id
+		changed = true
+	}
+
 	// 迁移：如果旧的 wifi 配置存在，但 profiles 为空，则自动迁移为一个 profile
 	if cfg.Network.WiFiProfiles == nil {
 		cfg.Network.WiFiProfiles = []WiFiProfile{}
@@ -190,6 +243,11 @@ func LoadConfig() (*Config, error) {
 			Priority:    10,
 		})
 		// 不强制清空旧字段，避免用户困惑；但保存时会同时存在
+		_ = cfg.Save()
+	}
+
+	// 如果我们补齐了默认值，则回写配置，避免每次启动都重复补齐
+	if changed {
 		_ = cfg.Save()
 	}
 

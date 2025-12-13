@@ -4,7 +4,7 @@ import { api, clearToken, getToken, setToken } from "../lib/api";
 type AuthState = {
   token: string | null;
   initialized: boolean | null;
-  login: (username: string, password: string) => Promise<void>;
+  login: (username: string, password: string) => Promise<boolean>;
   logout: () => void;
   refreshInitStatus: () => Promise<boolean>;
 };
@@ -25,7 +25,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const res = await api.login(username, password);
     setToken(res.token);
     setTokenState(res.token);
-    await refreshInitStatus();
+    return await refreshInitStatus();
   };
 
   const logout = () => {

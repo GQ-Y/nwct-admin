@@ -7,6 +7,7 @@ import (
 	"nwct/client-nps/internal/database"
 	"nwct/client-nps/internal/logger"
 	"nwct/client-nps/internal/realtime"
+	"strings"
 	"sync"
 	"time"
 
@@ -30,6 +31,7 @@ type MessageHandler func(topic string, payload []byte)
 type MQTTStatus struct {
 	Connected        bool     `json:"connected"`
 	Server          string    `json:"server"`
+	Username        string    `json:"username"`
 	ClientID        string    `json:"client_id"`
 	ConnectedAt     string   `json:"connected_at"`
 	SubscribedTopics []string `json:"subscribed_topics"`
@@ -72,6 +74,10 @@ func (c *mqttClient) Connect() error {
 
 	opts := mqtt.NewClientOptions()
 	opts.AddBroker(fmt.Sprintf("tcp://%s:%d", c.config.Server, c.config.Port))
+	// client_id 为空时做回退，避免连接失败
+	if strings.TrimSpace(c.config.ClientID) == "" {
+		c.config.ClientID = fmt.Sprintf("nwct-%d", time.Now().Unix())
+	}
 	opts.SetClientID(c.config.ClientID)
 	
 	if c.config.Username != "" {
@@ -244,6 +250,7 @@ func (c *mqttClient) GetStatus() (*MQTTStatus, error) {
 	return &MQTTStatus{
 		Connected:        c.IsConnected(),
 		Server:          fmt.Sprintf("%s:%d", c.config.Server, c.config.Port),
+		Username:        c.config.Username,
 		ClientID:        c.config.ClientID,
 		ConnectedAt:     connectedAt,
 		SubscribedTopics: subscribed,

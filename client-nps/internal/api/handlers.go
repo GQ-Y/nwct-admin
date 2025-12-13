@@ -2,12 +2,14 @@ package api
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"net/http"
 	"nwct/client-nps/config"
 	"nwct/client-nps/internal/database"
 	"nwct/client-nps/internal/logger"
 	"nwct/client-nps/internal/network"
+	"nwct/client-nps/internal/nps"
 	"nwct/client-nps/internal/scanner"
 	"nwct/client-nps/internal/toolkit"
 	"nwct/client-nps/models"
@@ -890,26 +892,115 @@ func (s *Server) handleNPSStatus(c *gin.Context) {
 	c.JSON(http.StatusOK, models.SuccessResponse(status))
 }
 
+// handleNPCInstall 一键下载并安装 npc（用于设备端集成 NPS 客户端）
+func (s *Server) handleNPCInstall(c *gin.Context) {
+	var req struct {
+		Version    string `json:"version"`
+		InstallDir string `json:"install_dir"`
+	}
+	_ = c.ShouldBindJSON(&req)
+
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 60*time.Second)
+	defer cancel()
+
+	res, err := nps.InstallNPC(ctx, nps.InstallOptions{
+		Version:    strings.TrimSpace(req.Version),
+		InstallDir: strings.TrimSpace(req.InstallDir),
+	})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse(500, err.Error()))
+		return
+	}
+
+	// 写入配置，后续 connect 默认就能用
+	s.config.NPSServer.NPCPath = res.Path
+	if err := s.config.Save(); err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse(500, "保存配置失败: "+err.Error()))
+		return
+	}
+
+	c.JSON(http.StatusOK, models.SuccessResponse(res))
+}
+
 // handleNPSConnect 处理NPS连接请求
 func (s *Server) handleNPSConnect(c *gin.Context) {
 	var req struct {
-		Server        string   `json:"server" binding:"required"`
-		VKey          string   `json:"vkey" binding:"required"`
-		ClientID      string   `json:"client_id" binding:"required"`
+		Server        string   `json:"server"`
+		VKey          string   `json:"vkey"`
+		ClientID      string   `json:"client_id"`
 		NPCPath       string   `json:"npc_path"`
 		NPCConfigPath string   `json:"npc_config_path"`
 		NPCArgs       []string `json:"npc_args"`
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, models.ErrorResponse(400, "参数错误: "+err.Error()))
-		return
+		// 允许空请求体：使用已有配置（实现“一键连接”）
 	}
 
-	// 更新配置
-	s.config.NPSServer.Server = req.Server
-	s.config.NPSServer.VKey = req.VKey
-	s.config.NPSServer.ClientID = req.ClientID
+	// 合并配置：请求未提供的字段则沿用已有配置（或由 npc_config_path 覆盖）
+	if strings.TrimSpace(req.Server) == "" {
+		req.Server = s.config.NPSServer.Server
+	}
+	if strings.TrimSpace(req.VKey) == "" {
+		req.VKey = s.config.NPSServer.VKey
+	}
+	if strings.TrimSpace(req.ClientID) == "" {
+		req.ClientID = s.config.NPSServer.ClientID
+	}
+	if strings.TrimSpace(req.NPCConfigPath) == "" {
+		req.NPCConfigPath = s.config.NPSServer.NPCConfigPath
+	}
+	if req.NPCArgs == nil {
+		req.NPCArgs = s.config.NPSServer.NPCArgs
+	}
+
+	// 默认 server/client_id：允许“完全空请求”也能一键连接
+	if strings.TrimSpace(req.Server) == "" {
+		req.Server = "127.0.0.1:19024"
+	}
+	if strings.TrimSpace(req.ClientID) == "" {
+		id := strings.TrimSpace(s.config.Device.ID)
+		if id == "" {
+			id = "device_001"
+		}
+		id = strings.ReplaceAll(id, "_", "-")
+		req.ClientID = "nwct-" + id
+	}
+
+	// vkey 允许为空：如果提供了 npc_config_path，则由配置文件决定；
+	// 否则当 vkey 为空时，尝试从 NPS Web 自动创建/查找 client 并获取 vkey（用于测试/内置默认服务）。
+	if strings.TrimSpace(req.VKey) == "" && strings.TrimSpace(req.NPCConfigPath) == "" {
+		baseURL := strings.TrimSpace(os.Getenv("NWCT_NPS_WEB_URL"))
+		if baseURL == "" {
+			baseURL = "http://127.0.0.1:19080"
+		}
+		user := strings.TrimSpace(os.Getenv("NWCT_NPS_WEB_USER"))
+		if user == "" {
+			user = "admin"
+		}
+		pass := os.Getenv("NWCT_NPS_WEB_PASS")
+		if strings.TrimSpace(pass) == "" {
+			pass = "123"
+		}
+		ctx, cancel := context.WithTimeout(c.Request.Context(), 8*time.Second)
+		defer cancel()
+		if v, err := nps.EnsureVKey(ctx, baseURL, user, pass, req.ClientID); err == nil && strings.TrimSpace(v) != "" {
+			req.VKey = strings.TrimSpace(v)
+		} else {
+			// 返回可定位的信息，方便排查 NPS Web 登录/创建 client 失败等问题
+			msg := "请先配置 NPS vkey（或提供 npc_config_path）"
+			if err != nil {
+				msg = "自动获取 NPS vkey 失败: " + err.Error()
+			}
+			c.JSON(http.StatusBadRequest, models.ErrorResponse(400, msg))
+			return
+		}
+	}
+
+	// 写回配置（连接成功后落盘，便于下次一键连接）
+	s.config.NPSServer.Server = strings.TrimSpace(req.Server)
+	s.config.NPSServer.VKey = strings.TrimSpace(req.VKey)
+	s.config.NPSServer.ClientID = strings.TrimSpace(req.ClientID)
 	if strings.TrimSpace(req.NPCPath) != "" {
 		s.config.NPSServer.NPCPath = strings.TrimSpace(req.NPCPath)
 	}
@@ -924,6 +1015,8 @@ func (s *Server) handleNPSConnect(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse(500, err.Error()))
 		return
 	}
+
+	_ = s.config.Save()
 
 	c.JSON(http.StatusOK, models.SuccessResponse(nil))
 }
@@ -965,25 +1058,54 @@ func (s *Server) handleMQTTStatus(c *gin.Context) {
 // handleMQTTConnect 处理MQTT连接请求
 func (s *Server) handleMQTTConnect(c *gin.Context) {
 	var req struct {
-		Server   string `json:"server" binding:"required"`
-		Port     int    `json:"port" binding:"required"`
+		Server   string `json:"server"`
+		Port     int    `json:"port"`
 		Username string `json:"username"`
 		Password string `json:"password"`
-		ClientID string `json:"client_id" binding:"required"`
+		ClientID string `json:"client_id"`
 		TLS      bool   `json:"tls"`
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, models.ErrorResponse(400, "参数错误: "+err.Error()))
+		// 允许空请求体，使用已有配置或默认配置
+	}
+
+	// 合并配置：请求未提供的字段则沿用已有配置（实现“内置默认服务”一键连接）
+	if strings.TrimSpace(req.Server) == "" {
+		req.Server = s.config.MQTT.Server
+	}
+	if req.Port <= 0 {
+		if s.config.MQTT.Port > 0 {
+			req.Port = s.config.MQTT.Port
+		} else {
+			req.Port = 1883
+		}
+	}
+	if strings.TrimSpace(req.Username) == "" {
+		req.Username = s.config.MQTT.Username
+	}
+	if strings.TrimSpace(req.Password) == "" {
+		req.Password = s.config.MQTT.Password
+	}
+	if strings.TrimSpace(req.ClientID) == "" {
+		if cid := strings.TrimSpace(s.config.MQTT.ClientID); cid != "" {
+			req.ClientID = cid
+		} else {
+			req.ClientID = strings.TrimSpace(s.config.Device.ID)
+		}
+	}
+
+	if strings.TrimSpace(req.Server) == "" || strings.TrimSpace(req.ClientID) == "" {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse(400, "请先配置 MQTT server/client_id"))
 		return
 	}
 
 	// 更新配置
-	s.config.MQTT.Server = req.Server
+	s.config.MQTT.Server = strings.TrimSpace(req.Server)
 	s.config.MQTT.Port = req.Port
-	s.config.MQTT.Username = req.Username
+	s.config.MQTT.Username = strings.TrimSpace(req.Username)
 	s.config.MQTT.Password = req.Password
-	s.config.MQTT.ClientID = req.ClientID
+	s.config.MQTT.ClientID = strings.TrimSpace(req.ClientID)
 	s.config.MQTT.TLS = req.TLS
 
 	if err := s.mqttClient.Connect(); err != nil {
