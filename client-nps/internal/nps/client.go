@@ -258,6 +258,9 @@ func (c *npsClient) GetStatus() (*NPSStatus, error) {
 		out.TrafficOutBytes = st.TrafficOutBytes
 		out.TotalTrafficBytes = st.TotalTrafficBytes
 		out.TotalTrafficHuman = formatBytesIEC(st.TotalTrafficBytes)
+		if len(st.Tunnels) > 0 {
+			out.Tunnels = st.Tunnels
+		}
 	} else if err != nil {
 		out.StatsError = err.Error()
 	}

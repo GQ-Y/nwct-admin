@@ -45,7 +45,30 @@ export const InitWizard: React.FC = () => {
     { title: t('wizard.step_finish'), icon: <Check size={20} /> },
   ];
 
-  const next = () => setCurrentStep(c => Math.min(c + 1, steps.length - 1));
+  const next = async () => {
+    // 网络步骤：先实际下发配置
+    if (currentStep === 1) {
+      setNetError('');
+      try {
+        await api.networkApply(
+          {
+            interface: netStatus?.current_interface || undefined,
+            ip_mode: ipMode,
+            ip: ipMode === 'static' ? staticIP : undefined,
+            netmask: ipMode === 'static' ? staticNetmask : undefined,
+            gateway: ipMode === 'static' ? staticGateway : undefined,
+            dns: ipMode === 'static' ? staticDNS : undefined,
+          },
+          { skipAuth: true }
+        );
+        await refreshNetworkStatus();
+      } catch (e: any) {
+        setNetError(e?.message || '应用网络配置失败');
+        return;
+      }
+    }
+    setCurrentStep((c) => Math.min(c + 1, steps.length - 1));
+  };
   const prev = () => setCurrentStep(c => Math.max(c - 1, 0));
   
   const refreshNetworkStatus = async () => {

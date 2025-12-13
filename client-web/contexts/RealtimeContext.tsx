@@ -8,6 +8,7 @@ type RealtimeState = {
   npsStatus?: any;
   mqttLogNew?: any;
   devicesByIp: Record<string, any>;
+  scanStatus?: any;
 };
 
 const Ctx = createContext<RealtimeState | null>(null);
@@ -22,6 +23,7 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode; enabled: bo
   const [npsStatus, setNpsStatus] = useState<any>(null);
   const [mqttLogNew, setMqttLogNew] = useState<any>(null);
   const [devicesByIp, setDevicesByIp] = useState<Record<string, any>>({});
+  const [scanStatus, setScanStatus] = useState<any>(null);
 
   const wsRef = useRef<WebSocket | null>(null);
   const retryRef = useRef<number | null>(null);
@@ -58,6 +60,7 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode; enabled: bo
       const ws = openWebSocket((msg: RealtimeMessage) => {
       if (msg.type === "hello") {
         setLastHello(msg.data);
+        if (msg.data?.scan_status) setScanStatus(msg.data.scan_status);
         return;
       }
       if (msg.type === "event") {
@@ -70,6 +73,15 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode; enabled: bo
             return;
           case "mqtt_log_new":
             setMqttLogNew(msg.data);
+            return;
+          case "scan_started":
+            setScanStatus((prev: any) => ({ ...(prev || {}), status: "running", progress: 0, ...(msg.data || {}) }));
+            return;
+          case "scan_progress":
+            setScanStatus((msg.data || null) as any);
+            return;
+          case "scan_done":
+            setScanStatus((msg.data || null) as any);
             return;
           case "device_upsert": {
             const ip = msg.data?.ip;
@@ -120,8 +132,8 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode; enabled: bo
   }, [enabled]);
 
   const value = useMemo<RealtimeState>(
-    () => ({ connected, lastHello, systemStatus, npsStatus, mqttLogNew, devicesByIp }),
-    [connected, lastHello, systemStatus, npsStatus, mqttLogNew, devicesByIp]
+    () => ({ connected, lastHello, systemStatus, npsStatus, mqttLogNew, devicesByIp, scanStatus }),
+    [connected, lastHello, systemStatus, npsStatus, mqttLogNew, devicesByIp, scanStatus]
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

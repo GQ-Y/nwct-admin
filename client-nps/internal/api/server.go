@@ -81,6 +81,7 @@ func (s *Server) initRouter() {
 		api.POST("/network/wifi/connect", s.authMiddleware(), s.handleWiFiConnect)
 		api.GET("/network/wifi/scan", s.authMiddleware(), s.handleWiFiScan)
 		api.GET("/network/status", s.authMiddleware(), s.handleNetworkStatus)
+		api.POST("/network/apply", s.authMiddleware(), s.handleNetworkApply)
 
 		// 设备扫描
 		api.GET("/devices", s.authMiddleware(), s.handleDevicesList)

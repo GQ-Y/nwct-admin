@@ -90,6 +90,9 @@ export const api = {
   deviceDetail: (ip: string) => request<any>(`/api/v1/devices/${encodeURIComponent(ip)}`),
   scanStart: () =>
     request<any>("/api/v1/devices/scan/start", { method: "POST", body: "{}" }),
+  scanStop: () =>
+    request<any>("/api/v1/devices/scan/stop", { method: "POST", body: "{}" }),
+  scanStatus: () => request<any>("/api/v1/devices/scan/status"),
 
   npsStatus: () => request<any>("/api/v1/nps/status"),
   npsNpcInstall: (req?: { version?: string; install_dir?: string }) =>
@@ -151,6 +154,16 @@ export const api = {
     opts?: { skipAuth?: boolean }
   ) =>
     request<any>("/api/v1/network/wifi/connect", {
+      method: "POST",
+      body: JSON.stringify(req),
+      skipAuth: Boolean(opts?.skipAuth),
+    }),
+
+  networkApply: (
+    req: { interface?: string; ip_mode: string; ip?: string; netmask?: string; gateway?: string; dns?: string },
+    opts?: { skipAuth?: boolean }
+  ) =>
+    request<any>("/api/v1/network/apply", {
       method: "POST",
       body: JSON.stringify(req),
       skipAuth: Boolean(opts?.skipAuth),

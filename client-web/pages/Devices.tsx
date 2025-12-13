@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Card, Button, SearchInput, Select, Badge, Pagination } from '../components/UI';
+import { Card, Button, SearchInput, Select, Badge, Pagination, ProgressBar, Alert } from '../components/UI';
 import { Device } from '../types';
 import { RefreshCw, Smartphone, Monitor, Server, Camera, Radar } from 'lucide-react';
 import { useLanguage } from '../contexts/LanguageContext';
@@ -17,6 +17,8 @@ export const Devices: React.FC = () => {
   const [isScanning, setIsScanning] = useState(false);
   const [isScanningPorts, setIsScanningPorts] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
+  const [scanStatus, setScanStatus] = useState<any>(null);
+  const [scanError, setScanError] = useState<string>('');
   const itemsPerPage = 10;
 
   const refreshDevices = async () => {
@@ -37,6 +39,40 @@ export const Devices: React.FC = () => {
   useEffect(() => {
     refreshDevices().catch(() => {});
   }, []);
+
+  // 初次进入：拉一次扫描状态（避免刷新后 UI 不知道是否正在扫描）
+  useEffect(() => {
+    api.scanStatus()
+      .then((s) => setScanStatus(s))
+      .catch(() => {});
+  }, []);
+
+  // realtime scan status
+  useEffect(() => {
+    if (!rt.scanStatus) return;
+    setScanStatus(rt.scanStatus);
+  }, [rt.scanStatus]);
+
+  // 兜底：扫描中轮询状态（某些环境 ws 断连时仍能看到进度）
+  useEffect(() => {
+    const st = scanStatus?.status;
+    const running = st === 'running';
+    if (!running) return;
+    const timer = window.setInterval(() => {
+      api.scanStatus()
+        .then((s) => setScanStatus(s))
+        .catch(() => {});
+    }, 2000);
+    return () => window.clearInterval(timer);
+  }, [scanStatus?.status]);
+
+  // 扫描结束：刷新列表（兜底保证 UI 能看到最终设备）
+  useEffect(() => {
+    const st = scanStatus?.status;
+    if (st === 'completed') {
+      refreshDevices().catch(() => {});
+    }
+  }, [scanStatus?.status]);
 
   // realtime upsert/status update: merge into list
   useEffect(() => {
@@ -90,10 +126,11 @@ export const Devices: React.FC = () => {
   };
 
   const handleScan = () => {
-    if (isScanning) return;
+    if (isScanning || scanStatus?.status === 'running') return;
+    setScanError('');
     setIsScanning(true);
     api.scanStart()
-      .then(() => refreshDevices())
+      .then(() => api.scanStatus().then((s) => setScanStatus(s)).catch(() => {}))
       .catch(() => {
         // 扫描重复触发时后端可能返回“扫描已在进行中”，这里无需打断 UI
       })
@@ -190,11 +227,37 @@ export const Devices: React.FC = () => {
               onChange={setFilterType}
             />
          </div>
-         <Button onClick={handleScan} disabled={isScanning}>
+         <Button onClick={handleScan} disabled={isScanning || scanStatus?.status === 'running'}>
            <RefreshCw size={18} className={isScanning ? 'animate-spin' : ''} /> 
-           {isScanning ? t('devices.scanning') : t('devices.scan_network')}
+           {(isScanning || scanStatus?.status === 'running') ? t('devices.scanning') : t('devices.scan_network')}
          </Button>
       </div>
+
+      {scanError ? <Alert type="error">{scanError}</Alert> : null}
+      {scanStatus?.status === 'running' ? (
+        <Card style={{ marginBottom: 16 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+            <div style={{ fontWeight: 600 }}>扫描中</div>
+            <div style={{ color: 'var(--text-secondary)', fontSize: 12 }}>
+              进度 {Number(scanStatus?.progress || 0)}% · 已扫描 {Number(scanStatus?.scanned_count || 0)} · 发现 {Number(scanStatus?.found_count || 0)}
+            </div>
+          </div>
+          <ProgressBar value={Math.max(0, Math.min(100, Number(scanStatus?.progress || 0)))} />
+          <div style={{ marginTop: 12, display: 'flex', justifyContent: 'flex-end' }}>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setScanError('');
+                api.scanStop()
+                  .then(() => api.scanStatus().then((s) => setScanStatus(s)).catch(() => {}))
+                  .catch((e: any) => setScanError(e?.message || '停止扫描失败'));
+              }}
+            >
+              停止扫描
+            </Button>
+          </div>
+        </Card>
+      ) : null}
 
       <Card>
         <table className="table">

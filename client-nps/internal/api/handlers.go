@@ -502,6 +502,63 @@ func (s *Server) handleNetworkStatus(c *gin.Context) {
 	c.JSON(http.StatusOK, models.SuccessResponse(status))
 }
 
+// handleNetworkApply 实际下发 DHCP/静态 IP 配置，并回写到 config
+func (s *Server) handleNetworkApply(c *gin.Context) {
+	var req struct {
+		Interface string `json:"interface"`
+		IPMode    string `json:"ip_mode"` // dhcp/static
+		IP        string `json:"ip"`
+		Netmask   string `json:"netmask"`
+		Gateway   string `json:"gateway"`
+		DNS       string `json:"dns"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse(400, "参数错误: "+err.Error()))
+		return
+	}
+
+	cfg := network.ApplyConfig{
+		Interface: strings.TrimSpace(req.Interface),
+		IPMode:    strings.TrimSpace(req.IPMode),
+		IP:        strings.TrimSpace(req.IP),
+		Netmask:   strings.TrimSpace(req.Netmask),
+		Gateway:   strings.TrimSpace(req.Gateway),
+		DNS:       strings.TrimSpace(req.DNS),
+	}
+
+	if err := s.netManager.ApplyNetworkConfig(cfg); err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse(500, err.Error()))
+		return
+	}
+
+	// 回写配置（即使未初始化也允许提前保存网络配置）
+	if cfg.Interface != "" {
+		s.config.Network.Interface = cfg.Interface
+	}
+	if cfg.IPMode != "" {
+		s.config.Network.IPMode = strings.ToLower(strings.TrimSpace(cfg.IPMode))
+	}
+	if s.config.Network.IPMode == "static" {
+		s.config.Network.IP = cfg.IP
+		s.config.Network.Netmask = cfg.Netmask
+		s.config.Network.Gateway = cfg.Gateway
+		s.config.Network.DNS = cfg.DNS
+	} else {
+		// dhcp：不强制清空静态字段（便于用户来回切换），这里只同步 dns
+		if cfg.DNS != "" {
+			s.config.Network.DNS = cfg.DNS
+		}
+	}
+	_ = s.config.Save()
+
+	// 返回最新网络状态
+	st, _ := s.netManager.GetNetworkStatus()
+	c.JSON(http.StatusOK, models.SuccessResponse(gin.H{
+		"message": "应用成功",
+		"status":  st,
+	}))
+}
+
 // handleDevicesList 处理获取设备列表请求
 func (s *Server) handleDevicesList(c *gin.Context) {
 	devices, err := s.scanner.GetDevices()

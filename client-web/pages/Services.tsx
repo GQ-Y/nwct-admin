@@ -239,7 +239,7 @@ export const NPSPage: React.FC = () => {
             {tunnels.length === 0 ? (
               <tr>
                 <td colSpan={5} style={{ color: '#888', padding: 12 }}>
-                  {connected ? '暂无隧道（当前实现中 npc 隧道列表可能为空）' : '未连接'}
+                  {connected ? '暂无隧道' : '未连接'}
                 </td>
               </tr>
             ) : null}
