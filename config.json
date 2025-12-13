@@ -12,19 +12,11 @@
     "gateway": "",
     "dns": "",
     "wifi": {
-      "ssid": "\u003credacted\u003e",
+      "ssid": "",
       "password": "",
-      "security": "wpa2_personal_mixed"
+      "security": ""
     },
-    "wifi_profiles": [
-      {
-        "ssid": "\u003credacted\u003e",
-        "password": "",
-        "security": "wpa2_personal_mixed",
-        "auto_connect": true,
-        "priority": 10
-      }
-    ]
+    "wifi_profiles": []
   },
   "nps_server": {
     "server": "127.0.0.1:19024",
@@ -55,6 +47,6 @@
     "path": "/Users/hook/Code.localized/Go/nwct/data/devices.db"
   },
   "auth": {
-    "password_hash": "$2a$10$S4pq5.SnChy7VxzBtwHD3.cnp1t1FCtohpKkrw6jRysK0zl36QdvO"
+    "password_hash": "$2a$10$Kb39UK5IqAugvRqiCmhF9unEsEPw5DqLHTx/t5HyXBnNiWyASd/QK"
   }
 }

@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Check, Wifi, Globe, Lock, Server, ArrowLeft, ArrowRight } from 'lucide-react';
 import { Button, Input, Card, Alert, Select } from '../components/UI';
 import { useLanguage } from '../contexts/LanguageContext';
-import { api } from '../lib/api';
+import { api, getToken } from '../lib/api';
 import { useAuth } from '../contexts/AuthContext';
 
 export const InitWizard: React.FC = () => {
@@ -50,6 +50,7 @@ export const InitWizard: React.FC = () => {
     if (currentStep === 1) {
       setNetError('');
       try {
+        const skipAuth = !getToken();
         await api.networkApply(
           {
             interface: netStatus?.current_interface || undefined,
@@ -59,7 +60,7 @@ export const InitWizard: React.FC = () => {
             gateway: ipMode === 'static' ? staticGateway : undefined,
             dns: ipMode === 'static' ? staticDNS : undefined,
           },
-          { skipAuth: true }
+          { skipAuth }
         );
         await refreshNetworkStatus();
       } catch (e: any) {
@@ -75,7 +76,8 @@ export const InitWizard: React.FC = () => {
     setNetError('');
     setNetLoading(true);
     try {
-      const st = await api.networkStatus({ skipAuth: true });
+      const skipAuth = !getToken();
+      const st = await api.networkStatus({ skipAuth });
       setNetStatus(st || null);
     } catch (e: any) {
       setNetError(e?.message || '获取网络状态失败');
@@ -88,7 +90,8 @@ export const InitWizard: React.FC = () => {
     setNetError('');
     setWifiScanning(true);
     try {
-      const res = await api.wifiScan({ allow_redacted: true, skipAuth: true });
+      const skipAuth = !getToken();
+      const res = await api.wifiScan({ allow_redacted: true, skipAuth });
       const list = (res?.networks || []) as any[];
       const normalized = list
         .map((n) => ({
@@ -119,6 +122,7 @@ export const InitWizard: React.FC = () => {
     setWifiConnecting(true);
     try {
       const selected = wifiNetworks.find((n) => n.ssid === ssid);
+      const skipAuth = !getToken();
       await api.wifiConnect(
         {
           ssid,
@@ -126,7 +130,7 @@ export const InitWizard: React.FC = () => {
           security: selected?.security,
           save: true,
         },
-        { skipAuth: true }
+        { skipAuth }
       );
       await refreshNetworkStatus();
       // 连接成功后，刷新一次扫描列表（标记 in_use）

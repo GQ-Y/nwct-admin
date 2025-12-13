@@ -423,9 +423,28 @@ func (nm *networkManager) GetNetworkStatus() (*NetworkStatus, error) {
 		Status: "disconnected",
 	}
 
-	// 查找第一个已连接且有IP的接口
-	for _, iface := range interfaces {
-		if iface.Status == "up" && iface.IP != "" {
+	// 优先使用默认路由的网卡（更符合“当前已连接网络”的直觉，避免 utun/bridge 等虚拟接口干扰）
+	if defDev, gw, err := nm.getDefaultRouteDeviceAndGateway(); err == nil && defDev != "" {
+		for _, iface := range interfaces {
+			if iface.Name == defDev && iface.Status == "up" && iface.IP != "" {
+				status.CurrentInterface = iface.Name
+				status.IP = iface.IP
+				status.Status = "connected"
+				status.Gateway = gw
+				break
+			}
+		}
+	}
+
+	// 兜底：查找第一个已连接且有IP的“物理接口”
+	if status.Status != "connected" {
+		for _, iface := range interfaces {
+			if iface.Status != "up" || iface.IP == "" {
+				continue
+			}
+			if isVirtualInterfaceName(iface.Name) {
+				continue
+			}
 			status.CurrentInterface = iface.Name
 			status.IP = iface.IP
 			status.Status = "connected"
@@ -436,8 +455,10 @@ func (nm *networkManager) GetNetworkStatus() (*NetworkStatus, error) {
 	// 测试网络延迟（ping网关或DNS）
 	if status.Status == "connected" {
 		// 读取默认网关（用于 traceroute 默认目标）
-		if gw, err := nm.getDefaultGateway(); err == nil {
-			status.Gateway = gw
+		if status.Gateway == "" {
+			if gw, err := nm.getDefaultGateway(); err == nil {
+				status.Gateway = gw
+			}
 		}
 
 		// 尝试ping 8.8.8.8测试连通性
@@ -448,6 +469,72 @@ func (nm *networkManager) GetNetworkStatus() (*NetworkStatus, error) {
 	}
 
 	return status, nil
+}
+
+func isVirtualInterfaceName(name string) bool {
+	n := strings.ToLower(strings.TrimSpace(name))
+	if n == "" {
+		return true
+	}
+	// macOS 常见虚拟/系统接口：utun(vpn), bridge(docker), awdl/llw(Apple), lo
+	if strings.HasPrefix(n, "utun") ||
+		strings.HasPrefix(n, "bridge") ||
+		strings.HasPrefix(n, "awdl") ||
+		strings.HasPrefix(n, "llw") ||
+		strings.HasPrefix(n, "lo") ||
+		strings.HasPrefix(n, "gif") ||
+		strings.HasPrefix(n, "stf") ||
+		strings.HasPrefix(n, "vmnet") {
+		return true
+	}
+	return false
+}
+
+func (nm *networkManager) getDefaultRouteDeviceAndGateway() (string, string, error) {
+	switch runtime.GOOS {
+	case "darwin":
+		out, err := nm.runCmd(3*time.Second, "route", "-n", "get", "default")
+		if err != nil {
+			return "", "", err
+		}
+		var gw, dev string
+		for _, line := range strings.Split(out, "\n") {
+			line = strings.TrimSpace(line)
+			if strings.HasPrefix(line, "gateway:") {
+				gw = strings.TrimSpace(strings.TrimPrefix(line, "gateway:"))
+			}
+			if strings.HasPrefix(line, "interface:") {
+				dev = strings.TrimSpace(strings.TrimPrefix(line, "interface:"))
+			}
+		}
+		if dev == "" && gw == "" {
+			return "", "", fmt.Errorf("未找到默认路由信息")
+		}
+		return dev, gw, nil
+	case "linux":
+		out, err := nm.runCmd(3*time.Second, "ip", "route", "show", "default")
+		if err != nil {
+			return "", "", err
+		}
+		// default via 192.168.1.1 dev eth0 ...
+		fields := strings.Fields(out)
+		gw := ""
+		dev := ""
+		for i := 0; i < len(fields)-1; i++ {
+			if fields[i] == "via" {
+				gw = fields[i+1]
+			}
+			if fields[i] == "dev" {
+				dev = fields[i+1]
+			}
+		}
+		if dev == "" && gw == "" {
+			return "", "", fmt.Errorf("未找到默认路由信息")
+		}
+		return dev, gw, nil
+	default:
+		return "", "", fmt.Errorf("不支持的系统: %s", runtime.GOOS)
+	}
 }
 
 func (nm *networkManager) getDefaultGateway() (string, error) {
