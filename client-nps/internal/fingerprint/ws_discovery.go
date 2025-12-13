@@ -35,7 +35,7 @@ func WSDiscoveryProbe(ctx context.Context, timeout time.Duration) (map[string]*W
 	}
 	defer conn.Close()
 
-	// Probe message (minimal)
+	// Probe message (generic): 不指定 Types，尽量让更多设备响应
 	msg := `<?xml version="1.0" encoding="UTF-8"?>
 <e:Envelope xmlns:e="http://www.w3.org/2003/05/soap-envelope"
  xmlns:w="http://schemas.xmlsoap.org/ws/2004/08/addressing"
@@ -48,7 +48,7 @@ func WSDiscoveryProbe(ctx context.Context, timeout time.Duration) (map[string]*W
  </e:Header>
  <e:Body>
   <d:Probe>
-   <d:Types>dn:NetworkVideoTransmitter</d:Types>
+   <d:Types></d:Types>
   </d:Probe>
  </e:Body>
 </e:Envelope>`

@@ -11,6 +11,7 @@ type Device struct {
 	Model     string    `json:"model"`
 	Type      string    `json:"type"`
 	OS        string    `json:"os"`
+	Extra     string    `json:"extra"`
 	Status    string    `json:"status"`
 	FirstSeen time.Time `json:"first_seen"`
 	LastSeen  time.Time `json:"last_seen"`

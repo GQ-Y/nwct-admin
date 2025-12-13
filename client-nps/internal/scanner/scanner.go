@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"net"
 	"nwct/client-nps/internal/database"
@@ -35,6 +36,7 @@ type Device struct {
 	Model     string `json:"model"`
 	Type      string `json:"type"`
 	OS        string `json:"os"`
+	Extra     string `json:"extra"`
 	Status    string `json:"status"`
 	OpenPorts []int  `json:"open_ports"`
 	LastSeen  string `json:"last_seen"`
@@ -220,9 +222,20 @@ func (ds *deviceScanner) performScan(subnet string) {
 
 		// 识别设备
 		device := ds.identifyDevice(arpDevice.IP, arpDevice.MAC)
+		evidence := map[string]any{}
 
 		// SSDP/UPnP 补充信息（名称/厂商/类型）
 		if adv := ssdpMap[arpDevice.IP]; adv != nil {
+			evidence["ssdp"] = map[string]any{
+				"location":     adv.Location,
+				"server":       adv.Server,
+				"usn":          adv.USN,
+				"st":           adv.ST,
+				"friendlyName": adv.FriendlyName,
+				"manufacturer": adv.Manufacturer,
+				"modelName":    adv.ModelName,
+				"deviceType":   adv.DeviceType,
+			}
 			if device.Name == "" {
 				if adv.FriendlyName != "" {
 					device.Name = adv.FriendlyName
@@ -245,6 +258,11 @@ func (ds *deviceScanner) performScan(subnet string) {
 
 		// WS-Discovery / ONVIF 补充信息（摄像头型号/厂商）
 		if w := wsdMap[arpDevice.IP]; w != nil {
+			evidence["wsd"] = map[string]any{
+				"types":  w.Types,
+				"xaddrs": w.XAddrs,
+				"scopes": w.Scopes,
+			}
 			// 从 scopes 简单提取品牌/型号线索（不同厂商 scope 格式差异很大）
 			// 主要依赖 ONVIF GetDeviceInformation
 			for _, x := range w.XAddrs {
@@ -254,6 +272,7 @@ func (ds *deviceScanner) performScan(subnet string) {
 					info, err := fingerprint.ONVIFGetDeviceInformation(ctx, x)
 					cancel()
 					if err == nil && info != nil {
+						evidence["onvif"] = info
 						if device.Vendor == "" || strings.EqualFold(device.Vendor, "unknown") {
 							if info.Manufacturer != "" {
 								device.Vendor = info.Manufacturer
@@ -275,6 +294,9 @@ func (ds *deviceScanner) performScan(subnet string) {
 							device.Model = info.Model
 						}
 						break
+					} else if err != nil {
+						// 记录最后一次错误，便于排查（常见 401 需要认证）
+						evidence["onvif_error"] = err.Error()
 					}
 				}
 			}
@@ -292,6 +314,7 @@ func (ds *deviceScanner) performScan(subnet string) {
 				defer cancel()
 				if portSet[80] {
 					if fp, err := fingerprint.ProbeHTTPFingerprint(ctx, arpDevice.IP+":80", false); err == nil && fp != nil {
+						evidence["http_80"] = fp
 						if device.Model == "" && fp.Title != "" {
 							device.Model = fp.Title
 						}
@@ -304,11 +327,19 @@ func (ds *deviceScanner) performScan(subnet string) {
 				}
 				if device.Model == "" && portSet[443] {
 					if fp, err := fingerprint.ProbeHTTPFingerprint(ctx, arpDevice.IP+":443", true); err == nil && fp != nil {
+						evidence["https_443"] = fp
 						if device.Model == "" && fp.Title != "" {
 							device.Model = fp.Title
 						}
 					}
 				}
+			}
+		}
+
+		extraJSON := ""
+		if len(evidence) > 0 {
+			if b, err := json.Marshal(evidence); err == nil {
+				extraJSON = string(b)
 			}
 		}
 
@@ -321,6 +352,7 @@ func (ds *deviceScanner) performScan(subnet string) {
 			Model:     device.Model,
 			Type:      device.Type,
 			OS:        device.OS,
+			Extra:     extraJSON,
 			Status:    "online",
 			FirstSeen: time.Now(),
 			LastSeen:  time.Now(),
@@ -402,7 +434,8 @@ func (ds *deviceScanner) identifyDevice(ip, mac string) *Device {
 
 // scanPorts 扫描设备端口
 func (ds *deviceScanner) scanPorts(ip string) {
-	commonPorts := []int{22, 23, 80, 443, 3389, 8080, 3306, 5432}
+	// 覆盖常见路由器/NAS/摄像头/NVR Web 端口
+	commonPorts := []int{22, 23, 53, 80, 81, 443, 445, 554, 8000, 8008, 8080, 8081, 8088, 8443, 8888, 8899, 5000, 5001, 3306, 5432, 9100}
 	updated := 0
 
 	for _, port := range commonPorts {
@@ -436,7 +469,7 @@ func (ds *deviceScanner) scanPorts(ip string) {
 
 // scanCommonPorts 扫描常用端口
 func (ds *deviceScanner) scanCommonPorts(ip string) []int {
-	commonPorts := []int{22, 23, 80, 443, 3389, 8080}
+	commonPorts := []int{22, 23, 53, 80, 81, 443, 445, 554, 8000, 8080, 8081, 8443, 8888}
 	openPorts := []int{}
 
 	for _, port := range commonPorts {
@@ -525,6 +558,8 @@ func (ds *deviceScanner) GetDeviceDetail(ip string) (*DeviceDetail, error) {
 			MAC:       dbDevice.MAC,
 			Name:      dbDevice.Name,
 			Vendor:    dbDevice.Vendor,
+			Model:     dbDevice.Model,
+			Extra:     dbDevice.Extra,
 			Type:      dbDevice.Type,
 			OS:        dbDevice.OS,
 			Status:    dbDevice.Status,

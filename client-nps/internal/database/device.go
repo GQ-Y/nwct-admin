@@ -24,15 +24,15 @@ func SaveDevice(db *sql.DB, device *Device) error {
 		// 更新设备
 		_, err = db.Exec(`
 			UPDATE devices 
-			SET mac = ?, name = ?, vendor = ?, model = ?, type = ?, os = ?, status = ?, last_seen = ?, updated_at = ?
+			SET mac = ?, name = ?, vendor = ?, model = ?, type = ?, os = ?, extra = ?, status = ?, last_seen = ?, updated_at = ?
 			WHERE ip = ?
-		`, device.MAC, device.Name, device.Vendor, device.Model, device.Type, device.OS, device.Status, now, now, device.IP)
+		`, device.MAC, device.Name, device.Vendor, device.Model, device.Type, device.OS, device.Extra, device.Status, now, now, device.IP)
 	} else {
 		// 插入新设备
 		_, err = db.Exec(`
-			INSERT INTO devices (ip, mac, name, vendor, model, type, os, status, first_seen, last_seen, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		`, device.IP, device.MAC, device.Name, device.Vendor, device.Model, device.Type, device.OS, device.Status, now, now, now)
+			INSERT INTO devices (ip, mac, name, vendor, model, type, os, extra, status, first_seen, last_seen, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`, device.IP, device.MAC, device.Name, device.Vendor, device.Model, device.Type, device.OS, device.Extra, device.Status, now, now, now)
 	}
 
 	if err != nil {
@@ -87,12 +87,12 @@ func TouchDeviceLastSeen(db *sql.DB, ip string) error {
 func GetDevice(db *sql.DB, ip string) (*Device, error) {
 	device := &Device{}
 	err := db.QueryRow(`
-		SELECT ip, mac, name, vendor, model, type, os, status, first_seen, last_seen
+		SELECT ip, mac, name, vendor, model, type, os, extra, status, first_seen, last_seen
 		FROM devices
 		WHERE ip = ?
 	`, ip).Scan(
 		&device.IP, &device.MAC, &device.Name, &device.Vendor, &device.Model,
-		&device.Type, &device.OS, &device.Status, &device.FirstSeen, &device.LastSeen,
+		&device.Type, &device.OS, &device.Extra, &device.Status, &device.FirstSeen, &device.LastSeen,
 	)
 
 	if err == sql.ErrNoRows {

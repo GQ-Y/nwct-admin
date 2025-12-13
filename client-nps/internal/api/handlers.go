@@ -660,6 +660,7 @@ func (s *Server) handleDeviceDetail(c *gin.Context) {
 		"os":         detail.OS,
 		"status":     detail.Status,
 		"open_ports": portList,
+		"extra":      detail.Extra,
 		"last_seen":  detail.LastSeen,
 		"first_seen": detail.FirstSeen,
 		"history":    detail.History,

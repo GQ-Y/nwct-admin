@@ -14,6 +14,7 @@ export const Devices: React.FC = () => {
   const [filterType, setFilterType] = useState('all');
   const [view, setView] = useState<'list' | 'detail'>('list');
   const [selectedDevice, setSelectedDevice] = useState<Device | null>(null);
+  const [selectedExtra, setSelectedExtra] = useState<any>(null);
   const [isScanning, setIsScanning] = useState(false);
   const [isScanningPorts, setIsScanningPorts] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
@@ -177,6 +178,17 @@ export const Devices: React.FC = () => {
                     <div><label style={{ fontSize: 12, color: '#999' }}>{t('devices.last_seen')}</label><div>{selectedDevice.lastSeen}</div></div>
                     <div><label style={{ fontSize: 12, color: '#999' }}>{t('devices.type')}</label><div style={{ textTransform: 'capitalize' }}>{selectedDevice.type}</div></div>
                  </div>
+                  {selectedExtra ? (
+                    <>
+                      <div style={{ height: 1, background: '#f0f0f0' }} />
+                      <div>
+                        <label style={{ fontSize: 12, color: '#999' }}>识别信息（调试）</label>
+                        <pre style={{ margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontSize: 12, color: '#333' }}>
+                          {JSON.stringify(selectedExtra, null, 2)}
+                        </pre>
+                      </div>
+                    </>
+                  ) : null}
               </div>
            </Card>
            
@@ -286,7 +298,26 @@ export const Devices: React.FC = () => {
                 <td>{d.vendor}</td>
                 <td><Badge status={d.status} text={t(`common.${d.status}`)} /></td>
                 <td>
-                  <Button variant="ghost" style={{ padding: '4px 8px', fontSize: 13 }} onClick={() => { setSelectedDevice(d); setView('detail'); }}>
+                  <Button
+                    variant="ghost"
+                    style={{ padding: '4px 8px', fontSize: 13 }}
+                    onClick={() => {
+                      setSelectedDevice(d);
+                      setSelectedExtra(null);
+                      setView('detail');
+                      // 拉取详情（拿 model/extra/端口信息等）
+                      api.deviceDetail(d.ip)
+                        .then((detail) => {
+                          setSelectedDevice((prev) => (prev ? { ...prev, model: detail?.model || prev.model || '' } : prev));
+                          try {
+                            setSelectedExtra(detail?.extra ? JSON.parse(detail.extra) : null);
+                          } catch {
+                            setSelectedExtra(detail?.extra || null);
+                          }
+                        })
+                        .catch(() => {});
+                    }}
+                  >
                     {t('common.detail')}
                   </Button>
                 </td>
