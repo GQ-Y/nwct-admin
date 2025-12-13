@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Card, Button, Input } from '../components/UI';
 import { Activity, Globe, Zap, Radio, Terminal } from 'lucide-react';
 import { useLanguage } from '../contexts/LanguageContext';
+import { api } from '../lib/api';
 
 const ToolTab: React.FC<{ icon: any, label: string, active: boolean, onClick: () => void }> = ({ icon, label, active, onClick }) => (
   <div 
@@ -42,14 +43,113 @@ export const Tools: React.FC = () => {
   const [activeTab, setActiveTab] = useState('ping');
   const [output, setOutput] = useState<string[]>([]);
   const [target, setTarget] = useState('');
+  const [running, setRunning] = useState(false);
 
-  const runTool = () => {
+  const title = useMemo(() => {
+    return activeTab === 'ping'
+      ? t('tools.ping')
+      : activeTab === 'trace'
+        ? t('tools.traceroute')
+        : activeTab === 'speed'
+          ? t('tools.speedtest')
+          : t('tools.portscan');
+  }, [activeTab, t]);
+
+  const runTool = async () => {
+    const tg = target.trim();
     setOutput([]);
-    setTimeout(() => setOutput(prev => [...prev, 'Starting...']), 100);
-    setTimeout(() => setOutput(prev => [...prev, 'Sending packets...']), 500);
-    setTimeout(() => setOutput(prev => [...prev, 'Reply from 8.8.8.8: bytes=32 time=24ms TTL=118']), 800);
-    setTimeout(() => setOutput(prev => [...prev, 'Reply from 8.8.8.8: bytes=32 time=23ms TTL=118']), 1200);
-    setTimeout(() => setOutput(prev => [...prev, 'Done.']), 1500);
+    setRunning(true);
+    try {
+      if (activeTab === 'ping') {
+        if (!tg) throw new Error('请输入目标 IP 或域名');
+        setOutput(['Starting...', `PING ${tg}`]);
+        const r = await api.toolsPing({ target: tg, count: 4, timeout: 5 });
+        const lines: string[] = [];
+        if (Array.isArray(r?.results)) {
+          for (const p of r.results) {
+            const seq = p?.sequence ?? '-';
+            if (p?.status === 'success') {
+              lines.push(`icmp_seq=${seq} time=${Number(p?.latency || 0).toFixed(1)} ms`);
+            } else {
+              lines.push(`icmp_seq=${seq} timeout`);
+            }
+          }
+        }
+        lines.push(
+          `--- ${r?.target || tg} ping statistics ---`,
+          `${r?.packets_sent ?? 0} packets transmitted, ${r?.packets_received ?? 0} received, ${Number(r?.packet_loss ?? 0).toFixed(1)}% packet loss`,
+          `round-trip min/avg/max = ${Number(r?.min_latency ?? 0).toFixed(1)}/${Number(r?.avg_latency ?? 0).toFixed(1)}/${Number(r?.max_latency ?? 0).toFixed(1)} ms`,
+          'Done.'
+        );
+        setOutput((prev) => [...prev, ...lines]);
+        return;
+      }
+
+      if (activeTab === 'trace') {
+        setOutput(['Starting traceroute...']);
+        const r = await api.toolsTraceroute({ target: tg || undefined, max_hops: 30, timeout: 5 });
+        const lines: string[] = [];
+        const hops = Array.isArray(r?.hops) ? r.hops : [];
+        lines.push(`traceroute to ${r?.target || tg || '(gateway)'}`);
+        for (const h of hops) {
+          const hop = h?.hop ?? '';
+          const ip = h?.ip || '*';
+          const lat = typeof h?.latency === 'number' && h.latency > 0 ? `${h.latency.toFixed(1)} ms` : '';
+          lines.push(`${hop}\t${ip}\t${lat}`.trim());
+        }
+        lines.push('Done.');
+        setOutput(lines);
+        return;
+      }
+
+      if (activeTab === 'speed') {
+        setOutput(['Starting speed test...']);
+        // 用后端 web 模式（更轻量，能测 DNS/TCP/TLS/TTFB）
+        const r = await api.toolsSpeedtest({ mode: 'web', url: tg || 'default', method: 'GET', count: 3, timeout: 8 });
+        const lines: string[] = [];
+        lines.push(`URL: ${r?.url || tg || 'default'}`);
+        if (Array.isArray(r?.attempts)) {
+          r.attempts.forEach((a: any, idx: number) => {
+            if (a?.ok) {
+              lines.push(
+                `#${idx + 1} OK status=${a.status_code} dns=${a.dns_ms}ms conn=${a.connect_ms}ms tls=${a.tls_ms}ms ttfb=${a.ttfb_ms}ms total=${a.total_ms}ms bytes=${a.bytes_read}`
+              );
+            } else {
+              lines.push(`#${idx + 1} FAIL ${a?.error || 'unknown error'}`);
+            }
+          });
+        }
+        if (r?.summary) {
+          lines.push(`summary: ${JSON.stringify(r.summary)}`);
+        }
+        lines.push('Done.');
+        setOutput(lines);
+        return;
+      }
+
+      // port scan
+      if (!tg) throw new Error('请输入目标 IP 或域名');
+      setOutput(['Starting port scan...']);
+      const r = await api.toolsPortscan({ target: tg, ports: '1-1024', timeout: 1, scan_type: 'tcp' });
+      const lines: string[] = [];
+      lines.push(`target: ${r?.target || tg}`);
+      lines.push(`scanned_ports: ${r?.scanned_ports ?? 0}`);
+      const open = Array.isArray(r?.open_ports) ? r.open_ports : [];
+      if (open.length === 0) {
+        lines.push('open_ports: (none)');
+      } else {
+        lines.push('open_ports:');
+        for (const p of open) {
+          lines.push(`- ${p?.port}/${p?.protocol} ${p?.service || ''}`.trim());
+        }
+      }
+      lines.push('Done.');
+      setOutput(lines);
+    } catch (e: any) {
+      setOutput([`Error: ${e?.message || String(e)}`]);
+    } finally {
+      setRunning(false);
+    }
   };
 
   return (
@@ -78,7 +178,7 @@ export const Tools: React.FC = () => {
             title={
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                     <Terminal size={20} color="var(--primary)" />
-                    {activeTab === 'ping' ? t('tools.ping') : activeTab === 'trace' ? t('tools.traceroute') : activeTab === 'speed' ? t('tools.speedtest') : t('tools.portscan')}
+                    {title}
                 </div>
             }
             glass
@@ -90,7 +190,9 @@ export const Tools: React.FC = () => {
                 onChange={e => setTarget(e.target.value)}
                 style={{ flex: 1 }}
              />
-             <Button onClick={runTool} style={{ minWidth: 120 }}>{t('common.start')}</Button>
+             <Button onClick={runTool} disabled={running} style={{ minWidth: 120 }}>
+               {running ? t('common.loading') : t('common.start')}
+             </Button>
            </div>
            
            <div style={{ 

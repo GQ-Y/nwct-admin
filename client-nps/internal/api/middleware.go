@@ -28,6 +28,15 @@ func corsMiddleware() gin.HandlerFunc {
 // authMiddleware JWT认证中间件
 func (s *Server) authMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
+		// 未初始化阶段：允许引导页完成网络相关操作（否则用户无法联网完成初始化）
+		// 仅放开 /api/v1/network/*，其余仍需鉴权。
+		if s != nil && s.config != nil && !s.config.Initialized {
+			if strings.HasPrefix(c.Request.URL.Path, "/api/v1/network/") {
+				c.Next()
+				return
+			}
+		}
+
 		// 从Header获取Token
 		authHeader := c.GetHeader("Authorization")
 		if authHeader == "" {

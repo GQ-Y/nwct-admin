@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
@@ -143,17 +144,78 @@ func DefaultConfig() *Config {
 			Host: "0.0.0.0",
 		},
 		Database: DatabaseConfig{
-			Path: "/var/nwct/devices.db",
+			Path: defaultDBPath(),
 		},
 		Auth: AuthConfig{},
 	}
+}
+
+func findRepoRoot() string {
+	wd, err := os.Getwd()
+	if err != nil || strings.TrimSpace(wd) == "" {
+		return ""
+	}
+	dir := wd
+	for i := 0; i < 10; i++ { // 最多向上找 10 层
+		if isRepoRoot(dir) {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
+	}
+	return ""
+}
+
+func isRepoRoot(dir string) bool {
+	if dir == "" {
+		return false
+	}
+	if st, err := os.Stat(filepath.Join(dir, "client-nps")); err != nil || !st.IsDir() {
+		return false
+	}
+	if st, err := os.Stat(filepath.Join(dir, "client-web")); err != nil || !st.IsDir() {
+		return false
+	}
+	return true
+}
+
+func defaultConfigPath() string {
+	// Linux 设备侧保持 /etc；本地开发（macOS/Windows）默认落到仓库根目录，方便调试/可见
+	if runtime.GOOS == "linux" {
+		return "/etc/nwct/config.json"
+	}
+	if root := findRepoRoot(); root != "" {
+		return filepath.Join(root, "config.json")
+	}
+	// 兜底：当前工作目录
+	if wd, err := os.Getwd(); err == nil && strings.TrimSpace(wd) != "" {
+		return filepath.Join(wd, "config.json")
+	}
+	return filepath.Join(os.TempDir(), "nwct", "config.json")
+}
+
+func defaultDBPath() string {
+	if runtime.GOOS == "linux" {
+		return "/var/nwct/devices.db"
+	}
+	// 默认跟随 repo root 的 data 目录，避免权限问题，也避免污染根目录
+	if root := findRepoRoot(); root != "" {
+		return filepath.Join(root, "data", "devices.db")
+	}
+	if wd, err := os.Getwd(); err == nil && strings.TrimSpace(wd) != "" {
+		return filepath.Join(wd, "data", "devices.db")
+	}
+	return filepath.Join(os.TempDir(), "nwct", "devices.db")
 }
 
 // GetConfigPath 获取配置文件路径
 func GetConfigPath() string {
 	configPath := os.Getenv("NWCT_CONFIG_PATH")
 	if configPath == "" {
-		configPath = "/etc/nwct/config.json"
+		configPath = defaultConfigPath()
 	}
 	return configPath
 }
@@ -224,7 +286,7 @@ func LoadConfig() (*Config, error) {
 	{
 		mqttRaw, _ := raw["mqtt"].(map[string]any)
 		if mqttRaw == nil {
-			if cfg.MQTT.AutoConnect == false {
+			if !cfg.MQTT.AutoConnect {
 				cfg.MQTT.AutoConnect = true
 				changed = true
 			}

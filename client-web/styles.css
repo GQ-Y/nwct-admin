@@ -335,6 +335,8 @@ body {
   color: var(--text-secondary);
   transition: var(--transition-base);
   border: 2px solid transparent;
+  position: relative;
+  z-index: 2;
 }
 .step span {
   font-size: 13px;
@@ -354,11 +356,12 @@ body {
 .step-line {
   position: absolute;
   top: 20px;
-  left: 0;
-  right: 0;
+  /* 只连接两个圆点之间：从当前圆点右边缘到下一圆点左边缘 */
+  left: calc(50% + 20px);
+  width: calc(100% - 40px);
   height: 2px;
   background: #E8E8E8;
-  z-index: 1;
+  z-index: 0;
 }
 
 /* Animations */

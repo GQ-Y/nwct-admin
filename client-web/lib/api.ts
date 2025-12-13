@@ -126,6 +126,52 @@ export const api = {
     const qs = q.toString();
     return request<any>(`/api/v1/mqtt/logs${qs ? `?${qs}` : ""}`);
   },
+
+  networkStatus: (opts?: { skipAuth?: boolean }) =>
+    request<any>("/api/v1/network/status", { skipAuth: Boolean(opts?.skipAuth) }),
+  networkInterfaces: (opts?: { skipAuth?: boolean }) =>
+    request<{ interfaces: any[] }>("/api/v1/network/interfaces", { skipAuth: Boolean(opts?.skipAuth) }),
+  wifiScan: (opts?: { allow_redacted?: boolean; skipAuth?: boolean }) => {
+    const q = new URLSearchParams();
+    if (opts?.allow_redacted) q.set("allow_redacted", "1");
+    const qs = q.toString();
+    return request<{ networks: any[] }>(`/api/v1/network/wifi/scan${qs ? `?${qs}` : ""}`, {
+      skipAuth: Boolean(opts?.skipAuth),
+    });
+  },
+  wifiConnect: (
+    req: {
+      ssid: string;
+      password?: string;
+      security?: string;
+      save?: boolean;
+      auto_connect?: boolean;
+      priority?: number;
+    },
+    opts?: { skipAuth?: boolean }
+  ) =>
+    request<any>("/api/v1/network/wifi/connect", {
+      method: "POST",
+      body: JSON.stringify(req),
+      skipAuth: Boolean(opts?.skipAuth),
+    }),
+
+  toolsPing: (req: { target: string; count?: number; timeout?: number }) =>
+    request<any>("/api/v1/tools/ping", { method: "POST", body: JSON.stringify(req) }),
+  toolsTraceroute: (req: { target?: string; max_hops?: number; timeout?: number }) =>
+    request<any>("/api/v1/tools/traceroute", { method: "POST", body: JSON.stringify(req || {}) }),
+  toolsSpeedtest: (req?: {
+    mode?: "web" | "download";
+    url?: string;
+    method?: "GET" | "HEAD";
+    count?: number;
+    timeout?: number;
+    download_bytes?: number;
+    server?: string;
+    test_type?: string;
+  }) => request<any>("/api/v1/tools/speedtest", { method: "POST", body: JSON.stringify(req || {}) }),
+  toolsPortscan: (req: { target: string; ports?: any; timeout?: number; scan_type?: string }) =>
+    request<any>("/api/v1/tools/portscan", { method: "POST", body: JSON.stringify(req) }),
 };
 
 

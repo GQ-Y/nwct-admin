@@ -30,8 +30,14 @@ type clientListResp struct {
 		ID        int    `json:"Id"`
 		Remark    string `json:"Remark"`
 		VerifyKey string `json:"VerifyKey"`
+		Addr      string `json:"Addr"`
 		IsConnect bool   `json:"IsConnect"`
 		Status    bool   `json:"Status"`
+		Flow      struct {
+			ExportFlow int64 `json:"ExportFlow"`
+			InletFlow  int64 `json:"InletFlow"`
+			FlowLimit  int64 `json:"FlowLimit"`
+		} `json:"Flow"`
 	} `json:"rows"`
 	Total int `json:"total"`
 }

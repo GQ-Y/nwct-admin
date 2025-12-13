@@ -1,0 +1,60 @@
+{
+  "initialized": true,
+  "device": {
+    "id": "device_001",
+    "name": "内网穿透盒子"
+  },
+  "network": {
+    "interface": "en0",
+    "ip_mode": "dhcp",
+    "ip": "",
+    "netmask": "",
+    "gateway": "",
+    "dns": "",
+    "wifi": {
+      "ssid": "\u003credacted\u003e",
+      "password": "",
+      "security": "wpa2_personal_mixed"
+    },
+    "wifi_profiles": [
+      {
+        "ssid": "\u003credacted\u003e",
+        "password": "",
+        "security": "wpa2_personal_mixed",
+        "auto_connect": true,
+        "priority": 10
+      }
+    ]
+  },
+  "nps_server": {
+    "server": "127.0.0.1:19024",
+    "vkey": "v67lvrsi3c7n6w66",
+    "client_id": "nwct-device-001",
+    "npc_path": "/Users/hook/Library/Caches/nwct/bin/npc"
+  },
+  "mqtt": {
+    "server": "mqtt.yingzhu.net",
+    "port": 1883,
+    "username": "nps",
+    "password": "nps",
+    "client_id": "device_001",
+    "tls": false,
+    "auto_connect": true
+  },
+  "scanner": {
+    "auto_scan": true,
+    "scan_interval": 300,
+    "timeout": 30,
+    "concurrency": 10
+  },
+  "server": {
+    "port": 8080,
+    "host": "0.0.0.0"
+  },
+  "database": {
+    "path": "/Users/hook/Code.localized/Go/nwct/data/devices.db"
+  },
+  "auth": {
+    "password_hash": "$2a$10$S4pq5.SnChy7VxzBtwHD3.cnp1t1FCtohpKkrw6jRysK0zl36QdvO"
+  }
+}

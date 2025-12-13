@@ -26,6 +26,29 @@ export const NPSPage: React.FC = () => {
     return s?.server || server || '-';
   }, [rt.npsStatus, status, server]);
 
+  const clientsOnline = useMemo(() => {
+    const s = rt.npsStatus ?? status;
+    const n = Number(s?.clients_online);
+    return Number.isFinite(n) ? n : null;
+  }, [rt.npsStatus, status]);
+
+  const totalTrafficHuman = useMemo(() => {
+    const s = rt.npsStatus ?? status;
+    const human = String(s?.total_traffic_human || '').trim();
+    if (human) return human;
+    const bytes = Number(s?.total_traffic_bytes);
+    if (!Number.isFinite(bytes) || bytes <= 0) return '';
+    // 简单格式化（IEC）
+    const units = ['B', 'K', 'M', 'G', 'T', 'P'];
+    let v = bytes;
+    let i = 0;
+    while (v >= 1024 && i < units.length - 1) {
+      v = v / 1024;
+      i++;
+    }
+    return `${v.toFixed(1)}${units[i]}`;
+  }, [rt.npsStatus, status]);
+
   useEffect(() => {
     refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -174,7 +197,9 @@ export const NPSPage: React.FC = () => {
                  <Card style={{ marginBottom: 0 }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                         <div>
-                            <div style={{ fontSize: 24, fontWeight: 700, color: '#52c41a' }}>12</div>
+                            <div style={{ fontSize: 24, fontWeight: 700, color: '#52c41a' }}>
+                              {connected ? (clientsOnline ?? '-') : '-'}
+                            </div>
                             <div style={{ color: 'var(--text-secondary)', fontSize: 13 }}>{t('services.clients_online') || 'Clients Online'}</div>
                         </div>
                          <Users size={20} color="#52c41a" />
@@ -183,7 +208,9 @@ export const NPSPage: React.FC = () => {
                  <Card style={{ marginBottom: 0 }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                         <div>
-                            <div style={{ fontSize: 24, fontWeight: 700, color: '#faad14' }}>2.4G</div>
+                            <div style={{ fontSize: 24, fontWeight: 700, color: '#faad14' }}>
+                              {connected ? (totalTrafficHuman || '-') : '-'}
+                            </div>
                             <div style={{ color: 'var(--text-secondary)', fontSize: 13 }}>{t('services.total_traffic') || 'Total Traffic'}</div>
                         </div>
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>

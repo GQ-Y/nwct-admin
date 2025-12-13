@@ -1,6 +1,7 @@
 package nps
 
 import (
+	"context"
 	"fmt"
 	"nwct/client-nps/config"
 	"nwct/client-nps/internal/logger"
@@ -8,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
@@ -31,6 +33,14 @@ type NPSStatus struct {
 	Tunnels     []Tunnel `json:"tunnels"`
 	NPCPath     string   `json:"npc_path,omitempty"`
 	LogPath     string   `json:"log_path,omitempty"`
+
+	// NPS Web 统计（来自 /client/list）
+	ClientsOnline     int    `json:"clients_online"`
+	TrafficInBytes    int64  `json:"traffic_in_bytes"`
+	TrafficOutBytes   int64  `json:"traffic_out_bytes"`
+	TotalTrafficBytes int64  `json:"total_traffic_bytes"`
+	TotalTrafficHuman string `json:"total_traffic_human"`
+	StatsError        string `json:"stats_error,omitempty"`
 }
 
 // Tunnel 隧道信息
@@ -197,9 +207,14 @@ func (c *npsClient) IsConnected() bool {
 
 // GetStatus 获取NPS状态
 func (c *npsClient) GetStatus() (*NPSStatus, error) {
+	// 先复制快照，避免持锁做网络请求
 	c.mu.RLock()
-	defer c.mu.RUnlock()
-
+	connected := c.connected
+	server := c.config.Server
+	clientID := c.config.ClientID
+	lastErr := c.lastError
+	npcPath := c.config.NPCPath
+	logPath := c.logPath
 	connectedAt := ""
 	if !c.connectedAt.IsZero() {
 		connectedAt = c.connectedAt.Format(time.RFC3339)
@@ -208,15 +223,44 @@ func (c *npsClient) GetStatus() (*NPSStatus, error) {
 	if c.cmd != nil && c.cmd.Process != nil {
 		pid = c.cmd.Process.Pid
 	}
-	return &NPSStatus{
-		Connected:   c.connected,
-		Server:      c.config.Server,
-		ClientID:    c.config.ClientID,
+	c.mu.RUnlock()
+
+	out := &NPSStatus{
+		Connected:   connected,
+		Server:      server,
+		ClientID:    clientID,
 		ConnectedAt: connectedAt,
 		PID:         pid,
-		LastError:   c.lastError,
+		LastError:   lastErr,
 		Tunnels:     []Tunnel{},
-		NPCPath:     c.config.NPCPath,
-		LogPath:     c.logPath,
-	}, nil
+		NPCPath:     npcPath,
+		LogPath:     logPath,
+	}
+
+	// 统计：优先用于面板展示，不应影响主流程；失败则仅写入 stats_error
+	baseURL := strings.TrimSpace(os.Getenv("NWCT_NPS_WEB_URL"))
+	if baseURL == "" {
+		baseURL = "http://127.0.0.1:19080"
+	}
+	user := strings.TrimSpace(os.Getenv("NWCT_NPS_WEB_USER"))
+	if user == "" {
+		user = "admin"
+	}
+	pass := os.Getenv("NWCT_NPS_WEB_PASS")
+	if strings.TrimSpace(pass) == "" {
+		pass = "123"
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	if st, err := fetchNPSWebStats(ctx, baseURL, user, pass); err == nil && st != nil {
+		out.ClientsOnline = st.ClientsOnline
+		out.TrafficInBytes = st.TrafficInBytes
+		out.TrafficOutBytes = st.TrafficOutBytes
+		out.TotalTrafficBytes = st.TotalTrafficBytes
+		out.TotalTrafficHuman = formatBytesIEC(st.TotalTrafficBytes)
+	} else if err != nil {
+		out.StatsError = err.Error()
+	}
+
+	return out, nil
 }
