@@ -32,6 +32,7 @@ type Device struct {
 	MAC       string `json:"mac"`
 	Name      string `json:"name"`
 	Vendor    string `json:"vendor"`
+	Model     string `json:"model"`
 	Type      string `json:"type"`
 	OS        string `json:"os"`
 	Status    string `json:"status"`
@@ -170,6 +171,17 @@ func (ds *deviceScanner) performScan(subnet string) {
 		}
 	}
 
+	// 0.5 WS-Discovery（ONVIF/Windows 等），用于发现摄像头并拿到 xaddrs
+	wsdMap := map[string]*fingerprint.WSDiscoveryDevice{}
+	{
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		if m, err := fingerprint.WSDiscoveryProbe(ctx, 2*time.Second); err == nil && m != nil {
+			wsdMap = m
+		}
+	}
+	logger.Info("WS-Discovery发现设备数: %d", len(wsdMap))
+
 	// 1. ARP扫描
 	arpDevices, err := ARPScan(subnet, 30*time.Second)
 	if err != nil {
@@ -231,12 +243,82 @@ func (ds *deviceScanner) performScan(subnet string) {
 			}
 		}
 
+		// WS-Discovery / ONVIF 补充信息（摄像头型号/厂商）
+		if w := wsdMap[arpDevice.IP]; w != nil {
+			// 从 scopes 简单提取品牌/型号线索（不同厂商 scope 格式差异很大）
+			// 主要依赖 ONVIF GetDeviceInformation
+			for _, x := range w.XAddrs {
+				// 常见 onvif 设备服务路径包含 /onvif/device_service
+				if strings.Contains(strings.ToLower(x), "onvif") {
+					ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+					info, err := fingerprint.ONVIFGetDeviceInformation(ctx, x)
+					cancel()
+					if err == nil && info != nil {
+						if device.Vendor == "" || strings.EqualFold(device.Vendor, "unknown") {
+							if info.Manufacturer != "" {
+								device.Vendor = info.Manufacturer
+							}
+						}
+						if device.Name == "" && info.Model != "" {
+							device.Name = info.Model
+						}
+						if device.OS == "" || strings.EqualFold(device.OS, "unknown") {
+							// ONVIF 设备通常归类为 camera
+							device.OS = "Embedded"
+						}
+						if device.Type == "" || device.Type == "unknown" || device.Type == "network_device" {
+							device.Type = "camera"
+						}
+						// 把型号写入 Vendor/Name 以外字段（数据库新增 model）
+						// 后续入库时会写入
+						if info.Model != "" {
+							device.Model = info.Model
+						}
+						break
+					}
+				}
+			}
+		}
+
+		// HTTP 指纹补充（路由器/NAS/摄像头 Web 管理页）
+		// 仅当 80/443 端口开放时探测
+		if len(device.OpenPorts) > 0 {
+			portSet := map[int]bool{}
+			for _, p := range device.OpenPorts {
+				portSet[p] = true
+			}
+			if portSet[80] || portSet[443] {
+				ctx, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
+				defer cancel()
+				if portSet[80] {
+					if fp, err := fingerprint.ProbeHTTPFingerprint(ctx, arpDevice.IP+":80", false); err == nil && fp != nil {
+						if device.Model == "" && fp.Title != "" {
+							device.Model = fp.Title
+						}
+						if device.Vendor == "" || strings.EqualFold(device.Vendor, "unknown") {
+							if fp.Server != "" {
+								device.Vendor = fp.Server
+							}
+						}
+					}
+				}
+				if device.Model == "" && portSet[443] {
+					if fp, err := fingerprint.ProbeHTTPFingerprint(ctx, arpDevice.IP+":443", true); err == nil && fp != nil {
+						if device.Model == "" && fp.Title != "" {
+							device.Model = fp.Title
+						}
+					}
+				}
+			}
+		}
+
 		// 保存到数据库
 		dbDevice := &database.Device{
 			IP:        device.IP,
 			MAC:       device.MAC,
 			Name:      device.Name,
 			Vendor:    device.Vendor,
+			Model:     device.Model,
 			Type:      device.Type,
 			OS:        device.OS,
 			Status:    "online",

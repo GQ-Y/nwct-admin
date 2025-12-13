@@ -5,6 +5,7 @@ export interface Device {
   name: string;
   type: 'server' | 'camera' | 'iot' | 'pc' | 'mobile';
   vendor: string;
+  model?: string;
   status: 'online' | 'offline';
   lastSeen: string;
   ports?: number[];

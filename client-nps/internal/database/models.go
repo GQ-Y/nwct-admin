@@ -8,6 +8,7 @@ type Device struct {
 	MAC       string    `json:"mac"`
 	Name      string    `json:"name"`
 	Vendor    string    `json:"vendor"`
+	Model     string    `json:"model"`
 	Type      string    `json:"type"`
 	OS        string    `json:"os"`
 	Status    string    `json:"status"`

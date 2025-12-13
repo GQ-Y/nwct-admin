@@ -61,8 +61,10 @@ func createTables() error {
 		mac TEXT NOT NULL,
 		name TEXT,
 		vendor TEXT,
+		model TEXT,
 		type TEXT,
 		os TEXT,
+		extra TEXT,
 		status TEXT DEFAULT 'offline',
 		first_seen DATETIME DEFAULT CURRENT_TIMESTAMP,
 		last_seen DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -119,6 +121,41 @@ func createTables() error {
 		}
 	}
 
+	// 轻量迁移：旧库补字段
+	if err := ensureColumn("devices", "model", "TEXT"); err != nil {
+		return err
+	}
+	if err := ensureColumn("devices", "extra", "TEXT"); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func ensureColumn(table, col, colType string) error {
+	// 检查是否存在该列
+	rows, err := db.Query(fmt.Sprintf("PRAGMA table_info(%s)", table))
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid int
+		var name, ctype string
+		var notnull int
+		var dflt sql.NullString
+		var pk int
+		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
+			continue
+		}
+		if strings.EqualFold(name, col) {
+			return nil
+		}
+	}
+	_, err = db.Exec(fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", table, col, colType))
+	if err != nil {
+		return fmt.Errorf("迁移失败: %s.%s: %v", table, col, err)
+	}
 	return nil
 }
 

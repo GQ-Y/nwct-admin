@@ -28,6 +28,7 @@ export const Devices: React.FC = () => {
       mac: d.mac,
       name: d.name || d.ip,
       vendor: d.vendor || 'Unknown',
+      model: d.model || '',
       type: (d.type || 'pc') as any,
       status: (d.status || 'offline') as any,
       lastSeen: d.last_seen || '',
@@ -163,7 +164,10 @@ export const Devices: React.FC = () => {
                     <div style={{ padding: 16, background: '#f0f2f5', borderRadius: '50%' }}>{getIcon(selectedDevice.type)}</div>
                     <div>
                       <h3 style={{ margin: 0 }}>{selectedDevice.name}</h3>
-                      <div style={{ color: '#666' }}>{selectedDevice.vendor}</div>
+                      <div style={{ color: '#666' }}>
+                        {selectedDevice.vendor}
+                        {selectedDevice.model ? ` · ${selectedDevice.model}` : ''}
+                      </div>
                     </div>
                  </div>
                  <div style={{ height: 1, background: '#f0f0f0' }} />
