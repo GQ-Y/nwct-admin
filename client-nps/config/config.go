@@ -81,6 +81,8 @@ type MQTTConfig struct {
 	Password string `json:"password"`
 	ClientID string `json:"client_id"`
 	TLS      bool   `json:"tls"`
+	// AutoConnect 是否允许程序启动时自动连接 MQTT（用于“内置默认服务”体验）
+	AutoConnect bool `json:"auto_connect"`
 }
 
 // ScannerConfig 扫描器配置
@@ -127,7 +129,8 @@ func DefaultConfig() *Config {
 			Username: "nps",
 			Password: "nps",
 			// 默认 client_id 与设备 id 保持一致，方便追踪/鉴权
-			ClientID: "device_001",
+			ClientID:    "device_001",
+			AutoConnect: true,
 		},
 		Scanner: ScannerConfig{
 			AutoScan:     true,
@@ -179,6 +182,10 @@ func LoadConfig() (*Config, error) {
 		return nil, err
 	}
 
+	// 用于判断某些字段是否“在原始 JSON 中存在”（兼容旧版本配置）
+	var raw map[string]any
+	_ = json.Unmarshal(data, &raw)
+
 	var cfg Config
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		return nil, err
@@ -212,6 +219,21 @@ func LoadConfig() (*Config, error) {
 			cfg.MQTT.ClientID = "device_001"
 		}
 		changed = true
+	}
+	// MQTT auto_connect：旧配置里字段不存在时默认开启；如果用户显式保存为 false，则尊重用户值
+	{
+		mqttRaw, _ := raw["mqtt"].(map[string]any)
+		if mqttRaw == nil {
+			if cfg.MQTT.AutoConnect == false {
+				cfg.MQTT.AutoConnect = true
+				changed = true
+			}
+		} else {
+			if _, ok := mqttRaw["auto_connect"]; !ok {
+				cfg.MQTT.AutoConnect = true
+				changed = true
+			}
+		}
 	}
 
 	// NPS defaults（server/client_id 可默认，vkey 由用户填写或由“一键连接”自动创建）

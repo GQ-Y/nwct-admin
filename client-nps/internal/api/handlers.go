@@ -1107,11 +1107,13 @@ func (s *Server) handleMQTTConnect(c *gin.Context) {
 	s.config.MQTT.Password = req.Password
 	s.config.MQTT.ClientID = strings.TrimSpace(req.ClientID)
 	s.config.MQTT.TLS = req.TLS
+	s.config.MQTT.AutoConnect = true
 
 	if err := s.mqttClient.Connect(); err != nil {
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse(500, err.Error()))
 		return
 	}
+	_ = s.config.Save()
 
 	c.JSON(http.StatusOK, models.SuccessResponse(nil))
 }
@@ -1122,6 +1124,9 @@ func (s *Server) handleMQTTDisconnect(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse(500, err.Error()))
 		return
 	}
+	// 用户主动断开：关闭自动连接，避免重启/启动逻辑再次自动拉起
+	s.config.MQTT.AutoConnect = false
+	_ = s.config.Save()
 
 	c.JSON(http.StatusOK, models.SuccessResponse(nil))
 }
@@ -1237,6 +1242,7 @@ func (s *Server) handleConfigGet(c *gin.Context) {
 			"username":  s.config.MQTT.Username,
 			"client_id": s.config.MQTT.ClientID,
 			"tls":       s.config.MQTT.TLS,
+			"auto_connect": s.config.MQTT.AutoConnect,
 		},
 		"scanner": s.config.Scanner,
 	}

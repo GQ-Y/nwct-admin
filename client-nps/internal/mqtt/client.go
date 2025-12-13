@@ -130,18 +130,40 @@ func (c *mqttClient) Connect() error {
 
 // Disconnect 断开MQTT连接
 func (c *mqttClient) Disconnect() error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	// 注意：不能在持有 c.mu 写锁时调用 Publish()/IsConnected()，否则会造成死锁（Publish 内部会读锁）。
+	// 因此这里采用：先快照 client/config，再在锁外 best-effort 发布 offline，最后再断开连接并更新状态。
 
+	c.mu.Lock()
 	if !c.connected || c.client == nil {
+		c.mu.Unlock()
 		return nil
 	}
+	client := c.client
+	deviceID := strings.TrimSpace(c.config.ClientID)
+	c.mu.Unlock()
 
-	// 发布离线消息
-	c.publishStatus("offline")
+	// best-effort 发布离线消息（不影响断开流程）
+	if deviceID != "" && client != nil && client.IsConnected() {
+		topic := fmt.Sprintf("nwct/%s/status", deviceID)
+		payload, _ := json.Marshal(map[string]any{
+			"status":    "offline",
+			"timestamp": time.Now().Format(time.RFC3339),
+			"device_id": deviceID,
+		})
+		tk := client.Publish(topic, 1, true, payload)
+		_ = tk.WaitTimeout(3 * time.Second)
+		// 不强行处理 token.Error()：断开要优先完成
+	}
 
-	c.client.Disconnect(250)
+	// 断开连接并更新状态
+	c.mu.Lock()
+	if c.client != nil {
+		c.client.Disconnect(250)
+	}
 	c.connected = false
+	c.client = nil
+	c.mu.Unlock()
+
 	logger.Info("MQTT连接已断开")
 	return nil
 }

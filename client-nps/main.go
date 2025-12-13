@@ -202,19 +202,23 @@ func main() {
 
 	// 如果已初始化，启动服务
 	if cfg.Initialized {
-		// 连接MQTT
-		if err := mqttClient.Connect(); err != nil {
-			logger.Error("MQTT连接失败: %v", err)
+		// 连接MQTT（可通过 mqtt.auto_connect 控制，保证 UI “断开”后不会被启动逻辑自动拉起）
+		if cfg.MQTT.AutoConnect {
+			if err := mqttClient.Connect(); err != nil {
+				logger.Error("MQTT连接失败: %v", err)
+			} else {
+				logger.Info("MQTT连接成功")
+
+				// 设置全局客户端用于命令处理
+				mqtt.SetGlobalClient(mqttClient)
+
+				// 订阅命令主题
+				deviceID := cfg.Device.ID
+				commandTopic := fmt.Sprintf("nwct/%s/command", deviceID)
+				mqttClient.Subscribe(commandTopic, mqtt.HandleCommandMessage)
+			}
 		} else {
-			logger.Info("MQTT连接成功")
-
-			// 设置全局客户端用于命令处理
-			mqtt.SetGlobalClient(mqttClient)
-
-			// 订阅命令主题
-			deviceID := cfg.Device.ID
-			commandTopic := fmt.Sprintf("nwct/%s/command", deviceID)
-			mqttClient.Subscribe(commandTopic, mqtt.HandleCommandMessage)
+			logger.Info("MQTT自动连接已关闭（mqtt.auto_connect=false）")
 		}
 
 		// 连接NPS

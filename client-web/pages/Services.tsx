@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Card, Button, Input, Badge } from '../components/UI';
+import { Card, Button, Input, Badge, Select } from '../components/UI';
 import { Pause, Play, Save, Activity, Users, ArrowUp, ArrowDown, RefreshCw } from 'lucide-react';
 import { useLanguage } from '../contexts/LanguageContext';
 import { api } from '../lib/api';
@@ -229,6 +229,11 @@ export const MQTTPage: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState<any>(null);
   const [logs, setLogs] = useState<any[]>([]);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(50);
+  const [total, setTotal] = useState(0);
+  const [hasNew, setHasNew] = useState(false);
+  const [lastError, setLastError] = useState<string>("");
 
   const [host, setHost] = useState("");
   const [port, setPort] = useState(1883);
@@ -240,6 +245,17 @@ export const MQTTPage: React.FC = () => {
   const [pubPayload, setPubPayload] = useState("");
 
   const connected = !!status?.connected;
+
+  const refreshLogs = async (p: number = page, ps: number = pageSize) => {
+    const d = await api.mqttLogs({ page: p, page_size: ps });
+    const list = Array.isArray(d?.logs) ? d.logs : [];
+    // 兜底：即使后端返回条数不受 page_size 影响，也保证前端按 pageSize 显示
+    setLogs(list.slice(0, ps));
+    setTotal(Number(d?.total || 0));
+    setPage(Number(d?.page || p) || p);
+    setPageSize(Number(d?.page_size || ps) || ps);
+    setHasNew(false);
+  };
 
   useEffect(() => {
     api.mqttStatus()
@@ -257,22 +273,33 @@ export const MQTTPage: React.FC = () => {
         if (!clientId) setClientId(s?.client_id || "");
       })
       .catch(() => {});
-    api.mqttLogs({ page: 1, page_size: 50 })
-      .then((d) => setLogs(d?.logs || []))
-      .catch(() => {});
+    refreshLogs(1, pageSize).catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
     if (!rt.mqttLogNew) return;
-    setLogs((prev) => {
-      const next = [rt.mqttLogNew, ...prev];
-      return next.slice(0, 200);
-    });
+    // 只有第一页才实时 prepend（分页下避免破坏用户翻页阅读）
+    if (page === 1) {
+      setLogs((prev) => {
+        const next = [rt.mqttLogNew, ...prev];
+        return next.slice(0, pageSize);
+      });
+      setTotal((x) => x + 1);
+    } else {
+      setHasNew(true);
+    }
   }, [rt.mqttLogNew]);
+
+  // pageSize 变更时立即截断当前列表，避免“切换条数但列表不变”的感知
+  useEffect(() => {
+    if (page !== 1) return;
+    setLogs((prev) => prev.slice(0, pageSize));
+  }, [page, pageSize]);
 
   const onToggle = async () => {
     setLoading(true);
+    setLastError("");
     try {
       if (connected) {
         await api.mqttDisconnect();
@@ -288,8 +315,12 @@ export const MQTTPage: React.FC = () => {
       }
       const s = await api.mqttStatus();
       setStatus(s);
+      // 连接成功后刷新第一页日志
+      if (!connected) {
+        await refreshLogs(1, pageSize);
+      }
     } catch (e: any) {
-      alert(e?.message || String(e));
+      setLastError(e?.message || String(e));
     } finally {
       setLoading(false);
     }
@@ -297,16 +328,21 @@ export const MQTTPage: React.FC = () => {
 
   const onPublish = async () => {
     setLoading(true);
+    setLastError("");
     try {
       await api.mqttPublish({ topic: pubTopic.trim(), payload: pubPayload });
-      const d = await api.mqttLogs({ page: 1, page_size: 50 });
-      setLogs(d?.logs || []);
+      // 发布后刷新当前页（一般在第一页看到最新）
+      await refreshLogs(page, pageSize);
     } catch (e: any) {
-      alert(e?.message || String(e));
+      setLastError(e?.message || String(e));
     } finally {
       setLoading(false);
     }
   };
+
+  const totalPages = Math.max(1, Math.ceil((total || 0) / (pageSize || 50)));
+  const canPrev = page > 1;
+  const canNext = page < totalPages;
 
   return (
     <div>
@@ -353,6 +389,11 @@ export const MQTTPage: React.FC = () => {
                   )}
                </Button>
             </div>
+            {lastError ? (
+              <div style={{ marginTop: 10, color: "#b91c1c", fontSize: 12 }}>
+                {lastError}
+              </div>
+            ) : null}
          </Card>
          <Card title={t('services.publish')}>
             <div style={{ marginBottom: 16 }}>
@@ -363,13 +404,23 @@ export const MQTTPage: React.FC = () => {
               <label>{t('services.payload')}</label>
               <Input value={pubPayload} onChange={(e) => setPubPayload((e.target as any).value)} placeholder='{"msg":"hello"} 或纯文本' />
             </div>
-            <Button onClick={onPublish} disabled={loading || !pubTopic.trim()}>
+            <Button onClick={onPublish} disabled={loading || !connected || !pubTopic.trim()}>
               {t('services.publish_btn')}
             </Button>
+            {!connected ? (
+              <div style={{ marginTop: 10, color: "#666", fontSize: 12 }}>
+                请先连接 MQTT 后再发布
+              </div>
+            ) : null}
          </Card>
        </div>
 
        <Card title={t('services.live_msgs')}>
+          {hasNew ? (
+            <div style={{ marginBottom: 10, color: "#0A59F7", fontSize: 12 }}>
+              有新消息到达（当前在第 {page} 页）。点击“刷新”查看。
+            </div>
+          ) : null}
           <table className="table">
             <thead><tr><th>{t('services.time')}</th><th>{t('services.dir')}</th><th>{t('services.topic')}</th><th>{t('services.payload')}</th><th>{t('services.qos')}</th></tr></thead>
             <tbody>
@@ -389,6 +440,42 @@ export const MQTTPage: React.FC = () => {
               ) : null}
             </tbody>
           </table>
+
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 12, gap: 12, flexWrap: "wrap" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, color: "#666", fontSize: 12 }}>
+              <span>共 {total} 条</span>
+              <span style={{ fontVariantNumeric: "tabular-nums" }}>页码 {page}/{totalPages}</span>
+              <span>每页</span>
+              <Select
+                width={120}
+                value={String(pageSize)}
+                options={[
+                  { label: "20 条", value: "20" },
+                  { label: "50 条", value: "50" },
+                  { label: "100 条", value: "100" },
+                ]}
+                onChange={(v) => {
+                  const ps = Number(v) || 50;
+                  setPageSize(ps);
+                  setPage(1);
+                  // 立刻更新 UI（即使网络慢也能看到条数变化）
+                  setLogs((prev) => prev.slice(0, ps));
+                  refreshLogs(1, ps).catch(() => {});
+                }}
+              />
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <Button variant="ghost" disabled={loading} onClick={() => refreshLogs(page, pageSize).catch(() => {})}>
+                刷新
+              </Button>
+              <Button variant="outline" disabled={loading || !canPrev} onClick={() => refreshLogs(page - 1, pageSize).catch(() => {})}>
+                上一页
+              </Button>
+              <Button variant="outline" disabled={loading || !canNext} onClick={() => refreshLogs(page + 1, pageSize).catch(() => {})}>
+                下一页
+              </Button>
+            </div>
+          </div>
        </Card>
     </div>
   );
