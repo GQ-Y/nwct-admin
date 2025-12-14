@@ -210,6 +210,25 @@ func GetRecentActivity(db *sql.DB, limit int) ([]DeviceActivity, error) {
 	return out, nil
 }
 
+// ClearAllDeviceData 清空本次扫描前的历史设备数据（设备、端口、历史）
+// 需求：每次扫描都丢弃历史数据，避免 UI 混入旧网段/旧结果
+func ClearAllDeviceData(db *sql.DB) error {
+	if db == nil {
+		return fmt.Errorf("数据库未初始化")
+	}
+	// 顺序：先删子表，再删主表
+	if _, err := db.Exec(`DELETE FROM device_ports`); err != nil {
+		return err
+	}
+	if _, err := db.Exec(`DELETE FROM device_history`); err != nil {
+		return err
+	}
+	if _, err := db.Exec(`DELETE FROM devices`); err != nil {
+		return err
+	}
+	return nil
+}
+
 // SaveDevicePort 保存设备端口
 func SaveDevicePort(db *sql.DB, deviceIP string, port *DevicePort) error {
 	_, err := db.Exec(`

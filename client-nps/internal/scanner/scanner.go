@@ -116,8 +116,14 @@ func (ds *deviceScanner) StartScan(subnet string) error {
 	ds.scanStatus.FoundCount = 0
 	ds.mu.Unlock()
 
+	// 每次扫描前清空旧结果，避免“历史设备”混入当前列表
+	if err := database.ClearAllDeviceData(ds.db); err != nil {
+		logger.Error("清空历史设备数据失败: %v", err)
+	}
+
 	realtime.Default().Broadcast("scan_started", map[string]interface{}{
 		"subnet": subnet,
+		"cleared": true,
 	})
 
 	// 在goroutine中执行扫描

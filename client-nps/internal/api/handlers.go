@@ -613,6 +613,10 @@ func (s *Server) handleDevicesList(c *gin.Context) {
 
 	// 过滤
 	status := c.Query("status")
+	// 默认只显示在线设备（符合“默认只显示在线”的产品预期）
+	if strings.TrimSpace(status) == "" {
+		status = "online"
+	}
 	deviceType := c.Query("type")
 	filtered := []scanner.Device{}
 	for _, d := range devices {

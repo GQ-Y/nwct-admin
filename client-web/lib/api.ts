@@ -89,7 +89,15 @@ export const api = {
   systemRestart: (type: "soft" | "hard" = "soft") =>
     request<any>("/api/v1/system/restart", { method: "POST", body: JSON.stringify({ type }) }),
 
-  devices: () => request<{ devices: any[]; total: number }>("/api/v1/devices"),
+  devices: (params?: { status?: string; type?: string; page?: number; page_size?: number }) => {
+    const q = new URLSearchParams();
+    if (params?.status) q.set("status", params.status);
+    if (params?.type) q.set("type", params.type);
+    if (params?.page) q.set("page", String(params.page));
+    if (params?.page_size) q.set("page_size", String(params.page_size));
+    const qs = q.toString();
+    return request<{ devices: any[]; total: number }>(`/api/v1/devices${qs ? `?${qs}` : ""}`);
+  },
   devicesActivity: (limit: number = 20) =>
     request<{ activities: any[] }>(`/api/v1/devices/activity?limit=${encodeURIComponent(String(limit))}`),
   deviceDetail: (ip: string) => request<any>(`/api/v1/devices/${encodeURIComponent(ip)}`),

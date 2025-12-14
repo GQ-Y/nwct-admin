@@ -11,7 +11,8 @@ export const Devices: React.FC = () => {
   const rt = useRealtime();
   const [devices, setDevices] = useState<Device[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
-  const [filterType, setFilterType] = useState('all');
+  // 默认只显示在线设备
+  const [filterType, setFilterType] = useState('online');
   const [view, setView] = useState<'list' | 'detail'>('list');
   const [selectedDevice, setSelectedDevice] = useState<Device | null>(null);
   const [selectedExtra, setSelectedExtra] = useState<any>(null);
@@ -23,7 +24,9 @@ export const Devices: React.FC = () => {
   const itemsPerPage = 10;
 
   const refreshDevices = async () => {
-    const res = await api.devices();
+    const status = filterType === 'all' ? 'all' : filterType;
+    // 该页面使用前端分页，这里拉一个较大的 page_size 避免只拿到后端默认 20 条
+    const res = await api.devices({ status, page: 1, page_size: 1000 });
     const mapped: Device[] = (res.devices || []).map((d: any) => ({
       ip: d.ip,
       mac: d.mac,
@@ -40,7 +43,8 @@ export const Devices: React.FC = () => {
 
   useEffect(() => {
     refreshDevices().catch(() => {});
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filterType]);
 
   // 初次进入：拉一次扫描状态（避免刷新后 UI 不知道是否正在扫描）
   useEffect(() => {
@@ -76,6 +80,17 @@ export const Devices: React.FC = () => {
     }
   }, [scanStatus?.status]);
 
+  // 扫描开始：清空历史列表（后端已清空 DB，这里同步清空前端状态）
+  useEffect(() => {
+    const st = scanStatus?.status;
+    if (st === 'running') {
+      setDevices([]);
+      setCurrentPage(1);
+      refreshDevices().catch(() => {});
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scanStatus?.status]);
+
   // realtime upsert/status update: merge into list
   useEffect(() => {
     const map = rt.devicesByIp;
@@ -106,8 +121,8 @@ export const Devices: React.FC = () => {
 
   const filtered = devices.filter(d => {
     const matchesSearch = d.name.toLowerCase().includes(searchTerm.toLowerCase()) || d.ip.includes(searchTerm);
-    const matchesType = filterType === 'all' || 
-                        (filterType === 'online' && d.status === 'online') || 
+    const matchesType = filterType === 'all' ||
+                        (filterType === 'online' && d.status === 'online') ||
                         (filterType === 'offline' && d.status === 'offline');
     return matchesSearch && matchesType;
   });
