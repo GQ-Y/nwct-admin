@@ -10,6 +10,7 @@ export const Dashboard: React.FC = () => {
   const { t } = useLanguage();
   const rt = useRealtime();
   const [fallbackInfo, setFallbackInfo] = useState<any>(null);
+  const [fallbackNps, setFallbackNps] = useState<any>(null);
   const sys = rt.systemStatus || fallbackInfo;
   const [activities, setActivities] = useState<any[]>([]);
 
@@ -18,6 +19,27 @@ export const Dashboard: React.FC = () => {
       .then((d) => setFallbackInfo(d))
       .catch(() => {});
   }, []);
+
+  // NPS 状态兜底：避免仅依赖 WS 的 nps_status_changed（无变化时不会推送）
+  useEffect(() => {
+    let stop = false;
+    const load = () =>
+      api
+        .npsStatus()
+        .then((d) => {
+          if (stop) return;
+          setFallbackNps(d);
+        })
+        .catch(() => {});
+    load();
+    const timer = window.setInterval(load, 5000);
+    return () => {
+      stop = true;
+      window.clearInterval(timer);
+    };
+  }, []);
+
+  const nps = rt.npsStatus || fallbackNps;
 
   useEffect(() => {
     let stop = false;
@@ -40,6 +62,7 @@ export const Dashboard: React.FC = () => {
   const mem = useMemo(() => Number(sys?.memory_usage ?? 0), [sys]);
   const disk = useMemo(() => Number(sys?.disk_usage ?? 0), [sys]);
   const netIp = sys?.network?.ip ?? '-';
+  const sshListening = Boolean((sys as any)?.ssh?.listening);
 
   return (
     <div>
@@ -99,7 +122,7 @@ export const Dashboard: React.FC = () => {
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', padding: '12px', background: '#f9f9f9', borderRadius: 4 }}>
               <span>{t('dashboard.nps_client')}</span>
-              <Badge status={rt.npsStatus?.connected ? 'online' : 'offline'} text={rt.npsStatus?.connected ? t('common.connected') : t('common.disconnected')} />
+              <Badge status={nps?.connected ? 'online' : 'offline'} text={nps?.connected ? t('common.connected') : t('common.disconnected')} />
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between', padding: '12px', background: '#f9f9f9', borderRadius: 4 }}>
               <span>{t('dashboard.mqtt_broker')}</span>
@@ -111,7 +134,7 @@ export const Dashboard: React.FC = () => {
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between', padding: '12px', background: '#f9f9f9', borderRadius: 4 }}>
               <span>{t('dashboard.ssh_service')}</span>
-              <Badge status="online" text={t('common.online')} />
+              <Badge status={sshListening ? 'online' : 'offline'} text={sshListening ? t('common.online') : t('common.offline')} />
             </div>
           </div>
         </Card>

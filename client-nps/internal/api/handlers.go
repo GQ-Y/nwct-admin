@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"net"
 	"net/http"
 	"nwct/client-nps/config"
 	"nwct/client-nps/internal/database"
@@ -172,6 +173,11 @@ func (s *Server) handleSystemInfo(c *gin.Context) {
 	}
 
 	hostname, _ := os.Hostname()
+	sshListening := false
+	if conn, err := net.DialTimeout("tcp", "127.0.0.1:22", 200*time.Millisecond); err == nil {
+		sshListening = true
+		_ = conn.Close()
+	}
 
 	info := gin.H{
 		"hostname":         hostname,
@@ -184,6 +190,10 @@ func (s *Server) handleSystemInfo(c *gin.Context) {
 		"cpu_usage":        cpuUsage,
 		"memory_usage":     memoryUsage,
 		"disk_usage":       diskUsage,
+		"ssh": gin.H{
+			"listening": sshListening,
+			"port":      22,
+		},
 		"network": gin.H{
 			"interface": netStatus.CurrentInterface,
 			"ip":        netStatus.IP,

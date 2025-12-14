@@ -61,6 +61,7 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode; enabled: bo
       if (msg.type === "hello") {
         setLastHello(msg.data);
         if (msg.data?.scan_status) setScanStatus(msg.data.scan_status);
+        if (msg.data?.nps_status) setNpsStatus(msg.data.nps_status);
         return;
       }
       if (msg.type === "event") {

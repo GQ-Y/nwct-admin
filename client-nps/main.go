@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -149,6 +150,11 @@ func main() {
 			}
 			netStatus, _ := netManager.GetNetworkStatus()
 			hostname, _ := os.Hostname()
+			sshListening := false
+			if conn, err := net.DialTimeout("tcp", "127.0.0.1:22", 200*time.Millisecond); err == nil {
+				sshListening = true
+				_ = conn.Close()
+			}
 
 			realtime.Default().Broadcast("system_status", map[string]interface{}{
 				"hostname":     hostname,
@@ -158,6 +164,10 @@ func main() {
 				"cpu_usage":    cpuUsage,
 				"memory_usage": memUsage,
 				"disk_usage":   diskUsage,
+				"ssh": map[string]interface{}{
+					"listening": sshListening,
+					"port":      22,
+				},
 				"network": map[string]interface{}{
 					"interface": netStatus.CurrentInterface,
 					"ip":        netStatus.IP,
