@@ -628,6 +628,33 @@ func (s *Server) handleDevicesList(c *gin.Context) {
 	}))
 }
 
+// handleDevicesActivity 最近活动（设备上线/离线历史）
+func (s *Server) handleDevicesActivity(c *gin.Context) {
+	limit := 20
+	if v := strings.TrimSpace(c.Query("limit")); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			limit = n
+		}
+	}
+	list, err := database.GetRecentActivity(s.db, limit)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse(500, err.Error()))
+		return
+	}
+	out := make([]gin.H, 0, len(list))
+	for _, a := range list {
+		out = append(out, gin.H{
+			"timestamp": a.Timestamp.Format(time.RFC3339),
+			"ip":        a.IP,
+			"status":    a.Status,
+			"name":      a.Name,
+			"vendor":    a.Vendor,
+			"model":     a.Model,
+		})
+	}
+	c.JSON(http.StatusOK, models.SuccessResponse(gin.H{"activities": out}))
+}
+
 // handleDeviceDetail 处理获取设备详情请求
 func (s *Server) handleDeviceDetail(c *gin.Context) {
 	ip := c.Param("ip")

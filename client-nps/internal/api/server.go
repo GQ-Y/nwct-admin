@@ -85,6 +85,7 @@ func (s *Server) initRouter() {
 
 		// 设备扫描
 		api.GET("/devices", s.authMiddleware(), s.handleDevicesList)
+		api.GET("/devices/activity", s.authMiddleware(), s.handleDevicesActivity)
 		api.GET("/devices/:ip", s.authMiddleware(), s.handleDeviceDetail)
 		api.POST("/devices/scan/start", s.authMiddleware(), s.handleScanStart)
 		api.POST("/devices/scan/stop", s.authMiddleware(), s.handleScanStop)

@@ -84,9 +84,10 @@ func pingWithSystemCommand(target string, count int, timeout time.Duration) (*Pi
 		if len(m) == 3 {
 			seq, _ := strconv.Atoi(string(m[1]))
 			lat, _ := strconv.ParseFloat(string(m[2]), 64)
-			// mac 的 icmp_seq 从 0 开始；统一映射为 1..count
-			if seq == 0 {
-				seq = 1
+			// mac 的 icmp_seq 从 0 开始（0..count-1）；统一映射为 1..count
+			// 旧逻辑只把 0->1，会导致 seq=1 覆盖 seq=0，从而“固定丢 1 个包”
+			if runtime.GOOS == "darwin" {
+				seq = seq + 1
 			}
 			if seq >= 1 && seq <= count {
 				results[seq] = lat

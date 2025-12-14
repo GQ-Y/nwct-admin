@@ -60,7 +60,8 @@ export const translations = {
       mqtt_broker: 'MQTT Broker',
       web_server: 'Web Server',
       ssh_service: 'SSH Service',
-      device_connected: 'Device {ip} connected to network.'
+      device_connected: 'Device {ip} connected to network.',
+      device_disconnected: 'Device {ip} disconnected.'
     },
     devices: {
       all_types: 'All Types',
@@ -226,7 +227,8 @@ export const translations = {
       mqtt_broker: 'MQTT 代理',
       web_server: 'Web 服务器',
       ssh_service: 'SSH 服务',
-      device_connected: '设备 {ip} 已连接到网络。'
+      device_connected: '设备 {ip} 已连接到网络。',
+      device_disconnected: '设备 {ip} 已离线。'
     },
     devices: {
       all_types: '所有类型',

@@ -11,11 +11,29 @@ export const Dashboard: React.FC = () => {
   const rt = useRealtime();
   const [fallbackInfo, setFallbackInfo] = useState<any>(null);
   const sys = rt.systemStatus || fallbackInfo;
+  const [activities, setActivities] = useState<any[]>([]);
 
   useEffect(() => {
     api.systemInfo()
       .then((d) => setFallbackInfo(d))
       .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    let stop = false;
+    const load = () =>
+      api.devicesActivity(5)
+        .then((d) => {
+          if (stop) return;
+          setActivities(Array.isArray(d?.activities) ? d.activities : []);
+        })
+        .catch(() => {});
+    load();
+    const timer = window.setInterval(load, 8000);
+    return () => {
+      stop = true;
+      window.clearInterval(timer);
+    };
   }, []);
 
   const cpu = useMemo(() => Number(sys?.cpu_usage ?? 0), [sys]);
@@ -100,12 +118,34 @@ export const Dashboard: React.FC = () => {
 
         <Card title={t('dashboard.recent_activity')}>
            <ul style={{ padding: 0, margin: 0, listStyle: 'none' }}>
-             {[1,2,3,4].map(i => (
-               <li key={i} style={{ padding: '12px 0', borderBottom: '1px solid #f0f0f0', display: 'flex', gap: 12 }}>
-                 <div style={{ color: '#8c8c8c', fontSize: 12, minWidth: 60 }}>10:3{i} AM</div>
-                 <div>{t('dashboard.device_connected', { ip: `192.168.1.10${i}` })}</div>
-               </li>
-             ))}
+             {activities.map((a, idx) => {
+               const ts = a?.timestamp ? new Date(a.timestamp) : null;
+               const timeLabel = ts && !Number.isNaN(ts.getTime()) ? ts.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--:--';
+               const ip = a?.ip || '-';
+               const st = String(a?.status || '').toLowerCase();
+               const msg = st === 'online' ? t('dashboard.device_connected', { ip }) : t('dashboard.device_disconnected', { ip });
+               const name = a?.name ? String(a.name) : '';
+               const vendorRaw = a?.vendor ? String(a.vendor) : '';
+               const vendor = vendorRaw && vendorRaw.toLowerCase() !== 'unknown' ? vendorRaw : '';
+               const model = a?.model ? String(a.model) : '';
+               const meta = [name, vendor, model].filter(Boolean).join(' · ');
+               return (
+                 <li key={`${a?.timestamp || idx}-${idx}`} style={{ padding: '12px 0', borderBottom: '1px solid #f0f0f0', display: 'flex', gap: 12 }}>
+                   <div style={{ color: '#8c8c8c', fontSize: 12, minWidth: 70 }}>{timeLabel}</div>
+                   <div style={{ flex: 1 }}>
+                     <div>{msg}</div>
+                     {meta ? (
+                       <div style={{ color: '#8c8c8c', fontSize: 12, marginTop: 4 }}>
+                         {meta}
+                       </div>
+                     ) : null}
+                   </div>
+                 </li>
+               );
+             })}
+             {activities.length === 0 ? (
+               <li style={{ padding: '12px 0', color: '#8c8c8c', fontSize: 13 }}>暂无活动</li>
+             ) : null}
            </ul>
         </Card>
       </div>

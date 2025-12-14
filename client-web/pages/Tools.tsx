@@ -62,7 +62,31 @@ export const Tools: React.FC = () => {
     try {
       if (activeTab === 'ping') {
         if (!tg) throw new Error('请输入目标 IP 或域名');
-        setOutput(['Starting...', `PING ${tg}`]);
+        // 先解析域名到 IP（如果输入本身是 IP，则跳过）
+        let resolved = '';
+        if (!/^(?:\\d{1,3}\\.){3}\\d{1,3}$/.test(tg)) {
+          try {
+            const dns = await api.toolsDNS({ query: tg, type: 'A' });
+            const recs = Array.isArray(dns?.records) ? dns.records : [];
+            // 兼容后端可能返回 string 或对象
+            for (const r of recs) {
+              if (typeof r === 'string' && r.trim()) {
+                resolved = r.trim();
+                break;
+              }
+              if (r && typeof r === 'object') {
+                const v = String((r.value ?? r.data ?? r.ip ?? '') || '').trim();
+                if (v) {
+                  resolved = v;
+                  break;
+                }
+              }
+            }
+          } catch {
+            // 忽略 DNS 失败：仍然可以直接 ping
+          }
+        }
+        setOutput(['Starting...', resolved ? `PING ${tg} (${resolved})` : `PING ${tg}`]);
         const r = await api.toolsPing({ target: tg, count: 4, timeout: 5 });
         const lines: string[] = [];
         if (Array.isArray(r?.results)) {

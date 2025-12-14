@@ -6,6 +6,15 @@ import (
 	"time"
 )
 
+type DeviceActivity struct {
+	Timestamp time.Time `json:"timestamp"`
+	IP        string    `json:"ip"`
+	Status    string    `json:"status"`
+	Name      string    `json:"name"`
+	Vendor    string    `json:"vendor"`
+	Model     string    `json:"model"`
+}
+
 // SaveDevice 保存或更新设备
 func SaveDevice(db *sql.DB, device *Device) error {
 	if db == nil {
@@ -166,6 +175,39 @@ func GetDevices(db *sql.DB, status, deviceType string, limit, offset int) ([]Dev
 	}
 
 	return devices, total, nil
+}
+
+// GetRecentActivity 返回最近的设备上线/离线历史
+func GetRecentActivity(db *sql.DB, limit int) ([]DeviceActivity, error) {
+	if db == nil {
+		return nil, fmt.Errorf("数据库未初始化")
+	}
+	if limit <= 0 {
+		limit = 20
+	}
+	if limit > 200 {
+		limit = 200
+	}
+	rows, err := db.Query(`
+		SELECT h.timestamp, h.status, d.ip, d.name, d.vendor, d.model
+		FROM device_history h
+		JOIN devices d ON d.ip = h.device_ip
+		ORDER BY h.timestamp DESC
+		LIMIT ?
+	`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []DeviceActivity{}
+	for rows.Next() {
+		var a DeviceActivity
+		if err := rows.Scan(&a.Timestamp, &a.Status, &a.IP, &a.Name, &a.Vendor, &a.Model); err != nil {
+			continue
+		}
+		out = append(out, a)
+	}
+	return out, nil
 }
 
 // SaveDevicePort 保存设备端口

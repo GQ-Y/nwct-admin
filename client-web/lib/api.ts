@@ -87,6 +87,8 @@ export const api = {
     request<any>("/api/v1/system/restart", { method: "POST", body: JSON.stringify({ type }) }),
 
   devices: () => request<{ devices: any[]; total: number }>("/api/v1/devices"),
+  devicesActivity: (limit: number = 20) =>
+    request<{ activities: any[] }>(`/api/v1/devices/activity?limit=${encodeURIComponent(String(limit))}`),
   deviceDetail: (ip: string) => request<any>(`/api/v1/devices/${encodeURIComponent(ip)}`),
   scanStart: () =>
     request<any>("/api/v1/devices/scan/start", { method: "POST", body: "{}" }),
@@ -185,6 +187,8 @@ export const api = {
   }) => request<any>("/api/v1/tools/speedtest", { method: "POST", body: JSON.stringify(req || {}) }),
   toolsPortscan: (req: { target: string; ports?: any; timeout?: number; scan_type?: string }) =>
     request<any>("/api/v1/tools/portscan", { method: "POST", body: JSON.stringify(req) }),
+  toolsDNS: (req: { query: string; type?: string; server?: string }) =>
+    request<any>("/api/v1/tools/dns", { method: "POST", body: JSON.stringify(req) }),
 };
 
 
