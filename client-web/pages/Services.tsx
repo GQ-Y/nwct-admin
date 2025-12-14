@@ -15,6 +15,7 @@ export const NPSPage: React.FC = () => {
   const [vkey, setVKey] = useState('');
   const [clientId, setClientId] = useState('');
   const [npcPath, setNpcPath] = useState('');
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
   const connected = useMemo(() => {
     const s = rt.npsStatus ?? status;
@@ -57,6 +58,16 @@ export const NPSPage: React.FC = () => {
   useEffect(() => {
     if (rt.npsStatus) setStatus(rt.npsStatus);
   }, [rt.npsStatus]);
+
+  const copyText = async (key: string, text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedKey(key);
+      window.setTimeout(() => setCopiedKey((k) => (k === key ? null : k)), 1200);
+    } catch {
+      // clipboard 不可用时静默失败
+    }
+  };
 
   const refresh = async () => {
     try {
@@ -172,9 +183,72 @@ export const NPSPage: React.FC = () => {
               </div>
             ) : null}
             {(status?.pid || status?.log_path) ? (
-              <div style={{ marginTop: 10, color: "#666", fontSize: 12 }}>
-                {status?.pid ? <div>pid: {status.pid}</div> : null}
-                {status?.log_path ? <div>npc.log: {status.log_path}</div> : null}
+              <div
+                style={{
+                  marginTop: 12,
+                  background: 'rgba(0,0,0,0.03)',
+                  borderRadius: 12,
+                  padding: 12,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 10,
+                }}
+              >
+                {status?.pid ? (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <div style={{ width: 72, fontSize: 12, color: 'var(--text-secondary)', fontWeight: 600 }}>进程</div>
+                    <div
+                      style={{
+                        flex: 1,
+                        fontFamily: '"SF Mono", Consolas, Monaco, monospace',
+                        fontSize: 12,
+                        color: 'var(--text-primary)',
+                      }}
+                    >
+                      pid {status.pid}
+                    </div>
+                    <button
+                      className="btn btn-ghost"
+                      style={{ height: 32, padding: '0 14px' }}
+                      onClick={() => copyText('nps_pid', String(status.pid))}
+                      title="复制 PID"
+                    >
+                      {copiedKey === 'nps_pid' ? '已复制' : '复制'}
+                    </button>
+                  </div>
+                ) : null}
+
+                {status?.log_path ? (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <div style={{ width: 72, fontSize: 12, color: 'var(--text-secondary)', fontWeight: 600 }}>日志</div>
+                    <div
+                      title={status.log_path}
+                      style={{
+                        flex: 1,
+                        fontFamily: '"SF Mono", Consolas, Monaco, monospace',
+                        fontSize: 12,
+                        color: 'var(--text-primary)',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                        padding: '6px 10px',
+                        borderRadius: 10,
+                        background: 'rgba(255,255,255,0.7)',
+                        border: '1px solid rgba(255,255,255,0.6)',
+                      }}
+                    >
+                      {status.log_path}
+                    </div>
+                    <button
+                      className="btn btn-ghost"
+                      style={{ height: 32, padding: '0 14px' }}
+                      onClick={() => copyText('nps_log', status.log_path)}
+                      title="复制日志路径"
+                    >
+                      {copiedKey === 'nps_log' ? '已复制' : '复制'}
+                    </button>
+                  </div>
+                ) : null}
               </div>
             ) : null}
           </div>

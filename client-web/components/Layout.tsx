@@ -1,8 +1,9 @@
-import React from 'react';
+import React, { useMemo, useState } from 'react';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, Server, Activity, Settings, Box, Globe, Shield, Languages, LogOut } from 'lucide-react';
+import { LayoutDashboard, Server, Activity, Settings, Box, Globe, Shield, Languages, LogOut, KeyRound, X } from 'lucide-react';
 import { useLanguage } from '../contexts/LanguageContext';
 import { useAuth } from '../contexts/AuthContext';
+import { api } from '../lib/api';
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -13,6 +14,13 @@ export const MainLayout: React.FC<LayoutProps> = ({ children }) => {
   const location = useLocation();
   const { t, language, setLanguage } = useLanguage();
   const { logout } = useAuth();
+  const [pwdOpen, setPwdOpen] = useState(false);
+  const [oldPwd, setOldPwd] = useState('');
+  const [newPwd, setNewPwd] = useState('');
+  const [confirmPwd, setConfirmPwd] = useState('');
+  const [pwdLoading, setPwdLoading] = useState(false);
+  const [pwdError, setPwdError] = useState<string | null>(null);
+  const [pwdSuccess, setPwdSuccess] = useState<string | null>(null);
 
   const handleLogout = () => {
     logout();
@@ -33,6 +41,53 @@ export const MainLayout: React.FC<LayoutProps> = ({ children }) => {
 
   const toggleLanguage = () => {
     setLanguage(language === 'en' ? 'zh' : 'en');
+  };
+
+  const canSubmitPwd = useMemo(() => {
+    return Boolean(oldPwd.trim() && newPwd.trim() && confirmPwd.trim() && !pwdLoading);
+  }, [oldPwd, newPwd, confirmPwd, pwdLoading]);
+
+  const openPwdModal = () => {
+    setPwdError(null);
+    setPwdSuccess(null);
+    setOldPwd('');
+    setNewPwd('');
+    setConfirmPwd('');
+    setPwdOpen(true);
+  };
+
+  const submitPwd = async () => {
+    setPwdError(null);
+    setPwdSuccess(null);
+    if (!oldPwd.trim() || !newPwd.trim() || !confirmPwd.trim()) {
+      setPwdError('请完整填写旧密码、新密码与确认密码');
+      return;
+    }
+    if (newPwd !== confirmPwd) {
+      setPwdError('新密码与确认密码不一致');
+      return;
+    }
+    if (newPwd.length < 6) {
+      setPwdError('新密码长度至少 6 位');
+      return;
+    }
+    setPwdLoading(true);
+    try {
+      await api.changePassword({
+        old_password: oldPwd,
+        new_password: newPwd,
+        confirm_password: confirmPwd,
+      });
+      setPwdSuccess('密码修改成功');
+      // 给用户短暂反馈后自动关闭
+      window.setTimeout(() => {
+        setPwdOpen(false);
+      }, 800);
+    } catch (e: any) {
+      setPwdError(e?.message || '密码修改失败');
+    } finally {
+      setPwdLoading(false);
+    }
   };
 
   return (
@@ -77,6 +132,14 @@ export const MainLayout: React.FC<LayoutProps> = ({ children }) => {
                  <div style={{ fontWeight: 600, fontSize: '14px' }}>Admin</div>
                  <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>System Admin</div>
               </div>
+              <button
+                className="btn btn-ghost"
+                style={{ width: 40, height: 40, padding: 0, borderRadius: '50%' }}
+                title="修改密码"
+                onClick={openPwdModal}
+              >
+                <KeyRound size={18} />
+              </button>
            </div>
         </div>
       </aside>
@@ -104,6 +167,68 @@ export const MainLayout: React.FC<LayoutProps> = ({ children }) => {
           {children}
         </div>
       </main>
+
+      {pwdOpen && (
+        <div className="modal-overlay" onMouseDown={() => setPwdOpen(false)}>
+          <div
+            className="card glass modal-panel"
+            onMouseDown={(e) => e.stopPropagation()}
+            style={{ padding: 24 }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+              <div style={{ fontSize: 18, fontWeight: 700 }}>修改密码</div>
+              <button className="btn btn-ghost" style={{ width: 40, height: 40, padding: 0, borderRadius: '50%' }} onClick={() => setPwdOpen(false)} title="关闭">
+                <X size={18} />
+              </button>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <input
+                className="input"
+                type="password"
+                placeholder="旧密码"
+                value={oldPwd}
+                onChange={(e) => setOldPwd(e.target.value)}
+                autoFocus
+              />
+              <input
+                className="input"
+                type="password"
+                placeholder="新密码（至少 6 位）"
+                value={newPwd}
+                onChange={(e) => setNewPwd(e.target.value)}
+              />
+              <input
+                className="input"
+                type="password"
+                placeholder="确认新密码"
+                value={confirmPwd}
+                onChange={(e) => setConfirmPwd(e.target.value)}
+              />
+
+              {pwdError && (
+                <div style={{ color: 'var(--error)', fontSize: 13, fontWeight: 600 }}>
+                  {pwdError}
+                </div>
+              )}
+              {pwdSuccess && (
+                <div style={{ color: 'var(--success)', fontSize: 13, fontWeight: 600 }}>
+                  {pwdSuccess}
+                </div>
+              )}
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 12, marginTop: 8 }}>
+                <button className="btn btn-outline" onClick={() => setPwdOpen(false)} disabled={pwdLoading}>
+                  取消
+                </button>
+                <button className="btn btn-primary" onClick={submitPwd} disabled={!canSubmitPwd}>
+                  {pwdLoading ? '保存中…' : '保存'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

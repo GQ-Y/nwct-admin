@@ -72,6 +72,7 @@ func (s *Server) initRouter() {
 		api.GET("/system/info", s.authMiddleware(), s.handleSystemInfo)
 		api.POST("/system/restart", s.authMiddleware(), s.handleSystemRestart)
 		api.GET("/system/logs", s.authMiddleware(), s.handleSystemLogs)
+		api.POST("/system/logs/clear", s.authMiddleware(), s.handleSystemLogsClear)
 
 		// 网络管理
 		api.GET("/network/interfaces", s.authMiddleware(), s.handleNetworkInterfaces)

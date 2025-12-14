@@ -12,6 +12,7 @@ import (
 	"nwct/client-nps/internal/nps"
 	"nwct/client-nps/internal/scanner"
 	"nwct/client-nps/internal/toolkit"
+	"nwct/client-nps/internal/version"
 	"nwct/client-nps/models"
 	"nwct/client-nps/utils"
 	"os"
@@ -170,9 +171,14 @@ func (s *Server) handleSystemInfo(c *gin.Context) {
 		diskUsage = du.UsedPercent
 	}
 
+	hostname, _ := os.Hostname()
+
 	info := gin.H{
+		"hostname":         hostname,
 		"device_id":        s.config.Device.ID,
-		"firmware_version": "1.0.0",
+		"firmware_version": version.Version,
+		"build_time":       version.BuildTime,
+		"commit":           version.Commit,
 		"uptime":           uptimeSec,
 		"start_time":       startTime,
 		"cpu_usage":        cpuUsage,
@@ -284,6 +290,34 @@ func (s *Server) handleSystemLogs(c *gin.Context) {
 		"page_size": 50,
 		"source":    logPath,
 	}))
+}
+
+// handleSystemLogsClear 清空系统日志（截断日志文件）
+func (s *Server) handleSystemLogsClear(c *gin.Context) {
+	// 推断日志路径：优先 NWCT_LOG_DIR，否则 /var/log/nwct，否则 /tmp/nwct
+	logDir := os.Getenv("NWCT_LOG_DIR")
+	if logDir == "" {
+		logDir = "/var/log/nwct"
+	}
+	logPath := filepath.Join(logDir, "system.log")
+	if _, err := os.Stat(logPath); err != nil {
+		alt := filepath.Join(os.TempDir(), "nwct", "system.log")
+		if _, err2 := os.Stat(alt); err2 == nil {
+			logPath = alt
+		}
+	}
+
+	// 截断文件（不存在则视为已清空）
+	if err := os.Truncate(logPath, 0); err != nil {
+		if os.IsNotExist(err) {
+			c.JSON(http.StatusOK, models.SuccessResponse(gin.H{"cleared": true}))
+			return
+		}
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse(500, "清空日志失败: "+err.Error()))
+		return
+	}
+
+	c.JSON(http.StatusOK, models.SuccessResponse(gin.H{"cleared": true}))
 }
 
 // handleNetworkInterfaces 处理获取网络接口列表请求

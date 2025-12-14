@@ -21,6 +21,7 @@ import (
 	"nwct/client-nps/internal/probe"
 	"nwct/client-nps/internal/realtime"
 	"nwct/client-nps/internal/scanner"
+	"nwct/client-nps/internal/version"
 
 	"github.com/shirou/gopsutil/v3/cpu"
 	"github.com/shirou/gopsutil/v3/disk"
@@ -147,8 +148,11 @@ func main() {
 				memUsage = m.UsedPercent
 			}
 			netStatus, _ := netManager.GetNetworkStatus()
+			hostname, _ := os.Hostname()
 
 			realtime.Default().Broadcast("system_status", map[string]interface{}{
+				"hostname":     hostname,
+				"firmware_version": version.Version,
 				"device_id":    cfg.Device.ID,
 				"uptime":       uptimeSec,
 				"cpu_usage":    cpuUsage,

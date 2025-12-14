@@ -13,10 +13,13 @@ export const System: React.FC = () => {
   const [lines, setLines] = useState(200);
   const [logs, setLogs] = useState<string[]>([]);
   const [source, setSource] = useState<string>("");
+  const [fallbackInfo, setFallbackInfo] = useState<any>(null);
 
-  const sys = rt.systemStatus;
+  const sys = rt.systemStatus || fallbackInfo;
   const ip = sys?.network?.ip ?? "-";
   const uptimeSec = Number(sys?.uptime ?? 0);
+  const hostname = String(sys?.hostname || "").trim() || "-";
+  const firmware = String(sys?.firmware_version || "").trim() || "-";
   const uptimeText = useMemo(() => {
     if (!uptimeSec) return "-";
     const d = Math.floor(uptimeSec / 86400);
@@ -46,9 +49,47 @@ export const System: React.FC = () => {
     }
   };
 
+  const exportLogs = () => {
+    const ts = new Date();
+    const pad = (n: number) => String(n).padStart(2, "0");
+    const name = `system-${ts.getFullYear()}${pad(ts.getMonth() + 1)}${pad(ts.getDate())}-${pad(ts.getHours())}${pad(ts.getMinutes())}${pad(ts.getSeconds())}.log`;
+    const header = source ? `# source: ${source}\n` : "";
+    const content = header + logs.join("\n") + "\n";
+    const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  };
+
+  const clearLogs = async () => {
+    if (!confirm("确认清空系统日志？")) return;
+    setLoading(true);
+    try {
+      await api.systemLogsClear();
+      setLogs([]);
+      await refreshLogs();
+    } catch (e: any) {
+      alert(e?.message || String(e));
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
     refreshLogs();
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // System Info 兜底：WS 未连接时也能显示真实数据
+  useEffect(() => {
+    api.systemInfo()
+      .then((d) => setFallbackInfo(d))
+      .catch(() => {});
   }, []);
 
   const reboot = async () => {
@@ -70,11 +111,11 @@ export const System: React.FC = () => {
             <div className="table" style={{ display: 'table' }}>
             <div style={{ display: 'table-row' }}>
                 <div style={{ display: 'table-cell', padding: '12px 8px', color: '#666', borderBottom: '1px solid #f0f0f0' }}>{t('system.hostname')}</div>
-                <div style={{ display: 'table-cell', padding: '12px 8px', fontWeight: 500, borderBottom: '1px solid #f0f0f0', textAlign: 'right' }}>netadmin-gw-01</div>
+                <div style={{ display: 'table-cell', padding: '12px 8px', fontWeight: 500, borderBottom: '1px solid #f0f0f0', textAlign: 'right' }}>{hostname}</div>
             </div>
             <div style={{ display: 'table-row' }}>
                 <div style={{ display: 'table-cell', padding: '12px 8px', color: '#666', borderBottom: '1px solid #f0f0f0' }}>{t('system.firmware')}</div>
-                <div style={{ display: 'table-cell', padding: '12px 8px', fontWeight: 500, borderBottom: '1px solid #f0f0f0', textAlign: 'right' }}>v2.4.1-stable</div>
+                <div style={{ display: 'table-cell', padding: '12px 8px', fontWeight: 500, borderBottom: '1px solid #f0f0f0', textAlign: 'right' }}>{firmware}</div>
             </div>
             <div style={{ display: 'table-row' }}>
                 <div style={{ display: 'table-cell', padding: '12px 8px', color: '#666', borderBottom: '1px solid #f0f0f0' }}>{t('system.uptime')}</div>
@@ -142,8 +183,12 @@ export const System: React.FC = () => {
           {logs.length === 0 ? <div style={{ color: "#888", padding: 12 }}>暂无日志</div> : null}
         </div>
         <div style={{ marginTop: 20, display: 'flex', gap: 12, paddingTop: 16, borderTop: '1px solid #f0f0f0' }}>
-          <Button variant="outline" style={{ flex: 1 }} disabled><Download size={16} /> {t('system.export')}</Button>
-          <Button variant="outline" style={{ flex: 1 }} disabled><Trash2 size={16} /> {t('system.clear')}</Button>
+          <Button variant="outline" style={{ flex: 1 }} onClick={exportLogs} disabled={loading || logs.length === 0}>
+            <Download size={16} /> {t('system.export')}
+          </Button>
+          <Button variant="outline" style={{ flex: 1 }} onClick={clearLogs} disabled={loading}>
+            <Trash2 size={16} /> {t('system.clear')}
+          </Button>
         </div>
       </Card>
     </div>

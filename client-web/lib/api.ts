@@ -71,6 +71,8 @@ export const api = {
       body: JSON.stringify({ username, password }),
       skipAuth: true,
     }),
+  changePassword: (req: { old_password: string; new_password: string; confirm_password: string }) =>
+    request<any>("/api/v1/auth/change-password", { method: "POST", body: JSON.stringify(req) }),
 
   initStatus: () => request<{ initialized: boolean }>("/api/v1/config/init/status"),
   configInit: (adminPassword: string, partial?: any) =>
@@ -83,6 +85,7 @@ export const api = {
   systemInfo: () => request<any>("/api/v1/system/info"),
   systemLogs: (lines: number = 200) =>
     request<any>(`/api/v1/system/logs?lines=${encodeURIComponent(String(lines))}`),
+  systemLogsClear: () => request<any>("/api/v1/system/logs/clear", { method: "POST", body: "{}" }),
   systemRestart: (type: "soft" | "hard" = "soft") =>
     request<any>("/api/v1/system/restart", { method: "POST", body: JSON.stringify({ type }) }),
 
