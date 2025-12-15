@@ -132,7 +132,7 @@ func main() {
 
 	// 系统状态心跳（WebSocket实时推送）
 	go func() {
-		ticker := time.NewTicker(10 * time.Second)
+		ticker := time.NewTicker(30 * time.Second) // 从 10 秒增加到 30 秒，减少内存占用和 CPU 使用
 		defer ticker.Stop()
 		for {
 			uptimeSec, _ := host.Uptime()
@@ -157,13 +157,13 @@ func main() {
 			}
 
 			realtime.Default().Broadcast("system_status", map[string]interface{}{
-				"hostname":     hostname,
+				"hostname":         hostname,
 				"firmware_version": version.Version,
-				"device_id":    cfg.Device.ID,
-				"uptime":       uptimeSec,
-				"cpu_usage":    cpuUsage,
-				"memory_usage": memUsage,
-				"disk_usage":   diskUsage,
+				"device_id":        cfg.Device.ID,
+				"uptime":           uptimeSec,
+				"cpu_usage":        cpuUsage,
+				"memory_usage":     memUsage,
+				"disk_usage":       diskUsage,
 				"ssh": map[string]interface{}{
 					"listening": sshListening,
 					"port":      22,
@@ -200,10 +200,15 @@ func main() {
 	// 初始化HTTP API服务器
 	apiServer := api.NewServer(cfg, db, netManager, npsClient, mqttClient)
 
-	// 创建HTTP服务器
+	// 创建HTTP服务器，设置内存优化参数
 	httpServer := &http.Server{
 		Addr:    fmt.Sprintf(":%d", cfg.Server.Port),
 		Handler: apiServer.Router(),
+		// 限制连接参数以节省内存
+		ReadTimeout:    15 * time.Second,
+		WriteTimeout:   15 * time.Second,
+		IdleTimeout:    60 * time.Second,
+		MaxHeaderBytes: 1 << 12, // 4KB 头部限制（从默认 1MB 降到 4KB）
 	}
 
 	// 启动HTTP服务器

@@ -115,7 +115,7 @@ func arpScanSimple(ipnet *net.IPNet, timeout time.Duration) ([]ARPDevice, error)
 	// 2) 读取系统 ARP 表，回收子网内的 IP/MAC
 
 	// 枚举子网内 IP（/24 通常 254 个）
-	ips := make([]string, 0, 512)
+	ips := make([]string, 0, 256) // 从 512 降到 256，减少预分配内存
 	for ip := ipnet.IP.Mask(ipnet.Mask); ipnet.Contains(ip); inc(ip) {
 		if isNetworkOrBroadcast(ip, ipnet) {
 			continue

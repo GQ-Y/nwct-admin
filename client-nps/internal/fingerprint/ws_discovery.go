@@ -57,7 +57,7 @@ func WSDiscoveryProbe(ctx context.Context, timeout time.Duration) (map[string]*W
 	_, _ = conn.WriteToUDP([]byte(msg), raddr)
 
 	out := map[string]*WSDiscoveryDevice{}
-	buf := make([]byte, 64*1024)
+	buf := make([]byte, 16*1024) // 从 64KB 降到 16KB，节省内存
 	for {
 		select {
 		case <-ctx.Done():

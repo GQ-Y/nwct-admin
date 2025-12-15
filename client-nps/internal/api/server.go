@@ -54,7 +54,8 @@ func (s *Server) Router() *gin.Engine {
 func (s *Server) initRouter() {
 	gin.SetMode(gin.ReleaseMode)
 	s.router = gin.New()
-	s.router.Use(gin.Logger())
+	// 移除 Logger 中间件以节省内存（生产环境通常不需要详细日志）
+	// s.router.Use(gin.Logger())
 	s.router.Use(gin.Recovery())
 
 	// CORS中间件

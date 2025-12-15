@@ -33,9 +33,9 @@ type Hub struct {
 func NewHub() *Hub {
 	h := &Hub{
 		clients:    make(map[*Client]struct{}),
-		register:   make(chan *Client, 64),
-		unregister: make(chan *Client, 64),
-		broadcast:  make(chan []byte, 256),
+		register:   make(chan *Client, 16),   // 从 64 降到 16，节省内存
+		unregister: make(chan *Client, 16),   // 从 64 降到 16
+		broadcast:  make(chan []byte, 32),     // 从 256 降到 32，节省内存
 	}
 	go h.run()
 	return h
@@ -75,7 +75,7 @@ func (h *Hub) run() {
 func (h *Hub) Register(conn *websocket.Conn) *Client {
 	c := &Client{
 		Conn: conn,
-		Send: make(chan []byte, 64),
+		Send: make(chan []byte, 16), // 从 64 降到 16，节省内存
 	}
 	h.register <- c
 	return c

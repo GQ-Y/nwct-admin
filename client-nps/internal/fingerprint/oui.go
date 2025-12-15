@@ -256,9 +256,9 @@ func parseIEEEOUI(r io.Reader) (map[string]string, error) {
 	// FC-D0-8C   (hex)                Huawei Technologies Co.,Ltd
 	// FC D0 8C   (base 16)            Huawei Technologies Co.,Ltd
 	sc := bufio.NewScanner(r)
-	sc.Buffer(make([]byte, 0, 64*1024), 2*1024*1024)
+	sc.Buffer(make([]byte, 0, 16*1024), 256*1024) // 从 64KB/2MB 降到 16KB/256KB，节省内存
 
-	m := make(map[string]string, 64*1024)
+	m := make(map[string]string, 16*1024) // 从 64K 降到 16K，减少预分配
 	reLine := regexp.MustCompile(`(?i)^\s*([0-9A-F]{2})[-\s:]?([0-9A-F]{2})[-\s:]?([0-9A-F]{2})\s+\((hex|base\s+16)\)\s+(.+?)\s*$`)
 
 	for sc.Scan() {

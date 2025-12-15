@@ -68,7 +68,7 @@ func MDNSReverseLookup(ip string, timeout time.Duration) (string, error) {
 		return "", err
 	}
 
-	buf := make([]byte, 2048)
+	buf := make([]byte, 512) // 从 2048 降到 512，mDNS 响应通常很小
 	n, err := conn.Read(buf)
 	if err != nil {
 		return "", err

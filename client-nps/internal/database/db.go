@@ -31,8 +31,8 @@ func InitDB(dbPath string) (*sql.DB, error) {
 		dbPath = fallback
 	}
 
-	// 打开数据库
-	database, err := sql.Open("sqlite3", dbPath+"?_foreign_keys=1")
+	// 打开数据库，设置内存优化参数
+	database, err := sql.Open("sqlite3", dbPath+"?_foreign_keys=1&_journal_mode=WAL&_cache_size=-2000&_synchronous=NORMAL")
 	if err != nil {
 		return nil, err
 	}
@@ -42,6 +42,20 @@ func InitDB(dbPath string) (*sql.DB, error) {
 	// 测试连接
 	if err := db.Ping(); err != nil {
 		return nil, err
+	}
+
+	// 设置 SQLite 内存优化参数（减少缓存占用）
+	// _cache_size=-2000 表示 2MB 缓存（默认是 -2000KB，即约 2MB）
+	// _journal_mode=WAL 使用 WAL 模式，性能更好且内存占用更可控
+	// _synchronous=NORMAL 平衡性能和安全性
+	if _, err := db.Exec("PRAGMA cache_size = -2000"); err != nil {
+		// 忽略错误，继续执行
+	}
+	if _, err := db.Exec("PRAGMA journal_mode = WAL"); err != nil {
+		// 忽略错误，继续执行
+	}
+	if _, err := db.Exec("PRAGMA synchronous = NORMAL"); err != nil {
+		// 忽略错误，继续执行
 	}
 
 	// 创建表

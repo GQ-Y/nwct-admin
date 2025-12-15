@@ -61,7 +61,7 @@ func SSDPDiscover(ctx context.Context, timeout time.Duration) (map[string]*SSDPD
 
 	// 收集响应
 	out := map[string]*SSDPDevice{}
-	buf := make([]byte, 64*1024)
+	buf := make([]byte, 16*1024) // 从 64KB 降到 16KB，SSDP 响应通常很小
 	for {
 		if ctx.Err() != nil {
 			break
@@ -94,7 +94,7 @@ func SSDPDiscover(ctx context.Context, timeout time.Duration) (map[string]*SSDPD
 
 	// 拉取 XML 描述（尽量不阻塞太久：并发少量抓取）
 	cli := &http.Client{Timeout: 4 * time.Second}
-	sem := make(chan struct{}, 4)
+	sem := make(chan struct{}, 2) // 从 4 降到 2，减少并发连接数，节省内存
 	var wg sync.WaitGroup
 	for _, dev := range out {
 		if ctx.Err() != nil {
