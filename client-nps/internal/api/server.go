@@ -2,11 +2,17 @@ package api
 
 import (
 	"database/sql"
+	"io/fs"
+	"net/http"
 	"nwct/client-nps/config"
 	"nwct/client-nps/internal/mqtt"
 	"nwct/client-nps/internal/network"
 	"nwct/client-nps/internal/nps"
 	"nwct/client-nps/internal/scanner"
+	"nwct/client-nps/internal/webui"
+	"nwct/client-nps/models"
+	"path"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 )
@@ -60,6 +66,15 @@ func (s *Server) initRouter() {
 
 	// CORS中间件
 	s.router.Use(corsMiddleware())
+
+	// Web UI（embed 静态文件 + SPA 回退）
+	distFS := webui.DistFS()
+	fileServer := http.FileServer(http.FS(distFS))
+	serveFromDist := func(c *gin.Context, urlPath string) {
+		r := c.Request.Clone(c.Request.Context())
+		r.URL.Path = urlPath
+		fileServer.ServeHTTP(c.Writer, r)
+	}
 
 	// API路由组
 	api := s.router.Group("/api/v1")
@@ -125,5 +140,47 @@ func (s *Server) initRouter() {
 
 	// WebSocket路由
 	s.router.GET("/ws", s.handleWebSocket)
-}
 
+	// 未命中路由：静态资源优先，其次 SPA 回退到 index.html
+	s.router.NoRoute(func(c *gin.Context) {
+		// API 未命中：返回 JSON 404，避免被前端 index.html “吞掉”
+		if strings.HasPrefix(c.Request.URL.Path, "/api/") {
+			c.JSON(http.StatusNotFound, models.ErrorResponse(404, "not found"))
+			return
+		}
+		// WS 未命中：也返回 404
+		if strings.HasPrefix(c.Request.URL.Path, "/ws") {
+			c.JSON(http.StatusNotFound, models.ErrorResponse(404, "not found"))
+			return
+		}
+
+		// 仅对 GET/HEAD 提供静态页面回退，其它方法保持 404
+		if c.Request.Method != http.MethodGet && c.Request.Method != http.MethodHead {
+			c.JSON(http.StatusNotFound, models.ErrorResponse(404, "not found"))
+			return
+		}
+
+		reqPath := c.Request.URL.Path
+		clean := path.Clean("/" + strings.TrimPrefix(reqPath, "/"))
+		if clean == "/" {
+			// 直接用目录方式交给 http.FileServer 处理 index.html，
+			// 避免触发它对 /index.html 的“重定向到 ./”规范化逻辑导致循环跳转。
+			serveFromDist(c, "/")
+			return
+		}
+
+		rel := strings.TrimPrefix(clean, "/")
+		if st, err := fs.Stat(distFS, rel); err == nil && st != nil && !st.IsDir() {
+			serveFromDist(c, clean)
+			return
+		}
+		// 目录路径：尝试 /dir/index.html（兼容部分静态资源布局）
+		if st, err := fs.Stat(distFS, path.Join(rel, "index.html")); err == nil && st != nil && !st.IsDir() {
+			serveFromDist(c, path.Join(clean, "index.html"))
+			return
+		}
+
+		// SPA 回退
+		serveFromDist(c, "/")
+	})
+}

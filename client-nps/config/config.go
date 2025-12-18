@@ -140,7 +140,7 @@ func DefaultConfig() *Config {
 			Concurrency:  5, // 从 10 降到 5，减少并发连接数，节省内存
 		},
 		Server: ServerConfig{
-			Port: 8080,
+			Port: 80,
 			Host: "0.0.0.0",
 		},
 		Database: DatabaseConfig{

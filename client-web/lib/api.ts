@@ -11,11 +11,11 @@ function getApiBase(): string {
 
   // Vite dev 环境：无论端口是多少，都默认把 API 指向后端（避免误打到前端 origin 导致 404）
   const isDev = Boolean((import.meta as any).env?.DEV);
-  if (isDev) return "http://localhost:8080";
+  if (isDev) return "http://localhost:80";
 
   // 生产环境同域部署（例如 Nginx 反代到 /api/v1），则直接用当前 origin
   if (typeof window !== "undefined") return window.location.origin;
-  return "http://localhost:8080";
+  return "http://localhost:80";
 }
 
 export const API_BASE = getApiBase();
