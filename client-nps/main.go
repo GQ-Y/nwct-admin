@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"log"
 	"net"
@@ -15,10 +16,10 @@ import (
 	"nwct/client-nps/config"
 	"nwct/client-nps/internal/api"
 	"nwct/client-nps/internal/database"
+	"nwct/client-nps/internal/frp"
 	"nwct/client-nps/internal/logger"
 	"nwct/client-nps/internal/mqtt"
 	"nwct/client-nps/internal/network"
-	"nwct/client-nps/internal/nps"
 	"nwct/client-nps/internal/probe"
 	"nwct/client-nps/internal/realtime"
 	"nwct/client-nps/internal/scanner"
@@ -29,6 +30,48 @@ import (
 	"github.com/shirou/gopsutil/v3/host"
 	"github.com/shirou/gopsutil/v3/mem"
 )
+
+// autoCreateTunnelsForOnlineDevices 为在线设备自动创建隧道
+func autoCreateTunnelsForOnlineDevices(db *sql.DB, frpClient frp.Client) {
+	// 等待一下，确保 frpc 已完全启动
+	time.Sleep(2 * time.Second)
+
+	// 查询所有在线设备
+	devices, _, err := database.GetDevices(db, "online", "", 1000, 0)
+	if err != nil {
+		logger.Error("查询在线设备失败: %v", err)
+		return
+	}
+
+	logger.Info("开始为 %d 个在线设备创建自动穿透隧道", len(devices))
+
+	for _, device := range devices {
+		// 获取设备的开放端口
+		ports, err := database.GetDevicePorts(db, device.IP)
+		if err != nil {
+			logger.Error("获取设备端口失败: ip=%s err=%v", device.IP, err)
+			continue
+		}
+
+		// 为每个端口创建隧道
+		for _, port := range ports {
+			if port.Status != "open" {
+				continue
+			}
+
+			tunnelName := frp.GenerateTunnelName(device.IP, port.Port)
+			tunnel := frp.NewTunnel(tunnelName, "tcp", device.IP, port.Port, 0)
+
+			if err := frpClient.AddTunnel(tunnel); err != nil {
+				logger.Error("创建隧道失败: name=%s err=%v", tunnelName, err)
+			} else {
+				logger.Info("自动创建隧道: %s -> %s:%d", tunnelName, device.IP, port.Port)
+			}
+		}
+	}
+
+	logger.Info("自动穿透隧道创建完成")
+}
 
 func autoConnectWiFi(cfg *config.Config, netManager network.Manager) {
 	// 没有 profiles 就跳过
@@ -187,8 +230,10 @@ func main() {
 		Timeout:  1 * time.Second,
 	})
 
-	// 初始化NPS客户端
-	npsClient := nps.NewClient(&cfg.NPSServer)
+	// 初始化FRP客户端
+	frpClient := frp.NewClient(&cfg.FRPServer)
+	// 设置全局客户端（用于自动穿透）
+	frp.SetGlobalClient(frpClient)
 
 	// 初始化MQTT客户端
 	mqttClient := mqtt.NewClient(&cfg.MQTT)
@@ -198,7 +243,7 @@ func main() {
 	mqtt.SetGlobalScanner(scanner.NewScanner(db))
 
 	// 初始化HTTP API服务器
-	apiServer := api.NewServer(cfg, db, netManager, npsClient, mqttClient)
+	apiServer := api.NewServer(cfg, db, netManager, frpClient, mqttClient)
 
 	// 创建HTTP服务器，设置内存优化参数
 	httpServer := &http.Server{
@@ -240,11 +285,13 @@ func main() {
 			logger.Info("MQTT自动连接已关闭（mqtt.auto_connect=false）")
 		}
 
-		// 连接NPS
-		if err := npsClient.Connect(); err != nil {
-			logger.Error("NPS连接失败: %v", err)
+		// 连接FRP并自动穿透在线服务
+		if err := frpClient.Connect(); err != nil {
+			logger.Error("FRP连接失败: %v", err)
 		} else {
-			logger.Info("NPS连接成功")
+			logger.Info("FRP连接成功")
+			// 自动穿透：查询数据库中的在线设备和端口，创建隧道
+			go autoCreateTunnelsForOnlineDevices(db, frpClient)
 		}
 	}
 
@@ -260,9 +307,9 @@ func main() {
 		mqttClient.Disconnect()
 	}
 
-	// 关闭NPS连接
-	if npsClient.IsConnected() {
-		npsClient.Disconnect()
+	// 关闭FRP连接
+	if frpClient.IsConnected() {
+		frpClient.Disconnect()
 	}
 
 	// 关闭HTTP服务器

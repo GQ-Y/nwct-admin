@@ -31,7 +31,7 @@ export const MainLayout: React.FC<LayoutProps> = ({ children }) => {
     { path: '/dashboard', label: t('nav.dashboard'), icon: <LayoutDashboard size={20} /> },
     { path: '/devices', label: t('nav.devices'), icon: <Server size={20} /> },
     { path: '/tools', label: t('nav.tools'), icon: <Activity size={20} /> },
-    { path: '/nps', label: t('nav.nps'), icon: <Globe size={20} /> },
+    { path: '/frp', label: 'FRP 服务', icon: <Globe size={20} /> },
     { path: '/mqtt', label: t('nav.mqtt'), icon: <Box size={20} /> },
     { path: '/system', label: t('nav.system'), icon: <Settings size={20} /> },
   ];

@@ -8,7 +8,7 @@ import { Dashboard } from './pages/Dashboard';
 import { Devices } from './pages/Devices';
 import { Tools } from './pages/Tools';
 import { System } from './pages/System';
-import { NPSPage, MQTTPage } from './pages/Services';
+import { FRPPage, MQTTPage } from './pages/Services';
 import { LanguageProvider } from './contexts/LanguageContext';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { RealtimeProvider } from './contexts/RealtimeContext';
@@ -43,7 +43,7 @@ export const App: React.FC = () => {
               <Route path="/devices" element={<Devices />} />
               <Route path="/tools" element={<Tools />} />
               <Route path="/system" element={<System />} />
-              <Route path="/nps" element={<NPSPage />} />
+              <Route path="/frp" element={<FRPPage />} />
               <Route path="/mqtt" element={<MQTTPage />} />
             </Route>
           </Routes>

@@ -5,50 +5,26 @@ import { useLanguage } from '../contexts/LanguageContext';
 import { api } from '../lib/api';
 import { useRealtime } from '../contexts/RealtimeContext';
 
-export const NPSPage: React.FC = () => {
+export const FRPPage: React.FC = () => {
   const { t } = useLanguage();
   const rt = useRealtime();
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState<any>(null);
   const [tunnels, setTunnels] = useState<any[]>([]);
   const [server, setServer] = useState('');
-  const [vkey, setVKey] = useState('');
-  const [clientId, setClientId] = useState('');
-  const [npcPath, setNpcPath] = useState('');
+  const [token, setToken] = useState('');
+  const [frcPath, setFrcPath] = useState('');
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
   const connected = useMemo(() => {
-    const s = rt.npsStatus ?? status;
+    const s = rt.frpStatus ?? status;
     return !!s?.connected;
-  }, [rt.npsStatus, status]);
+  }, [rt.frpStatus, status]);
 
   const serverLabel = useMemo(() => {
-    const s = rt.npsStatus ?? status;
+    const s = rt.frpStatus ?? status;
     return s?.server || server || '-';
-  }, [rt.npsStatus, status, server]);
-
-  const clientsOnline = useMemo(() => {
-    const s = rt.npsStatus ?? status;
-    const n = Number(s?.clients_online);
-    return Number.isFinite(n) ? n : null;
-  }, [rt.npsStatus, status]);
-
-  const totalTrafficHuman = useMemo(() => {
-    const s = rt.npsStatus ?? status;
-    const human = String(s?.total_traffic_human || '').trim();
-    if (human) return human;
-    const bytes = Number(s?.total_traffic_bytes);
-    if (!Number.isFinite(bytes) || bytes <= 0) return '';
-    // 简单格式化（IEC）
-    const units = ['B', 'K', 'M', 'G', 'T', 'P'];
-    let v = bytes;
-    let i = 0;
-    while (v >= 1024 && i < units.length - 1) {
-      v = v / 1024;
-      i++;
-    }
-    return `${v.toFixed(1)}${units[i]}`;
-  }, [rt.npsStatus, status]);
+  }, [rt.frpStatus, status, server]);
 
   useEffect(() => {
     refresh();
@@ -56,8 +32,8 @@ export const NPSPage: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    if (rt.npsStatus) setStatus(rt.npsStatus);
-  }, [rt.npsStatus]);
+    if (rt.frpStatus) setStatus(rt.frpStatus);
+  }, [rt.frpStatus]);
 
   const copyText = async (key: string, text: string) => {
     try {
@@ -71,12 +47,11 @@ export const NPSPage: React.FC = () => {
 
   const refresh = async () => {
     try {
-      const s = await api.npsStatus();
+      const s = await api.frpStatus();
       setStatus(s);
       if (!server) setServer(s?.server || '');
-      if (!clientId) setClientId(s?.client_id || '');
-      if (!npcPath) setNpcPath(s?.npc_path || '');
-      const tt = await api.npsTunnels();
+      if (!frcPath) setFrcPath(s?.frc_path || '');
+      const tt = await api.frpTunnels();
       setTunnels(tt?.tunnels || []);
     } catch {
       // ignore
@@ -87,35 +62,19 @@ export const NPSPage: React.FC = () => {
     setLoading(true);
     try {
       if (connected) {
-        await api.npsDisconnect();
+        await api.frpDisconnect();
       } else {
         const req = {
           server: server.trim() || undefined,
-          vkey: vkey.trim() || undefined,
-          client_id: clientId.trim() || undefined,
-          npc_path: npcPath.trim() || undefined,
+          token: token.trim() || undefined,
+          frc_path: frcPath.trim() || undefined,
         };
-        await api.npsConnect(req);
+        await api.frpConnect(req);
       }
-      const s = await api.npsStatus();
+      const s = await api.frpStatus();
       setStatus(s);
-      const tt = await api.npsTunnels();
+      const tt = await api.frpTunnels();
       setTunnels(tt?.tunnels || []);
-    } catch (e: any) {
-      alert(e?.message || String(e));
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const installNpc = async () => {
-    setLoading(true);
-    try {
-      const res = await api.npsNpcInstall({});
-      setNpcPath(res?.path || '');
-      const s = await api.npsStatus();
-      setStatus(s);
-      alert(`npc 已安装: ${res?.path || ''}`);
     } catch (e: any) {
       alert(e?.message || String(e));
     } finally {
@@ -126,7 +85,7 @@ export const NPSPage: React.FC = () => {
   return (
     <div>
       <div className="grid-2" style={{ marginBottom: 24 }}>
-        <Card title={t('services.nps_conn')}>
+        <Card title="FRP 连接">
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24 }}>
              <div style={{ display: 'flex', gap: 16 }}>
                <div style={{ 
@@ -155,20 +114,13 @@ export const NPSPage: React.FC = () => {
           <div style={{ background: '#f5f5f5', padding: 20, borderRadius: 12 }}>
             <div style={{ fontSize: 13, color: '#666', marginBottom: 12, fontWeight: 500 }}>{t('services.config')}</div>
             <div className="grid-2">
-              <Input value={server} onChange={(e) => setServer((e.target as any).value)} placeholder="server:8024" />
-              <Input value={vkey} onChange={(e) => setVKey((e.target as any).value)} type="password" placeholder="vkey" />
+              <Input value={server} onChange={(e) => setServer((e.target as any).value)} placeholder="117.172.29.237:7000" />
+              <Input value={token} onChange={(e) => setToken((e.target as any).value)} type="password" placeholder="token" />
             </div>
             <div style={{ marginTop: 12 }}>
-              <div style={{ fontSize: 13, color: '#666', marginBottom: 8 }}>Client ID</div>
-              <Input value={clientId} onChange={(e) => setClientId((e.target as any).value)} placeholder="client_id" />
-            </div>
-            <div style={{ marginTop: 12 }}>
-              <div style={{ fontSize: 13, color: '#666', marginBottom: 8 }}>npc 路径</div>
-              <Input value={npcPath} onChange={(e) => setNpcPath((e.target as any).value)} placeholder="npc 可执行文件路径" />
+              <div style={{ fontSize: 13, color: '#666', marginBottom: 8 }}>frpc 路径</div>
+              <Input value={frcPath} onChange={(e) => setFrcPath((e.target as any).value)} placeholder="frpc 可执行文件路径" />
               <div style={{ marginTop: 8, display: "flex", gap: 8 }}>
-                <Button variant="outline" onClick={installNpc} disabled={loading}>
-                  一键安装 npc
-                </Button>
                 <Button variant="ghost" onClick={refresh} disabled={loading}>
                   刷新
                 </Button>
@@ -210,10 +162,10 @@ export const NPSPage: React.FC = () => {
                     <button
                       className="btn btn-ghost"
                       style={{ height: 32, padding: '0 14px' }}
-                      onClick={() => copyText('nps_pid', String(status.pid))}
+                      onClick={() => copyText('frp_pid', String(status.pid))}
                       title="复制 PID"
                     >
-                      {copiedKey === 'nps_pid' ? '已复制' : '复制'}
+                      {copiedKey === 'frp_pid' ? '已复制' : '复制'}
                     </button>
                   </div>
                 ) : null}
@@ -242,10 +194,10 @@ export const NPSPage: React.FC = () => {
                     <button
                       className="btn btn-ghost"
                       style={{ height: 32, padding: '0 14px' }}
-                      onClick={() => copyText('nps_log', status.log_path)}
+                      onClick={() => copyText('frp_log', status.log_path)}
                       title="复制日志路径"
                     >
-                      {copiedKey === 'nps_log' ? '已复制' : '复制'}
+                      {copiedKey === 'frp_log' ? '已复制' : '复制'}
                     </button>
                   </div>
                 ) : null}
@@ -268,46 +220,21 @@ export const NPSPage: React.FC = () => {
              </Card>
 
              <div className="grid-2" style={{ gap: 24 }}>
-                 <Card style={{ marginBottom: 0 }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <div>
-                            <div style={{ fontSize: 24, fontWeight: 700, color: '#52c41a' }}>
-                              {connected ? (clientsOnline ?? '-') : '-'}
-                            </div>
-                            <div style={{ color: 'var(--text-secondary)', fontSize: 13 }}>{t('services.clients_online') || 'Clients Online'}</div>
-                        </div>
-                         <Users size={20} color="#52c41a" />
-                    </div>
-                 </Card>
-                 <Card style={{ marginBottom: 0 }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <div>
-                            <div style={{ fontSize: 24, fontWeight: 700, color: '#faad14' }}>
-                              {connected ? (totalTrafficHuman || '-') : '-'}
-                            </div>
-                            <div style={{ color: 'var(--text-secondary)', fontSize: 13 }}>{t('services.total_traffic') || 'Total Traffic'}</div>
-                        </div>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                            <ArrowUp size={12} color="#faad14" />
-                            <ArrowDown size={12} color="#faad14" />
-                        </div>
-                    </div>
-                 </Card>
              </div>
         </div>
       </div>
 
       <Card title={t('services.tunnels_list')}>
-        <table className="table">
-          <thead><tr><th>{t('services.id')}</th><th>{t('devices.type')}</th><th>{t('services.local')}</th><th>{t('services.remote_port')}</th><th>{t('devices.status')}</th></tr></thead>
+          <table className="table">
+          <thead><tr><th>名称</th><th>类型</th><th>本地地址</th><th>远程端口</th><th>创建时间</th></tr></thead>
           <tbody>
             {tunnels.map((tunnel: any, idx: number) => (
-              <tr key={tunnel.id || idx}>
-                <td>{tunnel.id || '-'}</td>
-                <td>{String(tunnel.type || '').toUpperCase()}</td>
-                <td>{tunnel.local_port != null ? `:${tunnel.local_port}` : '-'}</td>
-                <td>{tunnel.remote_port != null ? tunnel.remote_port : '-'}</td>
-                <td><Badge status={tunnel.status || 'offline'} text={t(`common.${tunnel.status || 'offline'}`)} /></td>
+              <tr key={tunnel.name || idx}>
+                <td>{tunnel.name || '-'}</td>
+                <td>{String(tunnel.type || 'tcp').toUpperCase()}</td>
+                <td>{tunnel.local_ip && tunnel.local_port ? `${tunnel.local_ip}:${tunnel.local_port}` : '-'}</td>
+                <td>{tunnel.remote_port != null && tunnel.remote_port > 0 ? tunnel.remote_port : '自动分配'}</td>
+                <td>{tunnel.created_at || '-'}</td>
               </tr>
             ))}
             {tunnels.length === 0 ? (

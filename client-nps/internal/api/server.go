@@ -7,7 +7,7 @@ import (
 	"nwct/client-nps/config"
 	"nwct/client-nps/internal/mqtt"
 	"nwct/client-nps/internal/network"
-	"nwct/client-nps/internal/nps"
+	"nwct/client-nps/internal/frp"
 	"nwct/client-nps/internal/scanner"
 	"nwct/client-nps/internal/webui"
 	"nwct/client-nps/models"
@@ -25,14 +25,14 @@ type Server struct {
 	config     *config.Config
 	db         *sql.DB
 	netManager network.Manager
-	npsClient  nps.Client
+	frpClient  frp.Client
 	mqttClient mqtt.Client
 	scanner    scanner.Scanner
 	router     *gin.Engine
 }
 
 // NewServer 创建API服务器
-func NewServer(cfg *config.Config, db *sql.DB, netManager network.Manager, npsClient nps.Client, mqttClient mqtt.Client) *Server {
+func NewServer(cfg *config.Config, db *sql.DB, netManager network.Manager, frpClient frp.Client, mqttClient mqtt.Client) *Server {
 	// 初始化扫描器
 	deviceScanner := scanner.NewScanner(db)
 
@@ -40,7 +40,7 @@ func NewServer(cfg *config.Config, db *sql.DB, netManager network.Manager, npsCl
 		config:     cfg,
 		db:         db,
 		netManager: netManager,
-		npsClient:  npsClient,
+		frpClient:  frpClient,
 		mqttClient: mqttClient,
 		scanner:    deviceScanner,
 	}
@@ -115,12 +115,15 @@ func (s *Server) initRouter() {
 		api.POST("/tools/portscan", s.authMiddleware(), s.handlePortScan)
 		api.POST("/tools/dns", s.authMiddleware(), s.handleDNS)
 
-		// NPS管理
-		api.GET("/nps/status", s.authMiddleware(), s.handleNPSStatus)
-		api.POST("/nps/npc/install", s.authMiddleware(), s.handleNPCInstall)
-		api.POST("/nps/connect", s.authMiddleware(), s.handleNPSConnect)
-		api.POST("/nps/disconnect", s.authMiddleware(), s.handleNPSDisconnect)
-		api.GET("/nps/tunnels", s.authMiddleware(), s.handleNPSTunnels)
+		// FRP管理
+		api.GET("/frp/status", s.authMiddleware(), s.handleFRPStatus)
+		api.POST("/frp/connect", s.authMiddleware(), s.handleFRPConnect)
+		api.POST("/frp/disconnect", s.authMiddleware(), s.handleFRPDisconnect)
+		api.GET("/frp/tunnels", s.authMiddleware(), s.handleFRPTunnels)
+		api.POST("/frp/tunnels", s.authMiddleware(), s.handleFRPAddTunnel)
+		api.DELETE("/frp/tunnels/:name", s.authMiddleware(), s.handleFRPRemoveTunnel)
+		api.PUT("/frp/tunnels/:name", s.authMiddleware(), s.handleFRPUpdateTunnel)
+		api.POST("/frp/reload", s.authMiddleware(), s.handleFRPReload)
 
 		// MQTT管理
 		api.GET("/mqtt/status", s.authMiddleware(), s.handleMQTTStatus)

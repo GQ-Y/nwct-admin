@@ -2,7 +2,6 @@ package api
 
 import (
 	"bufio"
-	"context"
 	"fmt"
 	"net"
 	"net/http"
@@ -10,7 +9,7 @@ import (
 	"nwct/client-nps/internal/database"
 	"nwct/client-nps/internal/logger"
 	"nwct/client-nps/internal/network"
-	"nwct/client-nps/internal/nps"
+	"nwct/client-nps/internal/frp"
 	"nwct/client-nps/internal/scanner"
 	"nwct/client-nps/internal/toolkit"
 	"nwct/client-nps/internal/version"
@@ -1016,9 +1015,9 @@ func (s *Server) handleDNS(c *gin.Context) {
 	}))
 }
 
-// handleNPSStatus 处理获取NPS状态请求
-func (s *Server) handleNPSStatus(c *gin.Context) {
-	status, err := s.npsClient.GetStatus()
+// handleFRPStatus 处理获取FRP状态请求
+func (s *Server) handleFRPStatus(c *gin.Context) {
+	status, err := s.frpClient.GetStatus()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse(500, err.Error()))
 		return
@@ -1027,126 +1026,42 @@ func (s *Server) handleNPSStatus(c *gin.Context) {
 	c.JSON(http.StatusOK, models.SuccessResponse(status))
 }
 
-// handleNPCInstall 一键下载并安装 npc（用于设备端集成 NPS 客户端）
-func (s *Server) handleNPCInstall(c *gin.Context) {
+// handleFRPConnect 处理FRP连接请求
+func (s *Server) handleFRPConnect(c *gin.Context) {
 	var req struct {
-		Version    string `json:"version"`
-		InstallDir string `json:"install_dir"`
-	}
-	_ = c.ShouldBindJSON(&req)
-
-	ctx, cancel := context.WithTimeout(c.Request.Context(), 60*time.Second)
-	defer cancel()
-
-	res, err := nps.InstallNPC(ctx, nps.InstallOptions{
-		Version:    strings.TrimSpace(req.Version),
-		InstallDir: strings.TrimSpace(req.InstallDir),
-	})
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, models.ErrorResponse(500, err.Error()))
-		return
-	}
-
-	// 写入配置，后续 connect 默认就能用
-	s.config.NPSServer.NPCPath = res.Path
-	if err := s.config.Save(); err != nil {
-		c.JSON(http.StatusInternalServerError, models.ErrorResponse(500, "保存配置失败: "+err.Error()))
-		return
-	}
-
-	c.JSON(http.StatusOK, models.SuccessResponse(res))
-}
-
-// handleNPSConnect 处理NPS连接请求
-func (s *Server) handleNPSConnect(c *gin.Context) {
-	var req struct {
-		Server        string   `json:"server"`
-		VKey          string   `json:"vkey"`
-		ClientID      string   `json:"client_id"`
-		NPCPath       string   `json:"npc_path"`
-		NPCConfigPath string   `json:"npc_config_path"`
-		NPCArgs       []string `json:"npc_args"`
+		Server    string `json:"server"`
+		Token     string `json:"token"`
+		AdminAddr string `json:"admin_addr"`
+		AdminUser string `json:"admin_user"`
+		AdminPwd  string `json:"admin_pwd"`
+		FRCPath   string `json:"frc_path"`
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
-		// 允许空请求体：使用已有配置（实现“一键连接”）
+		// 允许空请求体：使用已有配置（实现"一键连接"）
 	}
 
-	// 合并配置：请求未提供的字段则沿用已有配置（或由 npc_config_path 覆盖）
-	if strings.TrimSpace(req.Server) == "" {
-		req.Server = s.config.NPSServer.Server
+	// 合并配置：请求未提供的字段则沿用已有配置
+	if strings.TrimSpace(req.Server) != "" {
+		s.config.FRPServer.Server = strings.TrimSpace(req.Server)
 	}
-	if strings.TrimSpace(req.VKey) == "" {
-		req.VKey = s.config.NPSServer.VKey
+	if strings.TrimSpace(req.Token) != "" {
+		s.config.FRPServer.Token = strings.TrimSpace(req.Token)
 	}
-	if strings.TrimSpace(req.ClientID) == "" {
-		req.ClientID = s.config.NPSServer.ClientID
+	if strings.TrimSpace(req.AdminAddr) != "" {
+		s.config.FRPServer.AdminAddr = strings.TrimSpace(req.AdminAddr)
 	}
-	if strings.TrimSpace(req.NPCConfigPath) == "" {
-		req.NPCConfigPath = s.config.NPSServer.NPCConfigPath
+	if strings.TrimSpace(req.AdminUser) != "" {
+		s.config.FRPServer.AdminUser = strings.TrimSpace(req.AdminUser)
 	}
-	if req.NPCArgs == nil {
-		req.NPCArgs = s.config.NPSServer.NPCArgs
+	if strings.TrimSpace(req.AdminPwd) != "" {
+		s.config.FRPServer.AdminPwd = strings.TrimSpace(req.AdminPwd)
 	}
-
-	// 默认 server/client_id：允许“完全空请求”也能一键连接
-	if strings.TrimSpace(req.Server) == "" {
-		req.Server = "127.0.0.1:19024"
-	}
-	if strings.TrimSpace(req.ClientID) == "" {
-		id := strings.TrimSpace(s.config.Device.ID)
-		if id == "" {
-			id = "device_001"
-		}
-		id = strings.ReplaceAll(id, "_", "-")
-		req.ClientID = "nwct-" + id
+	if strings.TrimSpace(req.FRCPath) != "" {
+		s.config.FRPServer.FRCPath = strings.TrimSpace(req.FRCPath)
 	}
 
-	// vkey 允许为空：如果提供了 npc_config_path，则由配置文件决定；
-	// 否则当 vkey 为空时，尝试从 NPS Web 自动创建/查找 client 并获取 vkey（用于测试/内置默认服务）。
-	if strings.TrimSpace(req.VKey) == "" && strings.TrimSpace(req.NPCConfigPath) == "" {
-		baseURL := strings.TrimSpace(os.Getenv("NWCT_NPS_WEB_URL"))
-		if baseURL == "" {
-			baseURL = "http://127.0.0.1:19080"
-		}
-		user := strings.TrimSpace(os.Getenv("NWCT_NPS_WEB_USER"))
-		if user == "" {
-			user = "admin"
-		}
-		pass := os.Getenv("NWCT_NPS_WEB_PASS")
-		if strings.TrimSpace(pass) == "" {
-			pass = "123"
-		}
-		ctx, cancel := context.WithTimeout(c.Request.Context(), 8*time.Second)
-		defer cancel()
-		if v, err := nps.EnsureVKey(ctx, baseURL, user, pass, req.ClientID); err == nil && strings.TrimSpace(v) != "" {
-			req.VKey = strings.TrimSpace(v)
-		} else {
-			// 返回可定位的信息，方便排查 NPS Web 登录/创建 client 失败等问题
-			msg := "请先配置 NPS vkey（或提供 npc_config_path）"
-			if err != nil {
-				msg = "自动获取 NPS vkey 失败: " + err.Error()
-			}
-			c.JSON(http.StatusBadRequest, models.ErrorResponse(400, msg))
-			return
-		}
-	}
-
-	// 写回配置（连接成功后落盘，便于下次一键连接）
-	s.config.NPSServer.Server = strings.TrimSpace(req.Server)
-	s.config.NPSServer.VKey = strings.TrimSpace(req.VKey)
-	s.config.NPSServer.ClientID = strings.TrimSpace(req.ClientID)
-	if strings.TrimSpace(req.NPCPath) != "" {
-		s.config.NPSServer.NPCPath = strings.TrimSpace(req.NPCPath)
-	}
-	if strings.TrimSpace(req.NPCConfigPath) != "" {
-		s.config.NPSServer.NPCConfigPath = strings.TrimSpace(req.NPCConfigPath)
-	}
-	if req.NPCArgs != nil {
-		s.config.NPSServer.NPCArgs = req.NPCArgs
-	}
-
-	if err := s.npsClient.Connect(); err != nil {
+	if err := s.frpClient.Connect(); err != nil {
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse(500, err.Error()))
 		return
 	}
@@ -1156,9 +1071,9 @@ func (s *Server) handleNPSConnect(c *gin.Context) {
 	c.JSON(http.StatusOK, models.SuccessResponse(nil))
 }
 
-// handleNPSDisconnect 处理NPS断开请求
-func (s *Server) handleNPSDisconnect(c *gin.Context) {
-	if err := s.npsClient.Disconnect(); err != nil {
+// handleFRPDisconnect 处理FRP断开请求
+func (s *Server) handleFRPDisconnect(c *gin.Context) {
+	if err := s.frpClient.Disconnect(); err != nil {
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse(500, err.Error()))
 		return
 	}
@@ -1166,17 +1081,81 @@ func (s *Server) handleNPSDisconnect(c *gin.Context) {
 	c.JSON(http.StatusOK, models.SuccessResponse(nil))
 }
 
-// handleNPSTunnels 处理获取NPS隧道列表请求
-func (s *Server) handleNPSTunnels(c *gin.Context) {
-	status, err := s.npsClient.GetStatus()
+// handleFRPTunnels 处理获取FRP隧道列表请求
+func (s *Server) handleFRPTunnels(c *gin.Context) {
+	tunnels, err := s.frpClient.GetTunnels()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse(500, err.Error()))
 		return
 	}
 
 	c.JSON(http.StatusOK, models.SuccessResponse(gin.H{
-		"tunnels": status.Tunnels,
+		"tunnels": tunnels,
 	}))
+}
+
+// handleFRPAddTunnel 处理添加隧道请求
+func (s *Server) handleFRPAddTunnel(c *gin.Context) {
+	var req frp.Tunnel
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse(400, "参数错误: "+err.Error()))
+		return
+	}
+
+	if err := s.frpClient.AddTunnel(&req); err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse(500, err.Error()))
+		return
+	}
+
+	c.JSON(http.StatusOK, models.SuccessResponse(nil))
+}
+
+// handleFRPRemoveTunnel 处理删除隧道请求
+func (s *Server) handleFRPRemoveTunnel(c *gin.Context) {
+	name := c.Param("name")
+	if name == "" {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse(400, "隧道名称不能为空"))
+		return
+	}
+
+	if err := s.frpClient.RemoveTunnel(name); err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse(500, err.Error()))
+		return
+	}
+
+	c.JSON(http.StatusOK, models.SuccessResponse(nil))
+}
+
+// handleFRPUpdateTunnel 处理更新隧道请求
+func (s *Server) handleFRPUpdateTunnel(c *gin.Context) {
+	name := c.Param("name")
+	if name == "" {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse(400, "隧道名称不能为空"))
+		return
+	}
+
+	var req frp.Tunnel
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse(400, "参数错误: "+err.Error()))
+		return
+	}
+
+	if err := s.frpClient.UpdateTunnel(name, &req); err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse(500, err.Error()))
+		return
+	}
+
+	c.JSON(http.StatusOK, models.SuccessResponse(nil))
+}
+
+// handleFRPReload 处理重载配置请求
+func (s *Server) handleFRPReload(c *gin.Context) {
+	if err := s.frpClient.Reload(); err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse(500, err.Error()))
+		return
+	}
+
+	c.JSON(http.StatusOK, models.SuccessResponse(nil))
 }
 
 // handleMQTTStatus 处理获取MQTT状态请求
@@ -1366,10 +1345,11 @@ func (s *Server) handleConfigGet(c *gin.Context) {
 			"name":      s.config.Device.Name,
 		},
 		"network": net,
-		"nps_server": gin.H{
-			"server":    s.config.NPSServer.Server,
-			"vkey":      "***",
-			"client_id": s.config.NPSServer.ClientID,
+		"frp_server": gin.H{
+			"server":     s.config.FRPServer.Server,
+			"token":      "***",
+			"admin_addr": s.config.FRPServer.AdminAddr,
+			"admin_user": s.config.FRPServer.AdminUser,
 		},
 		"mqtt": gin.H{
 			"server":    s.config.MQTT.Server,
@@ -1393,11 +1373,11 @@ func (s *Server) handleConfigUpdate(c *gin.Context) {
 		return
 	}
 
-	// 允许更新的字段：device/network/nps_server/mqtt/scanner/server/database/initialized
+	// 允许更新的字段：device/network/frp_server/mqtt/scanner/server/database/initialized
 	// 安全：不允许通过该接口直接写入 password_hash
 	s.config.Device = req.Device
 	s.config.Network = req.Network
-	s.config.NPSServer = req.NPSServer
+	s.config.FRPServer = req.FRPServer
 	s.config.MQTT = req.MQTT
 	s.config.Scanner = req.Scanner
 	s.config.Server = req.Server
@@ -1421,7 +1401,7 @@ func (s *Server) handleConfigInit(c *gin.Context) {
 	var req struct {
 		Device        *config.DeviceConfig    `json:"device"`
 		Network       *config.NetworkConfig   `json:"network"`
-		NPSServer     *config.NPSServerConfig `json:"nps_server"`
+		FRPServer     *config.FRPServerConfig `json:"frp_server"`
 		MQTT          *config.MQTTConfig      `json:"mqtt"`
 		Scanner       *config.ScannerConfig   `json:"scanner"`
 		AdminPassword string                  `json:"admin_password" binding:"required"`
@@ -1439,8 +1419,8 @@ func (s *Server) handleConfigInit(c *gin.Context) {
 	if req.Network != nil {
 		s.config.Network = *req.Network
 	}
-	if req.NPSServer != nil {
-		s.config.NPSServer = *req.NPSServer
+	if req.FRPServer != nil {
+		s.config.FRPServer = *req.FRPServer
 	}
 	if req.MQTT != nil {
 		s.config.MQTT = *req.MQTT

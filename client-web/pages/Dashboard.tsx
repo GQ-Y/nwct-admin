@@ -10,7 +10,7 @@ export const Dashboard: React.FC = () => {
   const { t } = useLanguage();
   const rt = useRealtime();
   const [fallbackInfo, setFallbackInfo] = useState<any>(null);
-  const [fallbackNps, setFallbackNps] = useState<any>(null);
+  const [fallbackFrp, setFallbackFrp] = useState<any>(null);
   const sys = rt.systemStatus || fallbackInfo;
   const [activities, setActivities] = useState<any[]>([]);
 
@@ -20,15 +20,15 @@ export const Dashboard: React.FC = () => {
       .catch(() => {});
   }, []);
 
-  // NPS 状态兜底：避免仅依赖 WS 的 nps_status_changed（无变化时不会推送）
+  // FRP 状态兜底：避免仅依赖 WS 的 frp_status_changed（无变化时不会推送）
   useEffect(() => {
     let stop = false;
     const load = () =>
       api
-        .npsStatus()
+        .frpStatus()
         .then((d) => {
           if (stop) return;
-          setFallbackNps(d);
+          setFallbackFrp(d);
         })
         .catch(() => {});
     load();
@@ -39,7 +39,7 @@ export const Dashboard: React.FC = () => {
     };
   }, []);
 
-  const nps = rt.npsStatus || fallbackNps;
+  const frp = rt.frpStatus || fallbackFrp;
 
   useEffect(() => {
     let stop = false;
@@ -121,8 +121,8 @@ export const Dashboard: React.FC = () => {
         <Card title={t('dashboard.service_status')}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', padding: '12px', background: '#f9f9f9', borderRadius: 4 }}>
-              <span>{t('dashboard.nps_client')}</span>
-              <Badge status={nps?.connected ? 'online' : 'offline'} text={nps?.connected ? t('common.connected') : t('common.disconnected')} />
+              <span>FRP 客户端</span>
+              <Badge status={frp?.connected ? 'online' : 'offline'} text={frp?.connected ? t('common.connected') : t('common.disconnected')} />
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between', padding: '12px', background: '#f9f9f9', borderRadius: 4 }}>
               <span>{t('dashboard.mqtt_broker')}</span>

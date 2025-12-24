@@ -107,19 +107,40 @@ export const api = {
     request<any>("/api/v1/devices/scan/stop", { method: "POST", body: "{}" }),
   scanStatus: () => request<any>("/api/v1/devices/scan/status"),
 
-  npsStatus: () => request<any>("/api/v1/nps/status"),
-  npsNpcInstall: (req?: { version?: string; install_dir?: string }) =>
-    request<any>("/api/v1/nps/npc/install", { method: "POST", body: JSON.stringify(req || {}) }),
-  npsConnect: (req: {
-    server: string;
-    vkey: string;
-    client_id: string;
-    npc_path?: string;
-    npc_config_path?: string;
-    npc_args?: string[];
-  }) => request<any>("/api/v1/nps/connect", { method: "POST", body: JSON.stringify(req) }),
-  npsDisconnect: () => request<any>("/api/v1/nps/disconnect", { method: "POST", body: "{}" }),
-  npsTunnels: () => request<{ tunnels: any[] }>("/api/v1/nps/tunnels"),
+  frpStatus: () => request<any>("/api/v1/frp/status"),
+  frpConnect: (req?: {
+    server?: string;
+    token?: string;
+    admin_addr?: string;
+    admin_user?: string;
+    admin_pwd?: string;
+    frc_path?: string;
+  }) => request<any>("/api/v1/frp/connect", { method: "POST", body: JSON.stringify(req || {}) }),
+  frpDisconnect: () => request<any>("/api/v1/frp/disconnect", { method: "POST", body: "{}" }),
+  frpTunnels: () => request<{ tunnels: any[] }>("/api/v1/frp/tunnels"),
+  frpAddTunnel: (tunnel: {
+    name: string;
+    type: string;
+    local_ip: string;
+    local_port: number;
+    remote_port?: number;
+    domain?: string;
+  }) => request<any>("/api/v1/frp/tunnels", { method: "POST", body: JSON.stringify(tunnel) }),
+  frpRemoveTunnel: (name: string) =>
+    request<any>(`/api/v1/frp/tunnels/${encodeURIComponent(name)}`, { method: "DELETE" }),
+  frpUpdateTunnel: (name: string, tunnel: {
+    name: string;
+    type: string;
+    local_ip: string;
+    local_port: number;
+    remote_port?: number;
+    domain?: string;
+  }) =>
+    request<any>(`/api/v1/frp/tunnels/${encodeURIComponent(name)}`, {
+      method: "PUT",
+      body: JSON.stringify(tunnel),
+    }),
+  frpReload: () => request<any>("/api/v1/frp/reload", { method: "POST", body: "{}" }),
 
   mqttStatus: () => request<any>("/api/v1/mqtt/status"),
   mqttConnect: (req: {

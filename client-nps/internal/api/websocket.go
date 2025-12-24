@@ -62,13 +62,13 @@ func (s *Server) handleWebSocket(c *gin.Context) {
 	// hello（一次性快照）
 	netStatus, _ := s.netManager.GetNetworkStatus()
 	scanStatus := s.scanner.GetScanStatus()
-	npsStatus, _ := s.npsClient.GetStatus()
+	frpStatus, _ := s.frpClient.GetStatus()
 	hub.Hello(cl, gin.H{
 		"message":     "WebSocket连接成功",
 		"device_id":   s.config.Device.ID,
 		"network":     netStatus,
 		"scan_status": scanStatus,
-		"nps_status":  npsStatus,
+		"frp_status":  frpStatus,
 	})
 
 	// 写循环

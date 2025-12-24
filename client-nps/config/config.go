@@ -14,7 +14,7 @@ type Config struct {
 	Initialized bool            `json:"initialized"`
 	Device      DeviceConfig    `json:"device"`
 	Network     NetworkConfig   `json:"network"`
-	NPSServer   NPSServerConfig `json:"nps_server"`
+	FRPServer   FRPServerConfig `json:"frp_server"`
 	MQTT        MQTTConfig      `json:"mqtt"`
 	Scanner     ScannerConfig   `json:"scanner"`
 	Server      ServerConfig    `json:"server"`
@@ -62,16 +62,14 @@ type WiFiProfile struct {
 	LastError     string `json:"last_error,omitempty"`
 }
 
-// NPSServerConfig NPS服务端配置
-type NPSServerConfig struct {
-	Server   string `json:"server"` // host:port
-	VKey     string `json:"vkey"`   // 验证密钥
-	ClientID string `json:"client_id"`
-
-	// NPS 客户端进程（npc）管理参数：默认使用系统 PATH 中的 `npc`
-	NPCPath       string   `json:"npc_path,omitempty"`
-	NPCConfigPath string   `json:"npc_config_path,omitempty"`
-	NPCArgs       []string `json:"npc_args,omitempty"`
+// FRPServerConfig FRP服务端配置
+type FRPServerConfig struct {
+	Server    string `json:"server"`     // 117.172.29.237:7000
+	Token     string `json:"token"`      // token123456
+	AdminAddr string `json:"admin_addr"` // 117.172.29.237:7500
+	AdminUser string `json:"admin_user"` // admin
+	AdminPwd  string `json:"admin_pwd"`  // admin_nAhTnN
+	FRCPath   string `json:"frc_path,omitempty"` // 可选：frpc 可执行文件路径。如果为空，优先使用嵌入的二进制，否则使用系统 PATH 中的 frpc
 }
 
 // MQTTConfig MQTT配置
@@ -122,7 +120,13 @@ func DefaultConfig() *Config {
 			Interface: "eth0",
 			IPMode:    "dhcp",
 		},
-		NPSServer: NPSServerConfig{},
+		FRPServer: FRPServerConfig{
+			Server:    "117.172.29.237:7000",
+			Token:     "token123456",
+			AdminAddr: "117.172.29.237:7500",
+			AdminUser: "admin",
+			AdminPwd:  "admin_nAhTnN",
+		},
 		MQTT: MQTTConfig{
 			// 默认内置 MQTT 服务（可在 UI/API 中覆盖）
 			Server:   "mqtt.yingzhu.net",
@@ -298,19 +302,25 @@ func LoadConfig() (*Config, error) {
 		}
 	}
 
-	// NPS defaults（server/client_id 可默认，vkey 由用户填写或由“一键连接”自动创建）
-	if strings.TrimSpace(cfg.NPSServer.Server) == "" {
-		// 本地开发/测试默认走 docker 映射的 bridge 端口
-		cfg.NPSServer.Server = "127.0.0.1:19024"
+	// FRP defaults
+	if strings.TrimSpace(cfg.FRPServer.Server) == "" {
+		cfg.FRPServer.Server = "117.172.29.237:7000"
 		changed = true
 	}
-	if strings.TrimSpace(cfg.NPSServer.ClientID) == "" {
-		id := strings.TrimSpace(cfg.Device.ID)
-		if id == "" {
-			id = "device_001"
-		}
-		id = strings.ReplaceAll(id, "_", "-")
-		cfg.NPSServer.ClientID = "nwct-" + id
+	if strings.TrimSpace(cfg.FRPServer.Token) == "" {
+		cfg.FRPServer.Token = "token123456"
+		changed = true
+	}
+	if strings.TrimSpace(cfg.FRPServer.AdminAddr) == "" {
+		cfg.FRPServer.AdminAddr = "117.172.29.237:7500"
+		changed = true
+	}
+	if strings.TrimSpace(cfg.FRPServer.AdminUser) == "" {
+		cfg.FRPServer.AdminUser = "admin"
+		changed = true
+	}
+	if strings.TrimSpace(cfg.FRPServer.AdminPwd) == "" {
+		cfg.FRPServer.AdminPwd = "admin_nAhTnN"
 		changed = true
 	}
 

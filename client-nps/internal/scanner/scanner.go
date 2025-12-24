@@ -10,6 +10,7 @@ import (
 	"net"
 	"nwct/client-nps/internal/database"
 	"nwct/client-nps/internal/fingerprint"
+	"nwct/client-nps/internal/frp"
 	"nwct/client-nps/internal/logger"
 	"nwct/client-nps/internal/realtime"
 	"nwct/client-nps/internal/toolkit"
@@ -383,6 +384,9 @@ func (ds *deviceScanner) performScan(subnet string) {
 		// 端口扫描（异步，避免阻塞）
 		if len(device.OpenPorts) == 0 {
 			go ds.scanPorts(device.IP)
+		} else {
+			// 自动穿透：为设备的开放端口创建隧道
+			go ds.autoCreateTunnels(device.IP, device.OpenPorts)
 		}
 	}
 
@@ -470,6 +474,42 @@ func (ds *deviceScanner) scanPorts(ip string) {
 			"ip":      ip,
 			"updated": updated,
 		})
+		// 自动穿透：为新发现的端口创建隧道
+		go ds.autoCreateTunnels(ip, nil)
+	}
+}
+
+// autoCreateTunnels 为设备的开放端口自动创建隧道
+func (ds *deviceScanner) autoCreateTunnels(deviceIP string, ports []int) {
+	// 检查全局 FRP 客户端是否可用
+	frpClient := frp.GetGlobalClient()
+	if frpClient == nil || !frpClient.IsConnected() {
+		return // FRP 未连接，跳过
+	}
+
+	// 如果没有提供端口列表，从数据库查询
+	if ports == nil || len(ports) == 0 {
+		dbPorts, err := database.GetDevicePorts(ds.db, deviceIP)
+		if err != nil {
+			return
+		}
+		for _, p := range dbPorts {
+			if p.Status == "open" {
+				ports = append(ports, p.Port)
+			}
+		}
+	}
+
+	// 为每个端口创建隧道
+	for _, port := range ports {
+		tunnelName := frp.GenerateTunnelName(deviceIP, port)
+		tunnel := frp.NewTunnel(tunnelName, "tcp", deviceIP, port, 0)
+
+		if err := frpClient.AddTunnel(tunnel); err != nil {
+			logger.Error("自动创建隧道失败: name=%s err=%v", tunnelName, err)
+		} else {
+			logger.Info("自动创建隧道: %s -> %s:%d", tunnelName, deviceIP, port)
+		}
 	}
 }
 
