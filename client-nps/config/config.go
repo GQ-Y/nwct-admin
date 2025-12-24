@@ -69,7 +69,8 @@ type FRPServerConfig struct {
 	AdminAddr string `json:"admin_addr"` // 117.172.29.237:7500
 	AdminUser string `json:"admin_user"` // admin
 	AdminPwd  string `json:"admin_pwd"`  // admin_nAhTnN
-	FRCPath   string `json:"frc_path,omitempty"` // 可选：frpc 可执行文件路径。如果为空，优先使用嵌入的二进制，否则使用系统 PATH 中的 frpc
+	// DomainSuffix HTTP/HTTPS 隧道的默认域名后缀（前端只填写前缀即可）
+	DomainSuffix string `json:"domain_suffix"` // frpc.zyckj.club
 }
 
 // MQTTConfig MQTT配置
@@ -121,11 +122,12 @@ func DefaultConfig() *Config {
 			IPMode:    "dhcp",
 		},
 		FRPServer: FRPServerConfig{
-			Server:    "117.172.29.237:7000",
-			Token:     "token123456",
-			AdminAddr: "117.172.29.237:7500",
-			AdminUser: "admin",
-			AdminPwd:  "admin_nAhTnN",
+			Server:       "117.172.29.237:7000",
+			Token:        "token123456",
+			AdminAddr:    "117.172.29.237:7500",
+			AdminUser:    "admin",
+			AdminPwd:     "admin_nAhTnN",
+			DomainSuffix: "frpc.zyckj.club",
 		},
 		MQTT: MQTTConfig{
 			// 默认内置 MQTT 服务（可在 UI/API 中覆盖）
@@ -321,6 +323,10 @@ func LoadConfig() (*Config, error) {
 	}
 	if strings.TrimSpace(cfg.FRPServer.AdminPwd) == "" {
 		cfg.FRPServer.AdminPwd = "admin_nAhTnN"
+		changed = true
+	}
+	if strings.TrimSpace(cfg.FRPServer.DomainSuffix) == "" {
+		cfg.FRPServer.DomainSuffix = "frpc.zyckj.club"
 		changed = true
 	}
 

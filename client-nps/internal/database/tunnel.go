@@ -3,6 +3,7 @@ package database
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -63,6 +64,40 @@ func DeleteTunnel(db *sql.DB, name string) error {
 	}
 	_, err := db.Exec("DELETE FROM frp_tunnels WHERE name = ?", name)
 	return err
+}
+
+// RenameTunnel 重命名隧道（更新主键 name）
+func RenameTunnel(db *sql.DB, oldName, newName string) error {
+	if db == nil {
+		return fmt.Errorf("数据库未初始化")
+	}
+	oldName = strings.TrimSpace(oldName)
+	newName = strings.TrimSpace(newName)
+	if oldName == "" || newName == "" {
+		return fmt.Errorf("隧道名称不能为空")
+	}
+	if oldName == newName {
+		return nil
+	}
+
+	// 检查新名称是否已存在
+	var exists bool
+	if err := db.QueryRow("SELECT EXISTS(SELECT 1 FROM frp_tunnels WHERE name = ?)", newName).Scan(&exists); err != nil {
+		return err
+	}
+	if exists {
+		return fmt.Errorf("隧道已存在: %s", newName)
+	}
+
+	now := time.Now()
+	res, err := db.Exec("UPDATE frp_tunnels SET name = ?, updated_at = ? WHERE name = ?", newName, now, oldName)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("隧道不存在: %s", oldName)
+	}
+	return nil
 }
 
 // GetTunnel 获取单个隧道配置

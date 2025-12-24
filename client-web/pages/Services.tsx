@@ -13,8 +13,8 @@ export const FRPPage: React.FC = () => {
   const [tunnels, setTunnels] = useState<any[]>([]);
   const [server, setServer] = useState('');
   const [token, setToken] = useState('');
-  const [frcPath, setFrcPath] = useState('');
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
+  const [domainSuffix, setDomainSuffix] = useState('frpc.zyckj.club');
   
   // 隧道管理相关状态
   const [showTunnelModal, setShowTunnelModal] = useState(false);
@@ -59,10 +59,14 @@ export const FRPPage: React.FC = () => {
 
   const refresh = async () => {
     try {
+      // 读取后端配置：获取默认域名后缀
+      const cfg = await api.configGet();
+      const ds = (cfg?.frp_server?.domain_suffix || '').trim();
+      if (ds) setDomainSuffix(ds.replace(/^\./, ''));
+
       const s = await api.frpStatus();
       setStatus(s);
       if (!server) setServer(s?.server || '');
-      if (!frcPath) setFrcPath(s?.frc_path || '');
       const tt = await api.frpTunnels();
       setTunnels(tt?.tunnels || []);
     } catch {
@@ -79,7 +83,6 @@ export const FRPPage: React.FC = () => {
         const req = {
           server: server.trim() || undefined,
           token: token.trim() || undefined,
-          frc_path: frcPath.trim() || undefined,
         };
         await api.frpConnect(req);
       }
@@ -111,13 +114,19 @@ export const FRPPage: React.FC = () => {
   // 打开编辑隧道对话框
   const openEditModal = (tunnel: any) => {
     setEditingTunnel(tunnel);
+    const rawDomain = String(tunnel.domain || '').trim();
+    const ds = domainSuffix.replace(/^\./, '');
+    let domainInput = rawDomain;
+    if (rawDomain && ds && rawDomain.toLowerCase().endsWith(`.${ds.toLowerCase()}`)) {
+      domainInput = rawDomain.slice(0, rawDomain.length - (ds.length + 1)); // 去掉 ".suffix"
+    }
     setTunnelForm({
       name: tunnel.name || '',
       type: tunnel.type || 'tcp',
       local_ip: tunnel.local_ip || '',
       local_port: String(tunnel.local_port || ''),
       remote_port: tunnel.remote_port ? String(tunnel.remote_port) : '',
-      domain: tunnel.domain || '',
+      domain: domainInput,
     });
     setShowTunnelModal(true);
   };
@@ -158,6 +167,21 @@ export const FRPPage: React.FC = () => {
       return;
     }
 
+    // 处理 HTTP/HTTPS 域名：默认只填前缀
+    let domain: string | undefined = undefined;
+    if (tunnelForm.type === 'http' || tunnelForm.type === 'https') {
+      const v = tunnelForm.domain.trim();
+      if (v) {
+        // 若包含点号，视为完整域名；否则拼接默认后缀
+        if (v.includes('.')) {
+          domain = v;
+        } else {
+          const ds = domainSuffix.replace(/^\./, '');
+          domain = ds ? `${v}.${ds}` : v;
+        }
+      }
+    }
+
     setLoading(true);
     try {
       const tunnelData = {
@@ -166,7 +190,7 @@ export const FRPPage: React.FC = () => {
         local_ip: tunnelForm.local_ip.trim(),
         local_port: Number(tunnelForm.local_port),
         remote_port: tunnelForm.remote_port ? Number(tunnelForm.remote_port) : 0,
-        domain: tunnelForm.domain.trim() || undefined,
+        domain,
       };
 
       if (editingTunnel) {
@@ -240,14 +264,10 @@ export const FRPPage: React.FC = () => {
               <Input value={server} onChange={(e) => setServer((e.target as any).value)} placeholder="117.172.29.237:7000" />
               <Input value={token} onChange={(e) => setToken((e.target as any).value)} type="password" placeholder="token" />
             </div>
-            <div style={{ marginTop: 12 }}>
-              <div style={{ fontSize: 13, color: '#666', marginBottom: 8 }}>frpc 路径</div>
-              <Input value={frcPath} onChange={(e) => setFrcPath((e.target as any).value)} placeholder="frpc 可执行文件路径" />
-              <div style={{ marginTop: 8, display: "flex", gap: 8 }}>
-                <Button variant="ghost" onClick={refresh} disabled={loading}>
-                  刷新
-                </Button>
-              </div>
+            <div style={{ marginTop: 12, display: "flex", gap: 8 }}>
+              <Button variant="ghost" onClick={refresh} disabled={loading}>
+                刷新
+              </Button>
             </div>
             <Button style={{ marginTop: 16 }} variant="primary" onClick={onToggle} disabled={loading}>
               <Save size={16} /> {connected ? t('common.disconnect') : t('services.save_config')}
@@ -367,6 +387,7 @@ export const FRPPage: React.FC = () => {
               <th>类型</th>
               <th>本地地址</th>
               <th>远程端口</th>
+              <th>域名</th>
               <th>创建时间</th>
               <th>操作</th>
             </tr>
@@ -378,6 +399,21 @@ export const FRPPage: React.FC = () => {
                 <td>{String(tunnel.type || 'tcp').toUpperCase()}</td>
                 <td>{tunnel.local_ip && tunnel.local_port ? `${tunnel.local_ip}:${tunnel.local_port}` : '-'}</td>
                 <td>{tunnel.remote_port != null && tunnel.remote_port > 0 ? tunnel.remote_port : '自动分配'}</td>
+                <td>
+                  {(tunnel.type === 'http' || tunnel.type === 'https') && tunnel.domain ? (
+                    <a
+                      href={`${tunnel.type === 'https' ? 'https' : 'http'}://${tunnel.domain}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      style={{ color: 'var(--primary)' }}
+                      title="新标签打开"
+                    >
+                      {tunnel.domain}
+                    </a>
+                  ) : (
+                    '-'
+                  )}
+                </td>
                 <td>{tunnel.created_at || '-'}</td>
                 <td>
                   <div style={{ display: 'flex', gap: 8 }}>
@@ -405,7 +441,7 @@ export const FRPPage: React.FC = () => {
             ))}
             {tunnels.length === 0 ? (
               <tr>
-                <td colSpan={6} style={{ color: '#888', padding: 12 }}>
+                <td colSpan={7} style={{ color: '#888', padding: 12 }}>
                   {connected ? '暂无隧道，点击"创建隧道"按钮添加' : '未连接'}
                 </td>
               </tr>
@@ -528,12 +564,12 @@ export const FRPPage: React.FC = () => {
               {(tunnelForm.type === 'http' || tunnelForm.type === 'https') && (
                 <div>
                   <label style={{ display: 'block', marginBottom: 8, fontSize: 14, fontWeight: 500 }}>
-                    域名 <span style={{ color: '#999' }}>(可选，仅 HTTP/HTTPS 使用)</span>
+                    域名前缀 <span style={{ color: '#999' }}>(可选，仅 HTTP/HTTPS 使用)</span>
                   </label>
                   <Input
                     value={tunnelForm.domain}
                     onChange={(e) => setTunnelForm({ ...tunnelForm, domain: (e.target as any).value })}
-                    placeholder="example.com"
+                    placeholder={`例如：e6666666（默认后缀 .${domainSuffix}）或完整域名`}
                   />
                 </div>
               )}

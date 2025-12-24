@@ -81,6 +81,7 @@ export const api = {
       body: JSON.stringify({ ...(partial || {}), admin_password: adminPassword }),
       skipAuth: true,
     }),
+  configGet: () => request<any>("/api/v1/config"),
 
   systemInfo: () => request<any>("/api/v1/system/info"),
   systemLogs: (lines: number = 200) =>
@@ -114,7 +115,6 @@ export const api = {
     admin_addr?: string;
     admin_user?: string;
     admin_pwd?: string;
-    frc_path?: string;
   }) => request<any>("/api/v1/frp/connect", { method: "POST", body: JSON.stringify(req || {}) }),
   frpDisconnect: () => request<any>("/api/v1/frp/disconnect", { method: "POST", body: "{}" }),
   frpTunnels: () => request<{ tunnels: any[] }>("/api/v1/frp/tunnels"),

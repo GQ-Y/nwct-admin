@@ -23,7 +23,8 @@
     "token": "token123456",
     "admin_addr": "117.172.29.237:7500",
     "admin_user": "admin",
-    "admin_pwd": "admin_nAhTnN"
+    "admin_pwd": "admin_nAhTnN",
+    "domain_suffix": "frpc.zyckj.club"
   },
   "mqtt": {
     "server": "mqtt.yingzhu.net",

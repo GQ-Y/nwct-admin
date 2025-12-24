@@ -47,24 +47,23 @@ type FRPStatus struct {
 	PID         int       `json:"pid"`
 	LastError   string    `json:"last_error,omitempty"`
 	Tunnels     []*Tunnel `json:"tunnels"`
-	FRCPath     string    `json:"frc_path,omitempty"`
 	LogPath     string    `json:"log_path,omitempty"`
 }
 
 // frpClient FRP客户端实现
 type frpClient struct {
-	config     *config.FRPServerConfig
-	tunnels    map[string]*Tunnel // 内存中维护的隧道配置
-	mu         sync.RWMutex
-	connected  bool
-	connectedAt time.Time
-	lastError   string
-	cmd         *exec.Cmd
-	configPath  string // frpc.ini 路径
-	logPath     string
-	restartCount int    // 重启计数，避免无限重启
+	config          *config.FRPServerConfig
+	tunnels         map[string]*Tunnel // 内存中维护的隧道配置
+	mu              sync.RWMutex
+	connected       bool
+	connectedAt     time.Time
+	lastError       string
+	cmd             *exec.Cmd
+	configPath      string // frpc.ini 路径
+	logPath         string
+	restartCount    int       // 重启计数，避免无限重启
 	lastRestartTime time.Time // 上次重启时间
-	proxyManager *ProxyManager
+	proxyManager    *ProxyManager
 }
 
 // NewClient 创建FRP客户端
@@ -78,9 +77,9 @@ func NewClient(cfg *config.FRPServerConfig) Client {
 	configPath := filepath.Join(configDir, "frpc.ini")
 
 	return &frpClient{
-		config:     cfg,
-		tunnels:    make(map[string]*Tunnel),
-		configPath: configPath,
+		config:       cfg,
+		tunnels:      make(map[string]*Tunnel),
+		configPath:   configPath,
 		proxyManager: NewProxyManager(),
 	}
 }
@@ -105,7 +104,7 @@ func (c *frpClient) Connect() error {
 	}
 
 	// 确保 frpc 可执行文件可用（优先使用嵌入的，否则使用系统 PATH）
-	frcPath, err := ensureFRCPath(c.config.FRCPath)
+	frcPath, err := ensureFRCPath()
 	if err != nil {
 		return fmt.Errorf("获取 frpc 可执行文件失败: %v", err)
 	}
@@ -155,7 +154,6 @@ func (c *frpClient) Connect() error {
 		"connected_at": c.connectedAt.Format(time.RFC3339),
 		"pid":          cmd.Process.Pid,
 		"last_error":   "",
-		"frc_path":     frcPath,
 		"log_path":     c.logPath,
 	})
 
@@ -164,12 +162,12 @@ func (c *frpClient) Connect() error {
 		err := cmd.Wait()
 		c.mu.Lock()
 		defer c.mu.Unlock()
-		
+
 		// 只有在当前 cmd 还是这个进程时才处理（避免旧进程的 Wait 干扰）
 		if c.cmd != cmd {
 			return
 		}
-		
+
 		c.connected = false
 		if err != nil {
 			c.lastError = err.Error()
@@ -179,24 +177,23 @@ func (c *frpClient) Connect() error {
 			logger.Info("frpc 进程已退出")
 		}
 		c.cmd = nil
-		
+
 		realtime.Default().Broadcast("frp_status_changed", map[string]interface{}{
 			"connected":    false,
 			"server":       c.config.Server,
 			"connected_at": "",
 			"pid":          0,
 			"last_error":   c.lastError,
-			"frc_path":     frcPath,
 			"log_path":     c.logPath,
 		})
-		
+
 		// 如果配置了服务器地址，说明应该保持连接，自动重启
 		if c.config.Server != "" {
 			logger.Info("frpc 进程异常退出，3秒后自动重启...")
 			c.mu.Unlock()
 			time.Sleep(3 * time.Second)
 			c.mu.Lock()
-			
+
 			// 再次检查是否应该重启（可能用户已经手动断开或配置已改变）
 			if c.config.Server != "" && c.cmd == nil {
 				logger.Info("开始自动重启 frpc...")
@@ -217,7 +214,11 @@ func (c *frpClient) Connect() error {
 
 // generateRandomDomain 生成随机子域名
 func (c *frpClient) generateRandomDomain() string {
-	const base = "frpc.zyckj.club"
+	base := strings.TrimSpace(c.config.DomainSuffix)
+	base = strings.TrimPrefix(base, ".")
+	if base == "" {
+		base = "frpc.zyckj.club"
+	}
 	const letters = "abcdefghijklmnopqrstuvwxyz0123456789"
 	b := make([]byte, 8)
 	for i := range b {
@@ -295,18 +296,19 @@ body { margin:0; padding:0; font-family: -apple-system,BlinkMacSystemFont,"Segoe
 
 	return GenerateConfig(c.config, cfgTunnels)
 }
+
 // monitorProcess 监控 frpc 进程，退出时自动重启
 func (c *frpClient) monitorProcess(cmd *exec.Cmd, frcPath string) {
 	err := cmd.Wait()
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	
+
 	// 只有在当前 cmd 还是这个进程时才处理（避免旧进程的 Wait 干扰）
 	// 如果 cmd 已经被清空（可能是正在重启），则忽略
 	if c.cmd != cmd || c.cmd == nil {
 		return
 	}
-	
+
 	c.connected = false
 	if err != nil {
 		c.lastError = err.Error()
@@ -316,22 +318,21 @@ func (c *frpClient) monitorProcess(cmd *exec.Cmd, frcPath string) {
 		logger.Info("frpc 进程已退出")
 	}
 	c.cmd = nil
-	
+
 	realtime.Default().Broadcast("frp_status_changed", map[string]interface{}{
 		"connected":    false,
 		"server":       c.config.Server,
 		"connected_at": "",
 		"pid":          0,
 		"last_error":   c.lastError,
-		"frc_path":     frcPath,
 		"log_path":     c.logPath,
 	})
-	
+
 	// 如果配置了服务器地址，说明应该保持连接，自动重启
 	// 但需要避免无限重启循环
 	if c.config.Server != "" {
 		now := time.Now()
-		
+
 		// 如果距离上次重启不到 10 秒，且重启次数超过 3 次，停止自动重启
 		if !c.lastRestartTime.IsZero() && now.Sub(c.lastRestartTime) < 10*time.Second {
 			c.restartCount++
@@ -344,7 +345,6 @@ func (c *frpClient) monitorProcess(cmd *exec.Cmd, frcPath string) {
 					"connected_at": "",
 					"pid":          0,
 					"last_error":   c.lastError,
-					"frc_path":     frcPath,
 					"log_path":     c.logPath,
 				})
 				return
@@ -353,13 +353,13 @@ func (c *frpClient) monitorProcess(cmd *exec.Cmd, frcPath string) {
 			// 重置计数
 			c.restartCount = 1
 		}
-		
+
 		c.lastRestartTime = now
 		logger.Info("frpc 进程异常退出，3秒后自动重启... (重试 %d/3)", c.restartCount)
 		c.mu.Unlock()
 		time.Sleep(3 * time.Second)
 		c.mu.Lock()
-		
+
 		// 再次检查是否应该重启（可能用户已经手动断开或配置已改变）
 		if c.config.Server != "" && c.cmd == nil && c.restartCount <= 3 {
 			logger.Info("开始自动重启 frpc...")
@@ -398,7 +398,6 @@ func (c *frpClient) Disconnect() error {
 		"connected_at": "",
 		"pid":          0,
 		"last_error":   "",
-		"frc_path":     c.config.FRCPath,
 		"log_path":     c.logPath,
 	})
 	return nil
@@ -417,7 +416,6 @@ func (c *frpClient) GetStatus() (*FRPStatus, error) {
 	connected := c.connected
 	server := c.config.Server
 	lastErr := c.lastError
-	frcPath := c.config.FRCPath
 	logPath := c.logPath
 	connectedAt := ""
 	if !c.connectedAt.IsZero() {
@@ -442,7 +440,6 @@ func (c *frpClient) GetStatus() (*FRPStatus, error) {
 		PID:         pid,
 		LastError:   lastErr,
 		Tunnels:     tunnels,
-		FRCPath:     frcPath,
 		LogPath:     logPath,
 	}, nil
 }
@@ -499,13 +496,14 @@ func (c *frpClient) AddTunnel(tunnel *Tunnel) error {
 	if db := database.GetDB(); db != nil {
 		// 转换为 database.Tunnel
 		dbTunnel := &database.Tunnel{
-			Name:       tunnel.Name,
-			Type:       tunnel.Type,
-			LocalIP:    tunnel.LocalIP,
-			LocalPort:  tunnel.LocalPort,
-			RemotePort: tunnel.RemotePort,
-			Domain:     tunnel.Domain,
-			CreatedAt:  tunnel.CreatedAt,
+			Name:            tunnel.Name,
+			Type:            tunnel.Type,
+			LocalIP:         tunnel.LocalIP,
+			LocalPort:       tunnel.LocalPort,
+			RemotePort:      tunnel.RemotePort,
+			Domain:          tunnel.Domain,
+			CreatedAt:       tunnel.CreatedAt,
+			FallbackEnabled: tunnel.FallbackEnabled,
 		}
 		if err := database.SaveTunnel(db, dbTunnel); err != nil {
 			logger.Error("保存隧道到数据库失败: %v", err)
@@ -570,7 +568,17 @@ func (c *frpClient) UpdateTunnel(name string, tunnel *Tunnel) error {
 		return fmt.Errorf("隧道不存在: %s", name)
 	}
 
-	tunnel.Name = name // 确保名称一致
+	old := c.tunnels[name]
+	newName := strings.TrimSpace(tunnel.Name)
+	if newName == "" {
+		newName = name
+	}
+
+	// created_at：如果请求没带，保留原始值
+	if strings.TrimSpace(tunnel.CreatedAt) == "" && old != nil {
+		tunnel.CreatedAt = old.CreatedAt
+	}
+
 	// HTTP/HTTPS 必须填写域名，否则 frpc 会退出；如未提供则自动生成随机域名
 	if tunnel.Type == "http" || tunnel.Type == "https" {
 		if strings.TrimSpace(tunnel.Domain) == "" {
@@ -581,26 +589,43 @@ func (c *frpClient) UpdateTunnel(name string, tunnel *Tunnel) error {
 			return fmt.Errorf("HTTP/HTTPS 隧道必须填写域名(custom_domains)")
 		}
 	}
-	c.tunnels[name] = tunnel
-	logger.Info("隧道已更新到内存: %s", name)
+	// 如果发生重命名，需要迁移 map key 并更新 DB 主键
+	if newName != name {
+		if _, exists := c.tunnels[newName]; exists {
+			return fmt.Errorf("隧道已存在: %s", newName)
+		}
+		logger.Info("隧道重命名: %s -> %s", name, newName)
+		// 先更新数据库主键（如 DB 可用）
+		if db := database.GetDB(); db != nil {
+			if err := database.RenameTunnel(db, name, newName); err != nil {
+				return fmt.Errorf("重命名隧道失败: %v", err)
+			}
+		}
+		delete(c.tunnels, name)
+	}
+
+	tunnel.Name = newName
+	c.tunnels[newName] = tunnel
+	logger.Info("隧道已更新到内存: %s", newName)
 
 	// 保存到数据库
 	if db := database.GetDB(); db != nil {
 		// 转换为 database.Tunnel
 		dbTunnel := &database.Tunnel{
-			Name:       tunnel.Name,
-			Type:       tunnel.Type,
-			LocalIP:    tunnel.LocalIP,
-			LocalPort:  tunnel.LocalPort,
-			RemotePort: tunnel.RemotePort,
-			Domain:     tunnel.Domain,
-			CreatedAt:  tunnel.CreatedAt,
+			Name:            tunnel.Name,
+			Type:            tunnel.Type,
+			LocalIP:         tunnel.LocalIP,
+			LocalPort:       tunnel.LocalPort,
+			RemotePort:      tunnel.RemotePort,
+			Domain:          tunnel.Domain,
+			CreatedAt:       tunnel.CreatedAt,
+			FallbackEnabled: tunnel.FallbackEnabled,
 		}
 		if err := database.SaveTunnel(db, dbTunnel); err != nil {
 			logger.Error("更新隧道到数据库失败: %v", err)
 			// 继续执行，不中断流程
 		} else {
-			logger.Info("隧道已更新到数据库: %s", name)
+			logger.Info("隧道已更新到数据库: %s", tunnel.Name)
 		}
 	}
 
@@ -680,7 +705,7 @@ func (c *frpClient) loadTunnelsFromDB() error {
 // reloadConfig 内部方法：重新生成配置并热重载 frpc
 func (c *frpClient) reloadConfig() error {
 	logger.Info("重新生成配置，当前隧道数: %d", len(c.tunnels))
-	
+
 	// 生成新配置（对 http/https 启用代理兜底与域名自动生成）
 	configContent, err := c.generateConfigWithProxy()
 	if err != nil {
@@ -693,7 +718,7 @@ func (c *frpClient) reloadConfig() error {
 	if err := os.WriteFile(c.configPath, []byte(configContent), 0644); err != nil {
 		return err
 	}
-	
+
 	logger.Info("配置文件已写入: %s", c.configPath)
 
 	// 如果进程正在运行，尝试使用热重载
@@ -716,7 +741,7 @@ func (c *frpClient) reloadConfig() error {
 
 		// 进程正在运行，使用热重载
 		logger.Info("使用 frpc reload 热重载配置...")
-		frcPath, err := ensureFRCPath(c.config.FRCPath)
+		frcPath, err := ensureFRCPath()
 		if err != nil {
 			return fmt.Errorf("获取 frpc 可执行文件失败: %v", err)
 		}
@@ -754,7 +779,7 @@ func (c *frpClient) restartProcess() error {
 
 	// 标记正在重启，避免 monitorProcess 干扰
 	oldCmd := c.cmd
-	c.cmd = nil  // 先清空，避免 monitorProcess 处理旧进程退出
+	c.cmd = nil // 先清空，避免 monitorProcess 处理旧进程退出
 	c.connected = false
 
 	// 停止旧进程
@@ -762,7 +787,7 @@ func (c *frpClient) restartProcess() error {
 	_ = oldCmd.Wait()
 
 	// 重新启动（确保 frpc 路径可用）
-	frcPath, err := ensureFRCPath(c.config.FRCPath)
+	frcPath, err := ensureFRCPath()
 	if err != nil {
 		return fmt.Errorf("获取 frpc 可执行文件失败: %v", err)
 	}
@@ -795,7 +820,6 @@ func (c *frpClient) restartProcess() error {
 		"connected_at": c.connectedAt.Format(time.RFC3339),
 		"pid":          cmd.Process.Pid,
 		"last_error":   "",
-		"frc_path":     frcPath,
 		"log_path":     c.logPath,
 	})
 
@@ -804,4 +828,3 @@ func (c *frpClient) restartProcess() error {
 
 	return nil
 }
-

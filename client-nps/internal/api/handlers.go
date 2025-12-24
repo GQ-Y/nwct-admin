@@ -7,9 +7,9 @@ import (
 	"net/http"
 	"nwct/client-nps/config"
 	"nwct/client-nps/internal/database"
+	"nwct/client-nps/internal/frp"
 	"nwct/client-nps/internal/logger"
 	"nwct/client-nps/internal/network"
-	"nwct/client-nps/internal/frp"
 	"nwct/client-nps/internal/scanner"
 	"nwct/client-nps/internal/toolkit"
 	"nwct/client-nps/internal/version"
@@ -1034,7 +1034,6 @@ func (s *Server) handleFRPConnect(c *gin.Context) {
 		AdminAddr string `json:"admin_addr"`
 		AdminUser string `json:"admin_user"`
 		AdminPwd  string `json:"admin_pwd"`
-		FRCPath   string `json:"frc_path"`
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -1056,9 +1055,6 @@ func (s *Server) handleFRPConnect(c *gin.Context) {
 	}
 	if strings.TrimSpace(req.AdminPwd) != "" {
 		s.config.FRPServer.AdminPwd = strings.TrimSpace(req.AdminPwd)
-	}
-	if strings.TrimSpace(req.FRCPath) != "" {
-		s.config.FRPServer.FRCPath = strings.TrimSpace(req.FRCPath)
 	}
 
 	if err := s.frpClient.Connect(); err != nil {
@@ -1346,17 +1342,18 @@ func (s *Server) handleConfigGet(c *gin.Context) {
 		},
 		"network": net,
 		"frp_server": gin.H{
-			"server":     s.config.FRPServer.Server,
-			"token":      "***",
-			"admin_addr": s.config.FRPServer.AdminAddr,
-			"admin_user": s.config.FRPServer.AdminUser,
+			"server":        s.config.FRPServer.Server,
+			"token":         "***",
+			"admin_addr":    s.config.FRPServer.AdminAddr,
+			"admin_user":    s.config.FRPServer.AdminUser,
+			"domain_suffix": s.config.FRPServer.DomainSuffix,
 		},
 		"mqtt": gin.H{
-			"server":    s.config.MQTT.Server,
-			"port":      s.config.MQTT.Port,
-			"username":  s.config.MQTT.Username,
-			"client_id": s.config.MQTT.ClientID,
-			"tls":       s.config.MQTT.TLS,
+			"server":       s.config.MQTT.Server,
+			"port":         s.config.MQTT.Port,
+			"username":     s.config.MQTT.Username,
+			"client_id":    s.config.MQTT.ClientID,
+			"tls":          s.config.MQTT.TLS,
 			"auto_connect": s.config.MQTT.AutoConnect,
 		},
 		"scanner": s.config.Scanner,

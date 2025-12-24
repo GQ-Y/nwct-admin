@@ -9,6 +9,9 @@ export default defineConfig(({ mode }) => {
       server: {
         port: 3000,
         host: '0.0.0.0',
+        // 允许通过 FRP 分配的域名访问 Vite dev server（避免 "Blocked request. This host is not allowed."）
+        // 这里用后缀匹配，支持任意前缀：*.frpc.zyckj.club
+        allowedHosts: ['.frpc.zyckj.club'],
       },
       build: {
         // 输出到后端可 embed 的目录（最终由 client-nps 单端口提供）
