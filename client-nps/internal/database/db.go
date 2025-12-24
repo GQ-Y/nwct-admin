@@ -122,11 +122,26 @@ func createTables() error {
 		status TEXT DEFAULT 'success'
 	);`
 
+	// FRP隧道表
+	frpTunnelsTable := `
+	CREATE TABLE IF NOT EXISTS frp_tunnels (
+		name TEXT PRIMARY KEY,
+		type TEXT NOT NULL,
+		local_ip TEXT NOT NULL,
+		local_port INTEGER NOT NULL,
+		remote_port INTEGER DEFAULT 0,
+		domain TEXT,
+		fallback_enabled INTEGER DEFAULT 1,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	);`
+
 	tables := []string{
 		devicesTable,
 		devicePortsTable,
 		deviceHistoryTable,
 		mqttLogsTable,
+		frpTunnelsTable,
 	}
 
 	for _, table := range tables {
@@ -142,6 +157,8 @@ func createTables() error {
 	if err := ensureColumn("devices", "extra", "TEXT"); err != nil {
 		return err
 	}
+	// 轻量迁移：旧库补字段
+	_ = ensureColumn("frp_tunnels", "fallback_enabled", "INTEGER DEFAULT 1")
 
 	return nil
 }

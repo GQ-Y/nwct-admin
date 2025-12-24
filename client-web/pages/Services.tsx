@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Card, Button, Input, Badge, Select } from '../components/UI';
-import { Pause, Play, Save, Activity, Users, ArrowUp, ArrowDown, RefreshCw } from 'lucide-react';
+import { Pause, Play, Save, Activity, Users, ArrowUp, ArrowDown, RefreshCw, Plus, Edit, Trash2, X } from 'lucide-react';
 import { useLanguage } from '../contexts/LanguageContext';
 import { api } from '../lib/api';
 import { useRealtime } from '../contexts/RealtimeContext';
@@ -15,6 +15,18 @@ export const FRPPage: React.FC = () => {
   const [token, setToken] = useState('');
   const [frcPath, setFrcPath] = useState('');
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
+  
+  // 隧道管理相关状态
+  const [showTunnelModal, setShowTunnelModal] = useState(false);
+  const [editingTunnel, setEditingTunnel] = useState<any>(null);
+  const [tunnelForm, setTunnelForm] = useState({
+    name: '',
+    type: 'tcp',
+    local_ip: '',
+    local_port: '',
+    remote_port: '',
+    domain: '',
+  });
 
   const connected = useMemo(() => {
     const s = rt.frpStatus ?? status;
@@ -75,6 +87,117 @@ export const FRPPage: React.FC = () => {
       setStatus(s);
       const tt = await api.frpTunnels();
       setTunnels(tt?.tunnels || []);
+    } catch (e: any) {
+      alert(e?.message || String(e));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // 打开创建隧道对话框
+  const openCreateModal = () => {
+    setEditingTunnel(null);
+    setTunnelForm({
+      name: '',
+      type: 'tcp',
+      local_ip: '',
+      local_port: '',
+      remote_port: '',
+      domain: '',
+    });
+    setShowTunnelModal(true);
+  };
+
+  // 打开编辑隧道对话框
+  const openEditModal = (tunnel: any) => {
+    setEditingTunnel(tunnel);
+    setTunnelForm({
+      name: tunnel.name || '',
+      type: tunnel.type || 'tcp',
+      local_ip: tunnel.local_ip || '',
+      local_port: String(tunnel.local_port || ''),
+      remote_port: tunnel.remote_port ? String(tunnel.remote_port) : '',
+      domain: tunnel.domain || '',
+    });
+    setShowTunnelModal(true);
+  };
+
+  // 关闭对话框
+  const closeModal = () => {
+    setShowTunnelModal(false);
+    setEditingTunnel(null);
+  };
+
+  // 生成隧道名称（如果未提供）
+  const generateTunnelName = (localIP: string, localPort: string) => {
+    if (localIP && localPort) {
+      return localIP.replace(/\./g, '_') + '_' + localPort;
+    }
+    return '';
+  };
+
+  // 创建或更新隧道
+  const handleSaveTunnel = async () => {
+    // 验证表单
+    if (!tunnelForm.local_ip.trim()) {
+      alert('请输入本地 IP');
+      return;
+    }
+    if (!tunnelForm.local_port.trim() || Number(tunnelForm.local_port) < 1 || Number(tunnelForm.local_port) > 65535) {
+      alert('请输入有效的本地端口（1-65535）');
+      return;
+    }
+    if (tunnelForm.remote_port && (Number(tunnelForm.remote_port) < 0 || Number(tunnelForm.remote_port) > 65535)) {
+      alert('远程端口必须在 0-65535 之间（0 表示自动分配）');
+      return;
+    }
+
+    const name = tunnelForm.name.trim() || generateTunnelName(tunnelForm.local_ip, tunnelForm.local_port);
+    if (!name) {
+      alert('无法生成隧道名称，请手动输入');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const tunnelData = {
+        name,
+        type: tunnelForm.type,
+        local_ip: tunnelForm.local_ip.trim(),
+        local_port: Number(tunnelForm.local_port),
+        remote_port: tunnelForm.remote_port ? Number(tunnelForm.remote_port) : 0,
+        domain: tunnelForm.domain.trim() || undefined,
+      };
+
+      if (editingTunnel) {
+        // 更新隧道
+        await api.frpUpdateTunnel(editingTunnel.name, tunnelData);
+      } else {
+        // 创建隧道
+        await api.frpAddTunnel(tunnelData);
+      }
+
+      // 刷新列表
+      await refresh();
+      closeModal();
+    } catch (e: any) {
+      alert(e?.message || String(e));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // 删除隧道
+  const handleDeleteTunnel = async (tunnel: any) => {
+    if (!confirm(`确定要删除隧道 "${tunnel.name}" 吗？`)) {
+      return;
+    }
+
+    setLoading(true);
+    try {
+      await api.frpRemoveTunnel(tunnel.name);
+      // 刷新列表
+      await refresh();
     } catch (e: any) {
       alert(e?.message || String(e));
     } finally {
@@ -224,9 +347,30 @@ export const FRPPage: React.FC = () => {
         </div>
       </div>
 
-      <Card title={t('services.tunnels_list')}>
+      <Card 
+        title={t('services.tunnels_list')}
+        extra={
+          <Button 
+            variant="primary" 
+            onClick={openCreateModal}
+            disabled={!connected || loading}
+            style={{ display: 'flex', alignItems: 'center', gap: 8 }}
+          >
+            <Plus size={16} /> 创建隧道
+          </Button>
+        }
+      >
           <table className="table">
-          <thead><tr><th>名称</th><th>类型</th><th>本地地址</th><th>远程端口</th><th>创建时间</th></tr></thead>
+          <thead>
+            <tr>
+              <th>名称</th>
+              <th>类型</th>
+              <th>本地地址</th>
+              <th>远程端口</th>
+              <th>创建时间</th>
+              <th>操作</th>
+            </tr>
+          </thead>
           <tbody>
             {tunnels.map((tunnel: any, idx: number) => (
               <tr key={tunnel.name || idx}>
@@ -235,18 +379,177 @@ export const FRPPage: React.FC = () => {
                 <td>{tunnel.local_ip && tunnel.local_port ? `${tunnel.local_ip}:${tunnel.local_port}` : '-'}</td>
                 <td>{tunnel.remote_port != null && tunnel.remote_port > 0 ? tunnel.remote_port : '自动分配'}</td>
                 <td>{tunnel.created_at || '-'}</td>
+                <td>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <Button
+                      variant="ghost"
+                      onClick={() => openEditModal(tunnel)}
+                      disabled={loading}
+                      style={{ padding: '4px 8px', height: 'auto' }}
+                      title="编辑"
+                    >
+                      <Edit size={14} />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      onClick={() => handleDeleteTunnel(tunnel)}
+                      disabled={loading}
+                      style={{ padding: '4px 8px', height: 'auto', color: '#ff4d4f' }}
+                      title="删除"
+                    >
+                      <Trash2 size={14} />
+                    </Button>
+                  </div>
+                </td>
               </tr>
             ))}
             {tunnels.length === 0 ? (
               <tr>
-                <td colSpan={5} style={{ color: '#888', padding: 12 }}>
-                  {connected ? '暂无隧道' : '未连接'}
+                <td colSpan={6} style={{ color: '#888', padding: 12 }}>
+                  {connected ? '暂无隧道，点击"创建隧道"按钮添加' : '未连接'}
                 </td>
               </tr>
             ) : null}
           </tbody>
         </table>
       </Card>
+
+      {/* 创建/编辑隧道对话框 */}
+      {showTunnelModal && (
+        <div
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: 'rgba(0, 0, 0, 0.5)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1000,
+          }}
+          onClick={(e) => {
+            if (e.target === e.currentTarget) closeModal();
+          }}
+        >
+          <Card
+            title={editingTunnel ? '编辑隧道' : '创建隧道'}
+            extra={
+              <button
+                onClick={closeModal}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer',
+                  padding: 4,
+                  display: 'flex',
+                  alignItems: 'center',
+                }}
+              >
+                <X size={20} />
+              </button>
+            }
+            style={{
+              width: '90%',
+              maxWidth: 600,
+              maxHeight: '90vh',
+              overflow: 'auto',
+            }}
+          >
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+              <div>
+                <label style={{ display: 'block', marginBottom: 8, fontSize: 14, fontWeight: 500 }}>
+                  隧道名称 <span style={{ color: '#999' }}>(可选，不填则自动生成)</span>
+                </label>
+                <Input
+                  value={tunnelForm.name}
+                  onChange={(e) => setTunnelForm({ ...tunnelForm, name: (e.target as any).value })}
+                  placeholder="自动生成"
+                />
+              </div>
+
+              <div>
+                <label style={{ display: 'block', marginBottom: 8, fontSize: 14, fontWeight: 500 }}>
+                  类型 <span style={{ color: '#f5222d' }}>*</span>
+                </label>
+                <Select
+                  value={tunnelForm.type}
+                  onChange={(value) => setTunnelForm({ ...tunnelForm, type: value })}
+                  options={[
+                    { label: 'TCP', value: 'tcp' },
+                    { label: 'UDP', value: 'udp' },
+                    { label: 'HTTP', value: 'http' },
+                    { label: 'HTTPS', value: 'https' },
+                    { label: 'STCP', value: 'stcp' },
+                  ]}
+                />
+              </div>
+
+              <div>
+                <label style={{ display: 'block', marginBottom: 8, fontSize: 14, fontWeight: 500 }}>
+                  本地 IP <span style={{ color: '#f5222d' }}>*</span>
+                </label>
+                <Input
+                  value={tunnelForm.local_ip}
+                  onChange={(e) => setTunnelForm({ ...tunnelForm, local_ip: (e.target as any).value })}
+                  placeholder="192.168.1.100"
+                />
+              </div>
+
+              <div>
+                <label style={{ display: 'block', marginBottom: 8, fontSize: 14, fontWeight: 500 }}>
+                  本地端口 <span style={{ color: '#f5222d' }}>*</span>
+                </label>
+                <Input
+                  type="number"
+                  value={tunnelForm.local_port}
+                  onChange={(e) => setTunnelForm({ ...tunnelForm, local_port: (e.target as any).value })}
+                  placeholder="80"
+                  min="1"
+                  max="65535"
+                />
+              </div>
+
+              <div>
+                <label style={{ display: 'block', marginBottom: 8, fontSize: 14, fontWeight: 500 }}>
+                  远程端口 <span style={{ color: '#999' }}>(可选，0 表示自动分配)</span>
+                </label>
+                <Input
+                  type="number"
+                  value={tunnelForm.remote_port}
+                  onChange={(e) => setTunnelForm({ ...tunnelForm, remote_port: (e.target as any).value })}
+                  placeholder="0 (自动分配)"
+                  min="0"
+                  max="65535"
+                />
+              </div>
+
+              {(tunnelForm.type === 'http' || tunnelForm.type === 'https') && (
+                <div>
+                  <label style={{ display: 'block', marginBottom: 8, fontSize: 14, fontWeight: 500 }}>
+                    域名 <span style={{ color: '#999' }}>(可选，仅 HTTP/HTTPS 使用)</span>
+                  </label>
+                  <Input
+                    value={tunnelForm.domain}
+                    onChange={(e) => setTunnelForm({ ...tunnelForm, domain: (e.target as any).value })}
+                    placeholder="example.com"
+                  />
+                </div>
+              )}
+
+              <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end', marginTop: 8 }}>
+                <Button variant="outline" onClick={closeModal} disabled={loading}>
+                  取消
+                </Button>
+                <Button variant="primary" onClick={handleSaveTunnel} disabled={loading}>
+                  {loading ? '保存中...' : editingTunnel ? '更新' : '创建'}
+                </Button>
+              </div>
+            </div>
+          </Card>
+        </div>
+      )}
     </div>
   );
 };

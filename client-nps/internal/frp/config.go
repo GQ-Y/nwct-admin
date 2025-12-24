@@ -25,6 +25,10 @@ func GenerateConfig(cfg *config.FRPServerConfig, tunnels map[string]*Tunnel) (st
 	if cfg.Token != "" {
 		sb.WriteString(fmt.Sprintf("token = %s\n", cfg.Token))
 	}
+	// 启用 webServer 以支持热重载
+	sb.WriteString("\n[webServer]\n")
+	sb.WriteString("addr = 127.0.0.1\n")
+	sb.WriteString("port = 7400\n")
 	sb.WriteString("\n")
 
 	// 写入每个隧道配置

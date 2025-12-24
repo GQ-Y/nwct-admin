@@ -15,6 +15,7 @@ type Tunnel struct {
 	RemotePort int    `json:"remote_port"` // 远程端口（0表示自动分配）
 	Domain     string `json:"domain,omitempty"` // HTTP类型使用
 	CreatedAt  string `json:"created_at"`
+	FallbackEnabled bool `json:"fallback_enabled,omitempty"` // HTTP/HTTPS 目标不可达时展示默认页
 }
 
 // NewTunnel 创建新隧道

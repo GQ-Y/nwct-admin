@@ -10,7 +10,6 @@ import (
 	"net"
 	"nwct/client-nps/internal/database"
 	"nwct/client-nps/internal/fingerprint"
-	"nwct/client-nps/internal/frp"
 	"nwct/client-nps/internal/logger"
 	"nwct/client-nps/internal/realtime"
 	"nwct/client-nps/internal/toolkit"
@@ -382,12 +381,8 @@ func (ds *deviceScanner) performScan(subnet string) {
 		}
 
 		// 端口扫描（异步，避免阻塞）
-		if len(device.OpenPorts) == 0 {
-			go ds.scanPorts(device.IP)
-		} else {
-			// 自动穿透：为设备的开放端口创建隧道
-			go ds.autoCreateTunnels(device.IP, device.OpenPorts)
-		}
+		// 无论 scanCommonPorts 是否发现端口，都进行深度扫描以确保不遗漏
+		go ds.scanPorts(device.IP)
 	}
 
 	logger.Info("扫描完成，发现 %d 个设备", len(arpDevices))
@@ -444,9 +439,20 @@ func (ds *deviceScanner) identifyDevice(ip, mac string) *Device {
 
 // scanPorts 扫描设备端口
 func (ds *deviceScanner) scanPorts(ip string) {
-	// 覆盖常见路由器/NAS/摄像头/NVR Web 端口
-	commonPorts := []int{22, 23, 53, 80, 81, 443, 445, 554, 8000, 8008, 8080, 8081, 8088, 8443, 8888, 8899, 5000, 5001, 3306, 5432, 9100}
+	// 扩展端口列表：包含更多常见服务端口
+	// 路由器/网关: 80, 443, 8080, 8443
+	// NAS/存储: 5000, 5001, 8000, 8080
+	// 摄像头/NVR: 554, 8000, 8080, 8899
+	// 数据库: 3306, 5432, 6379
+	// 其他服务: 22(SSH), 23(Telnet), 53(DNS), 445(SMB), 5666(自定义), 9100(打印机)
+	commonPorts := []int{
+		22, 23, 53, 80, 81, 443, 445, 554,
+		8000, 8008, 8080, 8081, 8088, 8443, 8888, 8899,
+		5000, 5001, 5666,
+		3306, 5432, 6379, 9100,
+	}
 	updated := 0
+	newPorts := []int{} // 记录新发现的端口
 
 	for _, port := range commonPorts {
 		result, err := toolkit.PortScan(ip, []int{port}, 2*time.Second, "tcp")
@@ -455,6 +461,16 @@ func (ds *deviceScanner) scanPorts(ip string) {
 		}
 
 		for _, portInfo := range result.OpenPorts {
+			// 检查端口是否已存在
+			existingPorts, _ := database.GetDevicePorts(ds.db, ip)
+			exists := false
+			for _, ep := range existingPorts {
+				if ep.Port == portInfo.Port && ep.Status == "open" {
+					exists = true
+					break
+				}
+			}
+
 			dbPort := &database.DevicePort{
 				DeviceIP: ip,
 				Port:     portInfo.Port,
@@ -464,6 +480,10 @@ func (ds *deviceScanner) scanPorts(ip string) {
 				Status:   portInfo.Status,
 			}
 			if err := database.SaveDevicePort(ds.db, ip, dbPort); err == nil {
+				if !exists {
+					newPorts = append(newPorts, portInfo.Port)
+					logger.Info("发现新开放端口: %s:%d", ip, portInfo.Port)
+				}
 				updated++
 			}
 		}
@@ -474,48 +494,18 @@ func (ds *deviceScanner) scanPorts(ip string) {
 			"ip":      ip,
 			"updated": updated,
 		})
-		// 自动穿透：为新发现的端口创建隧道
-		go ds.autoCreateTunnels(ip, nil)
 	}
 }
 
-// autoCreateTunnels 为设备的开放端口自动创建隧道
-func (ds *deviceScanner) autoCreateTunnels(deviceIP string, ports []int) {
-	// 检查全局 FRP 客户端是否可用
-	frpClient := frp.GetGlobalClient()
-	if frpClient == nil || !frpClient.IsConnected() {
-		return // FRP 未连接，跳过
-	}
-
-	// 如果没有提供端口列表，从数据库查询
-	if ports == nil || len(ports) == 0 {
-		dbPorts, err := database.GetDevicePorts(ds.db, deviceIP)
-		if err != nil {
-			return
-		}
-		for _, p := range dbPorts {
-			if p.Status == "open" {
-				ports = append(ports, p.Port)
-			}
-		}
-	}
-
-	// 为每个端口创建隧道
-	for _, port := range ports {
-		tunnelName := frp.GenerateTunnelName(deviceIP, port)
-		tunnel := frp.NewTunnel(tunnelName, "tcp", deviceIP, port, 0)
-
-		if err := frpClient.AddTunnel(tunnel); err != nil {
-			logger.Error("自动创建隧道失败: name=%s err=%v", tunnelName, err)
-		} else {
-			logger.Info("自动创建隧道: %s -> %s:%d", tunnelName, deviceIP, port)
-		}
-	}
-}
-
-// scanCommonPorts 扫描常用端口
+// scanCommonPorts 扫描常用端口（快速扫描，用于设备识别）
 func (ds *deviceScanner) scanCommonPorts(ip string) []int {
-	commonPorts := []int{22, 23, 53, 80, 81, 443, 445, 554, 8000, 8080, 8081, 8443, 8888}
+	// 扩展端口列表，与 scanPorts 保持一致
+	commonPorts := []int{
+		22, 23, 53, 80, 81, 443, 445, 554,
+		8000, 8008, 8080, 8081, 8088, 8443, 8888, 8899,
+		5000, 5001, 5666,
+		3306, 5432, 6379, 9100,
+	}
 	openPorts := []int{}
 
 	for _, port := range commonPorts {
