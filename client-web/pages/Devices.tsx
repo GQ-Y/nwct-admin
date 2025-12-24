@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Card, Button, SearchInput, Select, Badge, Pagination, ProgressBar, Alert } from '../components/UI';
+import { Card, Button, SearchInput, Select, Badge, Pagination, ProgressBar, Alert, Input } from '../components/UI';
 import { Device } from '../types';
 import { RefreshCw, Smartphone, Monitor, Server, Camera, Radar } from 'lucide-react';
 import { useLanguage } from '../contexts/LanguageContext';
@@ -16,6 +16,18 @@ export const Devices: React.FC = () => {
   const [view, setView] = useState<'list' | 'detail'>('list');
   const [selectedDevice, setSelectedDevice] = useState<Device | null>(null);
   const [selectedExtra, setSelectedExtra] = useState<any>(null);
+  const [selectedPorts, setSelectedPorts] = useState<any[]>([]);
+  const [scanPortsInput, setScanPortsInput] = useState<string>('');
+  const [domainSuffix, setDomainSuffix] = useState('frpc.zyckj.club');
+  const [showTunnelModal, setShowTunnelModal] = useState(false);
+  const [tunnelForm, setTunnelForm] = useState({
+    name: '',
+    type: 'tcp',
+    local_ip: '',
+    local_port: '',
+    remote_port: '',
+    domain: '',
+  });
   const [isScanning, setIsScanning] = useState(false);
   const [isScanningPorts, setIsScanningPorts] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
@@ -50,6 +62,16 @@ export const Devices: React.FC = () => {
   useEffect(() => {
     api.scanStatus()
       .then((s) => setScanStatus(s))
+      .catch(() => {});
+  }, []);
+
+  // domain_suffix：用于从端口一键创建 HTTP/HTTPS 隧道时拼接域名
+  useEffect(() => {
+    api.configGet()
+      .then((cfg) => {
+        const ds = (cfg?.frp_server?.domain_suffix || '').trim();
+        if (ds) setDomainSuffix(ds.replace(/^\./, ''));
+      })
       .catch(() => {});
   }, []);
 
@@ -154,14 +176,97 @@ export const Devices: React.FC = () => {
       .finally(() => setIsScanning(false));
   };
 
-  const handleScanPorts = () => {
+  const handleScanPorts = async () => {
     if (isScanningPorts) return;
+    if (!selectedDevice?.ip) return;
     setIsScanningPorts(true);
-    setTimeout(() => {
-        setIsScanningPorts(false);
-        // In a real app, this would update the ports list
-    }, 3000);
-  }
+    try {
+      await api.deviceScanPorts(selectedDevice.ip, scanPortsInput);
+      // 轮询刷新端口（最多 15 秒）
+      for (let i = 0; i < 15; i++) {
+        // eslint-disable-next-line no-await-in-loop
+        await new Promise((r) => setTimeout(r, 1000));
+        // eslint-disable-next-line no-await-in-loop
+        const detail = await api.deviceDetail(selectedDevice.ip);
+        const ports = Array.isArray(detail?.open_ports) ? detail.open_ports : [];
+        setSelectedPorts(ports);
+        // 同步更新 selectedDevice 的 ports (number[]) 兜底
+        setSelectedDevice((prev) => (prev ? { ...prev, ports: ports.map((p: any) => Number(p?.port ?? p)).filter((n: any) => Number.isFinite(n)) } : prev));
+      }
+    } catch (e: any) {
+      // ignore
+    } finally {
+      setIsScanningPorts(false);
+    }
+  };
+
+  const openTunnelModalForPort = (port: number) => {
+    if (!selectedDevice?.ip) return;
+    const ip = selectedDevice.ip;
+    const p = String(port);
+    setTunnelForm({
+      name: `${ip.replace(/\./g, '_')}_${p}`,
+      type: 'tcp',
+      local_ip: ip,
+      local_port: p,
+      remote_port: p,
+      domain: '',
+    });
+    setShowTunnelModal(true);
+  };
+
+  const closeTunnelModal = () => setShowTunnelModal(false);
+
+  const saveTunnel = async () => {
+    const name = tunnelForm.name.trim();
+    if (!name) {
+      alert('请输入隧道名称');
+      return;
+    }
+    const localIP = tunnelForm.local_ip.trim();
+    const localPort = Number(tunnelForm.local_port);
+    const remotePort = Number(tunnelForm.remote_port);
+    if (!localIP) {
+      alert('请输入本地 IP');
+      return;
+    }
+    if (!Number.isFinite(localPort) || localPort < 1 || localPort > 65535) {
+      alert('请输入有效的本地端口');
+      return;
+    }
+    if (!Number.isFinite(remotePort) || remotePort < 0 || remotePort > 65535) {
+      alert('请输入有效的远程端口（0-65535）');
+      return;
+    }
+
+    let domain: string | undefined = undefined;
+    if (tunnelForm.type === 'http' || tunnelForm.type === 'https') {
+      const v = tunnelForm.domain.trim();
+      if (v) {
+        if (v.includes('.')) {
+          domain = v;
+        } else {
+          const ds = domainSuffix.replace(/^\./, '');
+          domain = ds ? `${v}.${ds}` : v;
+        }
+      }
+    }
+
+    try {
+      await api.frpAddTunnel({
+        name,
+        type: tunnelForm.type,
+        local_ip: localIP,
+        local_port: localPort,
+        remote_port: remotePort,
+        domain,
+      });
+      closeTunnelModal();
+      alert('隧道已创建');
+    } catch (e: any) {
+      alert(e?.message || String(e));
+    }
+  };
 
   const filterOptions = [
     { label: t('devices.all_types'), value: 'all' },
@@ -208,17 +313,44 @@ export const Devices: React.FC = () => {
            </Card>
            
            <Card title={t('devices.open_ports')}>
-              {selectedDevice.ports ? (
+              <div style={{ display: 'flex', gap: 12, marginBottom: 12 }}>
+                <Input
+                  style={{ flex: 1 } as any}
+                  value={scanPortsInput}
+                  onChange={(e) => setScanPortsInput(e.target.value)}
+                  placeholder="端口范围/列表（可选）：例如 80,443,3000-3010"
+                />
+              </div>
+              {(selectedPorts && selectedPorts.length > 0) || (selectedDevice.ports && selectedDevice.ports.length > 0) ? (
                 <table className="table">
-                  <thead><tr><th>{t('devices.port')}</th><th>{t('devices.protocol')}</th><th>{t('devices.state')}</th></tr></thead>
+                  <thead><tr><th>{t('devices.port')}</th><th>{t('devices.protocol')}</th><th>服务</th><th>{t('devices.state')}</th><th>{t('common.action')}</th></tr></thead>
                   <tbody>
-                    {selectedDevice.ports.map((p: number) => (
-                      <tr key={p}>
-                        <td>{p}</td>
-                        <td>TCP</td>
-                        <td><Badge status="online" text={t('devices.open')} /></td>
-                      </tr>
-                    ))}
+                    {(selectedPorts && selectedPorts.length > 0
+                      ? selectedPorts
+                      : (selectedDevice.ports || []).map((p: number) => ({ port: p, protocol: 'tcp', service: '', status: 'open' }))
+                    ).map((p: any) => {
+                      const port = Number(p?.port ?? 0);
+                      const protocol = String(p?.protocol || 'tcp').toUpperCase();
+                      const service = String(p?.service || '-');
+                      const st = String(p?.status || 'open').toLowerCase();
+                      return (
+                        <tr key={`${port}-${protocol}`}>
+                          <td>{port}</td>
+                          <td>{protocol}</td>
+                          <td>{service}</td>
+                          <td><Badge status={st === 'open' ? 'online' : 'offline'} text={st === 'open' ? t('devices.open') : t('common.offline')} /></td>
+                          <td>
+                            <Button
+                              variant="outline"
+                              style={{ fontSize: 13, padding: '4px 10px' }}
+                              onClick={() => openTunnelModalForPort(port)}
+                            >
+                              添加隧道
+                            </Button>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               ) : (
@@ -237,6 +369,78 @@ export const Devices: React.FC = () => {
               </div>
            </Card>
         </div>
+
+        {showTunnelModal ? (
+          <div
+            style={{
+              position: 'fixed',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              background: 'rgba(0, 0, 0, 0.5)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              zIndex: 1000,
+            }}
+            onClick={(e) => {
+              if (e.target === e.currentTarget) closeTunnelModal();
+            }}
+          >
+            <Card title="添加隧道" style={{ width: '90%', maxWidth: 560 }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                <div>
+                  <label style={{ display: 'block', marginBottom: 8, fontSize: 14, fontWeight: 500 }}>名称</label>
+                  <Input value={tunnelForm.name} onChange={(e) => setTunnelForm({ ...tunnelForm, name: (e.target as any).value })} />
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', marginBottom: 8, fontSize: 14, fontWeight: 500 }}>类型</label>
+                  <Select
+                    value={tunnelForm.type}
+                    onChange={(value) => setTunnelForm({ ...tunnelForm, type: value })}
+                    options={[
+                      { label: 'TCP', value: 'tcp' },
+                      { label: 'HTTP', value: 'http' },
+                      { label: 'HTTPS', value: 'https' },
+                    ]}
+                  />
+                </div>
+
+                <div className="grid-2" style={{ gap: 12 }}>
+                  <div>
+                    <label style={{ display: 'block', marginBottom: 8, fontSize: 14, fontWeight: 500 }}>本地 IP</label>
+                    <Input value={tunnelForm.local_ip} onChange={(e) => setTunnelForm({ ...tunnelForm, local_ip: (e.target as any).value })} />
+                  </div>
+                  <div>
+                    <label style={{ display: 'block', marginBottom: 8, fontSize: 14, fontWeight: 500 }}>本地端口</label>
+                    <Input type="number" value={tunnelForm.local_port} onChange={(e) => setTunnelForm({ ...tunnelForm, local_port: (e.target as any).value })} />
+                  </div>
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', marginBottom: 8, fontSize: 14, fontWeight: 500 }}>远程端口</label>
+                  <Input type="number" value={tunnelForm.remote_port} onChange={(e) => setTunnelForm({ ...tunnelForm, remote_port: (e.target as any).value })} />
+                </div>
+
+                {(tunnelForm.type === 'http' || tunnelForm.type === 'https') ? (
+                  <div>
+                    <label style={{ display: 'block', marginBottom: 8, fontSize: 14, fontWeight: 500 }}>
+                      域名前缀 <span style={{ color: '#999' }}>(默认后缀 .{domainSuffix})</span>
+                    </label>
+                    <Input value={tunnelForm.domain} onChange={(e) => setTunnelForm({ ...tunnelForm, domain: (e.target as any).value })} placeholder="例如：e6666666" />
+                  </div>
+                ) : null}
+
+                <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end', marginTop: 6 }}>
+                  <Button variant="outline" onClick={closeTunnelModal}>取消</Button>
+                  <Button variant="primary" onClick={saveTunnel}>创建</Button>
+                </div>
+              </div>
+            </Card>
+          </div>
+        ) : null}
       </div>
     );
   }
@@ -319,11 +523,13 @@ export const Devices: React.FC = () => {
                     onClick={() => {
                       setSelectedDevice(d);
                       setSelectedExtra(null);
+                      setSelectedPorts([]);
                       setView('detail');
                       // 拉取详情（拿 model/extra/端口信息等）
                       api.deviceDetail(d.ip)
                         .then((detail) => {
                           setSelectedDevice((prev) => (prev ? { ...prev, model: detail?.model || prev.model || '' } : prev));
+                          setSelectedPorts(Array.isArray(detail?.open_ports) ? detail.open_ports : []);
                           try {
                             setSelectedExtra(detail?.extra ? JSON.parse(detail.extra) : null);
                           } catch {

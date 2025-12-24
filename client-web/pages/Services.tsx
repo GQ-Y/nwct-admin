@@ -277,75 +277,7 @@ export const FRPPage: React.FC = () => {
                 last_error: {status.last_error}
               </div>
             ) : null}
-            {(status?.pid || status?.log_path) ? (
-              <div
-                style={{
-                  marginTop: 12,
-                  background: 'rgba(0,0,0,0.03)',
-                  borderRadius: 12,
-                  padding: 12,
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: 10,
-                }}
-              >
-                {status?.pid ? (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                    <div style={{ width: 72, fontSize: 12, color: 'var(--text-secondary)', fontWeight: 600 }}>进程</div>
-                    <div
-                      style={{
-                        flex: 1,
-                        fontFamily: '"SF Mono", Consolas, Monaco, monospace',
-                        fontSize: 12,
-                        color: 'var(--text-primary)',
-                      }}
-                    >
-                      pid {status.pid}
-                    </div>
-                    <button
-                      className="btn btn-ghost"
-                      style={{ height: 32, padding: '0 14px' }}
-                      onClick={() => copyText('frp_pid', String(status.pid))}
-                      title="复制 PID"
-                    >
-                      {copiedKey === 'frp_pid' ? '已复制' : '复制'}
-                    </button>
-                  </div>
-                ) : null}
-
-                {status?.log_path ? (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                    <div style={{ width: 72, fontSize: 12, color: 'var(--text-secondary)', fontWeight: 600 }}>日志</div>
-                    <div
-                      title={status.log_path}
-                      style={{
-                        flex: 1,
-                        fontFamily: '"SF Mono", Consolas, Monaco, monospace',
-                        fontSize: 12,
-                        color: 'var(--text-primary)',
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap',
-                        padding: '6px 10px',
-                        borderRadius: 10,
-                        background: 'rgba(255,255,255,0.7)',
-                        border: '1px solid rgba(255,255,255,0.6)',
-                      }}
-                    >
-                      {status.log_path}
-                    </div>
-                    <button
-                      className="btn btn-ghost"
-                      style={{ height: 32, padding: '0 14px' }}
-                      onClick={() => copyText('frp_log', status.log_path)}
-                      title="复制日志路径"
-                    >
-                      {copiedKey === 'frp_log' ? '已复制' : '复制'}
-                    </button>
-                  </div>
-                ) : null}
-              </div>
-            ) : null}
+            {/* 按需：进程 PID/日志路径属于调试信息，这里不在 UI 中展示 */}
           </div>
         </Card>
         
@@ -405,7 +337,7 @@ export const FRPPage: React.FC = () => {
                       href={`${tunnel.type === 'https' ? 'https' : 'http'}://${tunnel.domain}`}
                       target="_blank"
                       rel="noreferrer"
-                      style={{ color: 'var(--primary)' }}
+                      style={{ color: 'var(--primary)', textDecoration: 'none' }}
                       title="新标签打开"
                     >
                       {tunnel.domain}

@@ -104,6 +104,7 @@ func (s *Server) initRouter() {
 		api.GET("/devices", s.authMiddleware(), s.handleDevicesList)
 		api.GET("/devices/activity", s.authMiddleware(), s.handleDevicesActivity)
 		api.GET("/devices/:ip", s.authMiddleware(), s.handleDeviceDetail)
+		api.POST("/devices/:ip/ports/scan", s.authMiddleware(), s.handleDevicePortScan)
 		api.POST("/devices/scan/start", s.authMiddleware(), s.handleScanStart)
 		api.POST("/devices/scan/stop", s.authMiddleware(), s.handleScanStop)
 		api.GET("/devices/scan/status", s.authMiddleware(), s.handleScanStatus)

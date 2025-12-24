@@ -25,6 +25,8 @@ type Scanner interface {
 	GetDevices() ([]Device, error)
 	GetDeviceDetail(ip string) (*DeviceDetail, error)
 	GetScanStatus() *ScanStatus
+	// ScanDevicePorts 扫描指定设备端口（ports 为空则扫描常用端口）
+	ScanDevicePorts(ip string, ports []int) error
 }
 
 // Device 设备信息
@@ -613,6 +615,69 @@ func (ds *deviceScanner) GetScanStatus() *ScanStatus {
 
 	status := *ds.scanStatus
 	return &status
+}
+
+// ScanDevicePorts 扫描指定设备的端口（异步执行，避免阻塞 API）
+func (ds *deviceScanner) ScanDevicePorts(ip string, ports []int) error {
+	ip = strings.TrimSpace(ip)
+	if ip == "" {
+		return fmt.Errorf("设备 IP 不能为空")
+	}
+	// 校验设备存在
+	if _, err := database.GetDevice(ds.db, ip); err != nil {
+		return err
+	}
+
+	// 后台扫描，避免阻塞
+	go func() {
+		// 未指定端口：使用内置常用端口扫描逻辑（含补全 DB/广播）
+		if len(ports) == 0 {
+			ds.scanPorts(ip)
+			return
+		}
+
+		result, err := toolkit.PortScan(ip, ports, 2*time.Second, "tcp")
+		if err != nil || result == nil {
+			return
+		}
+
+		updated := 0
+		for _, portInfo := range result.OpenPorts {
+			// 检查端口是否已存在
+			existingPorts, _ := database.GetDevicePorts(ds.db, ip)
+			exists := false
+			for _, ep := range existingPorts {
+				if ep.Port == portInfo.Port && ep.Status == "open" {
+					exists = true
+					break
+				}
+			}
+
+			dbPort := &database.DevicePort{
+				DeviceIP: ip,
+				Port:     portInfo.Port,
+				Protocol: portInfo.Protocol,
+				Service:  portInfo.Service,
+				Version:  portInfo.Version,
+				Status:   portInfo.Status,
+			}
+			if err := database.SaveDevicePort(ds.db, ip, dbPort); err == nil {
+				if !exists {
+					logger.Info("发现新开放端口: %s:%d", ip, portInfo.Port)
+				}
+				updated++
+			}
+		}
+
+		if updated > 0 {
+			realtime.Default().Broadcast("device_ports_updated", map[string]interface{}{
+				"ip":      ip,
+				"updated": updated,
+			})
+		}
+	}()
+
+	return nil
 }
 
 // identifyVendor 识别厂商（基于MAC地址OUI）

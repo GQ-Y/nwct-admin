@@ -30,6 +30,106 @@ import (
 	"github.com/shirou/gopsutil/v3/mem"
 )
 
+func parsePortsInputToList(v any) []int {
+	// 复用 toolkit.PortScan 的 ports 解析能力（string / []int / []any），但不执行真实扫描
+	// 这里用一个小技巧：调用内部 parsePorts 不可见，因此在本层实现简单解析：
+	switch vv := v.(type) {
+	case nil:
+		return nil
+	case []int:
+		return vv
+	case []any:
+		out := make([]int, 0, len(vv))
+		for _, x := range vv {
+			switch n := x.(type) {
+			case int:
+				out = append(out, n)
+			case float64:
+				out = append(out, int(n))
+			case string:
+				// 允许字符串混入
+				out = append(out, parsePortsInputToList(n)...)
+			}
+		}
+		return out
+	case string:
+		s := strings.TrimSpace(vv)
+		if s == "" {
+			return nil
+		}
+		// 支持 "80,443,3000-3010"
+		parts := strings.Split(s, ",")
+		out := make([]int, 0, 64)
+		for _, p := range parts {
+			p = strings.TrimSpace(p)
+			if p == "" {
+				continue
+			}
+			if strings.Contains(p, "-") {
+				bits := strings.Split(p, "-")
+				if len(bits) != 2 {
+					continue
+				}
+				a, err1 := strconv.Atoi(strings.TrimSpace(bits[0]))
+				b, err2 := strconv.Atoi(strings.TrimSpace(bits[1]))
+				if err1 != nil || err2 != nil {
+					continue
+				}
+				if a > b {
+					a, b = b, a
+				}
+				if a < 1 {
+					a = 1
+				}
+				if b > 65535 {
+					b = 65535
+				}
+				// 防止误扫超大范围：最多 2000 个端口
+				if b-a+1 > 2000 {
+					b = a + 1999
+				}
+				for i := a; i <= b; i++ {
+					out = append(out, i)
+				}
+				continue
+			}
+			if n, err := strconv.Atoi(p); err == nil {
+				if n >= 1 && n <= 65535 {
+					out = append(out, n)
+				}
+			}
+		}
+		return out
+	default:
+		return nil
+	}
+}
+
+// handleDevicePortScan 扫描指定设备端口（常用端口或用户指定端口列表/范围）
+func (s *Server) handleDevicePortScan(c *gin.Context) {
+	ip := strings.TrimSpace(c.Param("ip"))
+	if ip == "" {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse(400, "设备IP不能为空"))
+		return
+	}
+
+	var req struct {
+		Ports any `json:"ports"` // 支持 "80,443,3000-3010" 或 []int
+	}
+	_ = c.ShouldBindJSON(&req) // 允许空请求体
+
+	ports := parsePortsInputToList(req.Ports)
+
+	if err := s.scanner.ScanDevicePorts(ip, ports); err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse(500, err.Error()))
+		return
+	}
+
+	c.JSON(http.StatusOK, models.SuccessResponse(gin.H{
+		"status": "started",
+	}))
+}
+
 func nowRFC3339() string {
 	return time.Now().Format(time.RFC3339)
 }

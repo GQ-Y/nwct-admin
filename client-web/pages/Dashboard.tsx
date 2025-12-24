@@ -62,7 +62,6 @@ export const Dashboard: React.FC = () => {
   const mem = useMemo(() => Number(sys?.memory_usage ?? 0), [sys]);
   const disk = useMemo(() => Number(sys?.disk_usage ?? 0), [sys]);
   const netIp = sys?.network?.ip ?? '-';
-  const sshListening = Boolean((sys as any)?.ssh?.listening);
 
   return (
     <div>
@@ -131,10 +130,6 @@ export const Dashboard: React.FC = () => {
             <div style={{ display: 'flex', justifyContent: 'space-between', padding: '12px', background: '#f9f9f9', borderRadius: 4 }}>
               <span>{t('dashboard.web_server')}</span>
               <Badge status="online" text={t('common.online')} />
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '12px', background: '#f9f9f9', borderRadius: 4 }}>
-              <span>{t('dashboard.ssh_service')}</span>
-              <Badge status={sshListening ? 'online' : 'offline'} text={sshListening ? t('common.online') : t('common.offline')} />
             </div>
           </div>
         </Card>

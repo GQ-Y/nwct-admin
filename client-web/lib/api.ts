@@ -102,6 +102,11 @@ export const api = {
   devicesActivity: (limit: number = 20) =>
     request<{ activities: any[] }>(`/api/v1/devices/activity?limit=${encodeURIComponent(String(limit))}`),
   deviceDetail: (ip: string) => request<any>(`/api/v1/devices/${encodeURIComponent(ip)}`),
+  deviceScanPorts: (ip: string, ports?: string) =>
+    request<any>(`/api/v1/devices/${encodeURIComponent(ip)}/ports/scan`, {
+      method: "POST",
+      body: JSON.stringify({ ports: ports?.trim() || undefined }),
+    }),
   scanStart: () =>
     request<any>("/api/v1/devices/scan/start", { method: "POST", body: "{}" }),
   scanStop: () =>
