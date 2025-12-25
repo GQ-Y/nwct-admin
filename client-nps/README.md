@@ -12,11 +12,20 @@
 - WebSocket实时推送
 - Web控制面板支持
 
+## 默认端口与访问入口
+
+- 默认监听：`:80`
+- Web 管理面板：`http://device-ip/`
+- API Base：`http://device-ip/api/v1`
+- WebSocket：`ws://device-ip/ws?token=...`
+
 ## 编译
 
 ```bash
 go build -o nwct-client .
 ```
+
+> 注意：Web 管理面板会被 embed 到后端二进制中。若你有更新前端，请先在 `client-web/` 执行 `pnpm build`，再编译本项目。
 
 ## 运行
 
@@ -24,7 +33,41 @@ go build -o nwct-client .
 ./nwct-client
 ```
 
-程序会在 `:8080` 端口启动HTTP API服务。
+程序会在 `:80` 端口启动 HTTP API 服务，并同端口托管 Web 管理面板。
+
+> 80 端口通常需要 root/capabilities，请在开发板侧使用 root 启动或配置相应权限。
+
+## 后台启动/停止（推荐脚本）
+
+仓库已提供控制脚本：`client-nps/nwctctl.sh`，支持后台启动、停止、重启、查看状态与日志。
+
+### 快速使用
+
+在 `client-nps/` 目录：
+
+```bash
+chmod +x ./nwctctl.sh
+sudo ./nwctctl.sh start
+./nwctctl.sh status
+./nwctctl.sh logs
+sudo ./nwctctl.sh restart
+sudo ./nwctctl.sh stop
+```
+
+### 快捷查找/杀进程（不使用脚本时）
+
+```bash
+# 查找
+pgrep -af nwct-client
+
+# 结束（优雅）
+pkill -TERM -f nwct-client
+
+# 强杀（必要时）
+pkill -KILL -f nwct-client
+```
+
+> 更推荐用 `nwctctl.sh`，它会使用 pidfile 避免误杀其它同名进程。
 
 ## 配置
 
@@ -34,7 +77,7 @@ go build -o nwct-client .
 
 ## API文档
 
-API基础路径：`http://localhost:8080/api/v1`
+API基础路径：`http://localhost/api/v1`
 
 详细API文档请参考 `docs/API接口设计.md`
 
