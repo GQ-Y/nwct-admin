@@ -146,16 +146,16 @@ func (p *StatusPage) drawTopBar(g *Graphics, w, h float64) {
 	// 标题 (深黑色 #1E293B)
 	titleSize := h * 0.046   // 22px
 	titleY := int(h * 0.083) // 40px
-	g.DrawTextTTF("NWCT 客户端", int(w*0.0625), titleY, color.RGBA{30, 41, 59, 255}, titleSize, FontWeightMedium)
+	g.DrawTextTTF("Totoro 智能网关", int(w*0.0625), titleY, color.RGBA{30, 41, 59, 255}, titleSize, FontWeightMedium)
 
 	// 状态指示器（保持绿色，加个浅灰色描边让它在白底更清晰）
 	dotRadius := int(h * 0.0125) // 6px
 	dotX := int(w * 0.896)       // 430px
 	dotY := int(h * 0.0625)      // 30px
 	// 描边
-	g.DrawCircle(dotX, dotY, dotRadius+1, color.RGBA{226, 232, 240, 255})
+	g.DrawCircleAA(dotX, dotY, dotRadius+1, color.RGBA{226, 232, 240, 255})
 	// 绿点
-	g.DrawCircle(dotX, dotY, dotRadius, color.RGBA{34, 197, 94, 255})
+	g.DrawCircleAA(dotX, dotY, dotRadius, color.RGBA{34, 197, 94, 255})
 }
 
 // drawLogo 绘制 LOGO 动画 - 悬浮灵动球 (Smooth & Cute)
@@ -184,16 +184,17 @@ func (p *StatusPage) drawLogo(g *Graphics, w, h float64) {
 	shadowH := 6
 	shadowAlpha := uint8(40 + (1.0-shadowScale)*20)
 	// 阴影位于球体下方
-	g.DrawRectRounded(centerX-shadowW/2, centerY+50, shadowW, shadowH, 3, color.RGBA{148, 163, 184, shadowAlpha})
+	// 用抗锯齿椭圆阴影替代圆角矩形，避免锯齿
+	g.DrawEllipseAA(centerX, centerY+50+shadowH/2, shadowW/2, shadowH/2, color.RGBA{148, 163, 184, shadowAlpha})
 
 	// --- 绘制身体 ---
 	// 鸿蒙蓝灵动球
 	bodyRadius := 42 + int(scaleOffset)
-	g.DrawCircle(centerX, drawY, bodyRadius, color.RGBA{59, 130, 246, 255})
+	g.DrawCircleAA(centerX, drawY, bodyRadius, color.RGBA{59, 130, 246, 255})
 
 	// --- 绘制肚子 (白色半圆) ---
 	bellyRadius := 28
-	g.DrawCircle(centerX, drawY+12, bellyRadius, color.RGBA{255, 255, 255, 240})
+	g.DrawCircleAA(centerX, drawY+12, bellyRadius, color.RGBA{255, 255, 255, 240})
 
 	// --- 绘制眼睛 ---
 	eyeOffsetX := 14
@@ -211,15 +212,15 @@ func (p *StatusPage) drawLogo(g *Graphics, w, h float64) {
 	} else {
 		// 睁眼 (眼白 + 眼珠)
 		// 眼白
-		g.DrawCircle(centerX-eyeOffsetX, eyeOffsetY, eyeRadius+2, color.RGBA{255, 255, 255, 255})
-		g.DrawCircle(centerX+eyeOffsetX, eyeOffsetY, eyeRadius+2, color.RGBA{255, 255, 255, 255})
+		g.DrawCircleAA(centerX-eyeOffsetX, eyeOffsetY, eyeRadius+2, color.RGBA{255, 255, 255, 255})
+		g.DrawCircleAA(centerX+eyeOffsetX, eyeOffsetY, eyeRadius+2, color.RGBA{255, 255, 255, 255})
 		// 眼珠 (黑色)
-		g.DrawCircle(centerX-eyeOffsetX, eyeOffsetY, eyeRadius-1, color.RGBA{30, 41, 59, 255})
-		g.DrawCircle(centerX+eyeOffsetX, eyeOffsetY, eyeRadius-1, color.RGBA{30, 41, 59, 255})
+		g.DrawCircleAA(centerX-eyeOffsetX, eyeOffsetY, eyeRadius-1, color.RGBA{30, 41, 59, 255})
+		g.DrawCircleAA(centerX+eyeOffsetX, eyeOffsetY, eyeRadius-1, color.RGBA{30, 41, 59, 255})
 	}
 
 	// --- 绘制小装饰 (光泽) ---
-	g.DrawCircle(centerX+18, drawY-22, 6, color.RGBA{255, 255, 255, 60})
+	g.DrawCircleAA(centerX+18, drawY-22, 6, color.RGBA{255, 255, 255, 60})
 }
 
 // drawNetworkArea 绘制网络区域 (无卡片，大数字)

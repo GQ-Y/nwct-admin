@@ -59,6 +59,150 @@ func (g *Graphics) drawRectPx(x, y, w, h int, c color.Color) {
 	draw.Draw(g.buffer, rect, &image.Uniform{c}, image.Point{}, draw.Src)
 }
 
+func clamp01(v float64) float64 {
+	if v < 0 {
+		return 0
+	}
+	if v > 1 {
+		return 1
+	}
+	return v
+}
+
+func (g *Graphics) blendPixelRGBA(x, y int, src color.RGBA) {
+	if x < 0 || y < 0 || x >= g.buffer.Bounds().Dx() || y >= g.buffer.Bounds().Dy() {
+		return
+	}
+	i := y*g.buffer.Stride + x*4
+	dstR := float64(g.buffer.Pix[i+0])
+	dstG := float64(g.buffer.Pix[i+1])
+	dstB := float64(g.buffer.Pix[i+2])
+	dstA := float64(g.buffer.Pix[i+3]) / 255.0
+
+	sa := float64(src.A) / 255.0
+	if sa <= 0 {
+		return
+	}
+
+	// Porter-Duff over
+	outA := sa + dstA*(1-sa)
+	if outA <= 0 {
+		return
+	}
+	outR := (float64(src.R)*sa + dstR*dstA*(1-sa)) / outA
+	outG := (float64(src.G)*sa + dstG*dstA*(1-sa)) / outA
+	outB := (float64(src.B)*sa + dstB*dstA*(1-sa)) / outA
+
+	g.buffer.Pix[i+0] = uint8(clamp01(outR/255.0) * 255.0)
+	g.buffer.Pix[i+1] = uint8(clamp01(outG/255.0) * 255.0)
+	g.buffer.Pix[i+2] = uint8(clamp01(outB/255.0) * 255.0)
+	g.buffer.Pix[i+3] = uint8(clamp01(outA) * 255.0)
+}
+
+// DrawCircleAA 绘制抗锯齿实心圆（用于状态页动画/指示点的平滑边缘）
+func (g *Graphics) DrawCircleAA(cx, cy, r int, c color.Color) {
+	cx = g.sx(cx)
+	cy = g.sy(cy)
+	r = g.sr(r)
+
+	if r <= 0 {
+		return
+	}
+	cr, cg, cb, ca := c.RGBA()
+	base := color.RGBA{uint8(cr >> 8), uint8(cg >> 8), uint8(cb >> 8), uint8(ca >> 8)}
+
+	rr := float64(r)
+	inner := rr - 0.5
+	outer := rr + 0.5
+	inner2 := inner * inner
+	outer2 := outer * outer
+
+	minX := cx - r - 1
+	maxX := cx + r + 1
+	minY := cy - r - 1
+	maxY := cy + r + 1
+
+	for y := minY; y <= maxY; y++ {
+		dy := float64(y) - float64(cy)
+		for x := minX; x <= maxX; x++ {
+			dx := float64(x) - float64(cx)
+			d2 := dx*dx + dy*dy
+			if d2 <= inner2 {
+				// 全覆盖
+				g.blendPixelRGBA(x, y, base)
+				continue
+			}
+			if d2 >= outer2 {
+				continue
+			}
+			// 边缘：线性覆盖估算
+			d := math.Sqrt(d2)
+			cover := clamp01(outer - d) // 0..1
+			if cover <= 0 {
+				continue
+			}
+			s := base
+			s.A = uint8(float64(base.A) * cover)
+			g.blendPixelRGBA(x, y, s)
+		}
+	}
+}
+
+// DrawEllipseAA 绘制抗锯齿实心椭圆
+func (g *Graphics) DrawEllipseAA(cx, cy, rx, ry int, c color.Color) {
+	cx = g.sx(cx)
+	cy = g.sy(cy)
+	rx = g.sx(rx)
+	ry = g.sy(ry)
+	if rx <= 0 || ry <= 0 {
+		return
+	}
+
+	cr, cg, cb, ca := c.RGBA()
+	base := color.RGBA{uint8(cr >> 8), uint8(cg >> 8), uint8(cb >> 8), uint8(ca >> 8)}
+
+	frx := float64(rx)
+	fry := float64(ry)
+
+	// 用“距离到边界”的近似做 1px 的抗锯齿带
+	// 椭圆方程： (dx/rx)^2 + (dy/ry)^2 = 1
+	// 取 d = sqrt(v) - 1，v 为上式左侧；d<0 在内部
+	minX := cx - rx - 2
+	maxX := cx + rx + 2
+	minY := cy - ry - 2
+	maxY := cy + ry + 2
+
+	for y := minY; y <= maxY; y++ {
+		dy := float64(y - cy)
+		ny := dy / fry
+		for x := minX; x <= maxX; x++ {
+			dx := float64(x - cx)
+			nx := dx / frx
+			v := nx*nx + ny*ny
+			if v <= 0.0 {
+				g.blendPixelRGBA(x, y, base)
+				continue
+			}
+			d := math.Sqrt(v) - 1.0
+			if d <= -0.5 {
+				// 内部
+				g.blendPixelRGBA(x, y, base)
+				continue
+			}
+			if d >= 0.5 {
+				continue
+			}
+			cover := clamp01(0.5 - d) // 0..1
+			if cover <= 0 {
+				continue
+			}
+			s := base
+			s.A = uint8(float64(base.A) * cover)
+			g.blendPixelRGBA(x, y, s)
+		}
+	}
+}
+
 // Clear 清空画布
 func (g *Graphics) Clear(c color.Color) {
 	draw.Draw(g.buffer, g.buffer.Bounds(), &image.Uniform{c}, image.Point{}, draw.Src)

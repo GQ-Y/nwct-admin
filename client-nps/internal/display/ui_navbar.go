@@ -34,8 +34,10 @@ func (nb *NavBar) SetOnBack(callback func()) {
 
 // Render 渲染导航栏
 func (nb *NavBar) Render(g *Graphics) {
-	// 背景（轻微渐变或透明）
-	// g.DrawRect(0, 0, nb.width, nb.height, ColorBackgroundStart)
+	// 背景：必须是实体底色，否则页面内容上滑会“透上来”导致返回箭头/标题重叠
+	// 这里用纯白 + 底部分割线，贴近鸿蒙/系统导航栏观感
+	g.DrawRect(0, 0, nb.width, nb.height, ColorBackgroundStart)
+	g.DrawRect(0, nb.height-1, nb.width, 1, ColorSeparator)
 	
 	// 返回按钮
 	if nb.hasBack {
@@ -43,14 +45,13 @@ func (nb *NavBar) Render(g *Graphics) {
 		// 简单的线条模拟箭头
 		arrowX := 24
 		arrowY := nb.height / 2
-		size := 12
+		size := 14
 		
 		// 两条线组成箭头
-		// 上半部分
-		for i := 0; i < 3; i++ { // 加粗
-			g.DrawLine(arrowX+size+i, arrowY-size, arrowX+i, arrowY, ColorTextPrimary)
-			g.DrawLine(arrowX+i, arrowY, arrowX+size+i, arrowY+size, ColorTextPrimary)
-		}
+		// 注意：在 720x720 预览缩放下，用“多条偏移线加粗”会产生明显重影感
+		// 这里改为单笔画，观感更干净
+		g.DrawLine(arrowX+size, arrowY-size, arrowX, arrowY, ColorTextPrimary)
+		g.DrawLine(arrowX, arrowY, arrowX+size, arrowY+size, ColorTextPrimary)
 		
 		// 点击区域提示 (可选)
 		// g.DrawRectRounded(10, 10, 40, 40, 8, color.RGBA{0,0,0,10})

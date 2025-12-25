@@ -290,9 +290,9 @@ func main() {
 
 	// 启动屏幕交互系统（与主程序共享 cfg/netManager/frpClient）
 	if *enableDisplay {
-		// 预览：macOS 下用更高分辨率窗口模拟（逻辑坐标仍按 480 设计稿缩放）
+		// 预览/设备：统一使用 720x720 逻辑分辨率；若设备真实 fb 非 720，会在 fb.Update 中做缩放映射
 		w, h := 480, 480
-		if runtime.GOOS == "darwin" {
+		if runtime.GOOS == "darwin" || runtime.GOOS == "linux" {
 			w, h = 720, 720
 		}
 		d, err := display.NewDisplay("NWCT Display Preview", w, h)

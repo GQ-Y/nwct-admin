@@ -89,10 +89,10 @@ func (p *TunnelEditPage) visibleBottom() int {
 	return 480
 }
 
-func (p *TunnelEditPage) clampScroll(contentBottom int) {
+// clampScroll 根据“内容真实高度”（与 scrollOffset 无关）夹紧滚动范围
+func (p *TunnelEditPage) clampScroll(contentHeight int) {
 	visibleH := p.visibleBottom() - p.contentTop()
-	contentH := contentBottom - p.contentTop()
-	minOffset := visibleH - contentH
+	minOffset := visibleH - contentHeight
 	if minOffset > 0 {
 		minOffset = 0
 	}
@@ -109,38 +109,44 @@ func (p *TunnelEditPage) layout() (contentBottom int) {
 	base := p.contentTop() + p.scrollOffset
 
 	// 协议区域（文字/按钮是用 Render 画，不是控件）
-	nameY := base + 170
+	// 让“协议类型”和“隧道名称”间距更紧凑
+	nameY := base + 118
 	p.nameInput.y = nameY
-	p.localIPInput.y = base + 226
-	p.localPortInput.y = base + 282
+	p.localIPInput.y = base + 174
+	p.localPortInput.y = base + 230
 
 	// 第四个输入框：remote 或 domain
-	p.remotePortInput.y = base + 338
-	p.domainInput.y = base + 338
+	p.remotePortInput.y = base + 286
+	p.domainInput.y = base + 286
 
-	cursorBottom := base + 338 + 46
+	// 下面开始计算“相对 contentTop 的真实内容高度”（与 scrollOffset 无关）
+	relCursorBottom := 286 + 46
 	if p.selectedType == "http" || p.selectedType == "https" {
 		// toggle 放在 domain input 下方
-		toggleLabelTop := p.domainInput.y + p.domainInput.height + 16
-		toggleY := toggleLabelTop + 22 // pill top
-		cursorBottom = toggleY + 24
+		relToggleLabelTop := 286 + 46 + 16
+		relToggleY := relToggleLabelTop + 22 // pill top
+		relCursorBottom = relToggleY + 24
 	}
 
 	// 错误提示（跟随内容）
-	p.errTextY = cursorBottom + 12
-	cursorBottom = p.errTextY
+	relErrTextY := relCursorBottom + 12
+	relAfterErr := relErrTextY
 	if strings.TrimSpace(p.lastErr) != "" {
-		cursorBottom += 22
+		relAfterErr += 22
 	}
 
 	// 操作按钮（在内容最底部）
-	btnY := cursorBottom + 10
-	p.saveBtnY = btnY
-	p.delBtnY = btnY
-	contentBottom = btnY + 50 + 16
+	relBtnY := relAfterErr + 10
+	relContentHeight := relBtnY + 50 + 16
+
+	// 写回绝对坐标（带 scrollOffset）
+	p.errTextY = base + relErrTextY
+	p.saveBtnY = base + relBtnY
+	p.delBtnY = base + relBtnY
+	contentBottom = base + relContentHeight
 
 	// 夹紧滚动边界
-	p.clampScroll(contentBottom)
+	p.clampScroll(relContentHeight)
 	return contentBottom
 }
 
@@ -215,11 +221,12 @@ func (p *TunnelEditPage) Render(g *Graphics) error {
 	} else {
 		p.navBar.title = "编辑隧道"
 	}
-	_ = g.DrawTextTTF(title, 24, 88+p.scrollOffset, ColorTextSecondary, 14, FontWeightRegular)
+	base := p.contentTop() + p.scrollOffset
+	_ = g.DrawTextTTF(title, 24, base+28, ColorTextSecondary, 14, FontWeightRegular)
 
 	// 协议类型选择（五个按钮）
-	_ = g.DrawTextTTF("协议类型", 24, 112+p.scrollOffset, ColorTextSecondary, 14, FontWeightRegular)
-	typeY := 132 + p.scrollOffset
+	_ = g.DrawTextTTF("协议类型", 24, base+52, ColorTextSecondary, 14, FontWeightRegular)
+	typeY := base + 72
 	typeH := 34
 	types := []string{"tcp", "udp", "http", "https", "stcp"}
 	gap := 8
@@ -363,7 +370,7 @@ func (p *TunnelEditPage) HandleTouch(x, y int, touchType TouchType) bool {
 
 	// 协议按钮点击
 	if touchType == TouchUp {
-		typeY := 132 + p.scrollOffset
+		typeY := (p.contentTop() + p.scrollOffset) + 72
 		typeH := 34
 		if y >= typeY && y <= typeY+typeH && x >= 24 && x <= 24+432 {
 			types := []string{"tcp", "udp", "http", "https", "stcp"}
