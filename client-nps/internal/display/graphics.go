@@ -270,15 +270,92 @@ func (g *Graphics) DrawRectRounded(x, y, w, h, radius int, c color.Color) {
 	w = g.sx(w)
 	h = g.sy(h)
 	radius = g.sr(radius)
-	// 绘制中心矩形
-	g.drawRectPx(x+radius, y, w-2*radius, h, c)
-	g.drawRectPx(x, y+radius, w, h-2*radius, c)
+	// 抗锯齿圆角矩形：
+	// - 内部区域直接填充
+	// - 四个圆角用 1px 软边混合，避免“台阶锯齿”
+	if w <= 0 || h <= 0 {
+		return
+	}
+	if radius <= 0 {
+		g.drawRectPx(x, y, w, h, c)
+		return
+	}
+	if radius*2 > w {
+		radius = w / 2
+	}
+	if radius*2 > h {
+		radius = h / 2
+	}
 
-	// 绘制四个圆角
-	g.drawFilledCircleCorner(x+radius, y+radius, radius, c, 2)     // 左上
-	g.drawFilledCircleCorner(x+w-radius, y+radius, radius, c, 1)   // 右上
-	g.drawFilledCircleCorner(x+radius, y+h-radius, radius, c, 3)   // 左下
-	g.drawFilledCircleCorner(x+w-radius, y+h-radius, radius, c, 4) // 右下
+	// 先填充中间和四条边（像素级，不再走缩放）
+	g.drawRectPx(x+radius, y, w-2*radius, h, c)           // 中间竖条
+	g.drawRectPx(x, y+radius, radius, h-2*radius, c)      // 左边
+	g.drawRectPx(x+w-radius, y+radius, radius, h-2*radius, c) // 右边
+
+	// 四角抗锯齿圆（每个角一个象限）
+	cr, cg, cb, ca := c.RGBA()
+	base := color.RGBA{uint8(cr >> 8), uint8(cg >> 8), uint8(cb >> 8), uint8(ca >> 8)}
+	rr := float64(radius)
+	inner := rr - 0.5
+	outer := rr + 0.5
+	inner2 := inner * inner
+	outer2 := outer * outer
+
+	// helper: 画一个象限角
+	drawCorner := func(cx, cy int, quadrant int) {
+		minX := cx - radius - 1
+		maxX := cx + radius + 1
+		minY := cy - radius - 1
+		maxY := cy + radius + 1
+		for py := minY; py <= maxY; py++ {
+			dy := float64(py - cy)
+			for px := minX; px <= maxX; px++ {
+				dx := float64(px - cx)
+				// 象限裁剪
+				switch quadrant {
+				case 1: // 右上
+					if dx < 0 || dy > 0 {
+						continue
+					}
+				case 2: // 左上
+					if dx > 0 || dy > 0 {
+						continue
+					}
+				case 3: // 左下
+					if dx > 0 || dy < 0 {
+						continue
+					}
+				case 4: // 右下
+					if dx < 0 || dy < 0 {
+						continue
+					}
+				}
+
+				d2 := dx*dx + dy*dy
+				if d2 <= inner2 {
+					g.blendPixelRGBA(px, py, base)
+					continue
+				}
+				if d2 >= outer2 {
+					continue
+				}
+				d := math.Sqrt(d2)
+				cover := clamp01(outer - d)
+				if cover <= 0 {
+					continue
+				}
+				s := base
+				s.A = uint8(float64(base.A) * cover)
+				g.blendPixelRGBA(px, py, s)
+			}
+		}
+	}
+
+	// 左上 / 右上 / 左下 / 右下
+	drawCorner(x+radius, y+radius, 2)
+	drawCorner(x+w-radius, y+radius, 1)
+	drawCorner(x+radius, y+h-radius, 3)
+	drawCorner(x+w-radius, y+h-radius, 4)
 }
 
 // drawFilledCircleCorner 绘制圆角（四分之一圆）
