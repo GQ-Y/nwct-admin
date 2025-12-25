@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-// StatusPage 实时状态页（鸿蒙风格）
+// StatusPage 实时状态页（鸿蒙风格 - 浅色简约）
 type StatusPage struct {
 	BasePage
 	logoFrame        int
@@ -68,106 +68,175 @@ func (p *StatusPage) HandleTouch(x, y int, touchType TouchType) bool {
 	return false
 }
 
-// Render 渲染页面（鸿蒙风格 - 响应式）
+// Render 渲染页面（鸿蒙风格 - 浅色简约响应式）
 func (p *StatusPage) Render(g *Graphics) error {
-	// 使用相对尺寸
 	w := float64(p.width)
 	h := float64(p.height)
 
-	// 绘制渐变背景（鸿蒙风格深色）
+	// 1. 浅色渐变背景 (模拟纸张质感)
+	// 纯白 -> 极浅灰蓝
 	colors := []color.Color{
-		color.RGBA{18, 20, 38, 255}, // 更深的深蓝色
-		color.RGBA{28, 32, 58, 255}, // 中等深蓝
-		color.RGBA{38, 44, 78, 255}, // 较浅深蓝
+		color.RGBA{255, 255, 255, 255}, // 纯白
+		color.RGBA{248, 250, 252, 255}, // 极浅灰
+		color.RGBA{241, 245, 249, 255}, // 浅灰蓝
 	}
 	g.DrawGradient(0, 0, p.width, p.height, colors, GradientVertical)
 
-	// 绘制顶部标题栏
+	// 2. 绘制顶部标题栏 (深色文字)
 	p.drawTopBar(g, w, h)
 
-	// 绘制龙猫 LOGO（改进的动画）
+	// 3. 绘制龙猫 LOGO (调整透明度适应浅色)
 	p.drawLogo(g, w, h)
 
-	// 绘制数据卡片（鸿蒙风格）
-	p.drawNetworkCard(g, w, h)
-	p.drawStatsCards(g, w, h)
+	// 4. 绘制数据区域 (无卡片背景，使用分割线)
+	p.drawNetworkArea(g, w, h)
+	p.drawStatsArea(g, w, h)
 
-	// 底部提示（居中显示）
+	// 5. 底部提示 (深灰色)
 	tipText := "轻触屏幕进入设置"
-	tipWidth := g.MeasureText(tipText, h*0.027, FontWeightRegular) // 约13px
+	tipSize := h * 0.027 // 13px
+	tipWidth := g.MeasureText(tipText, tipSize, FontWeightRegular)
 	tipX := (p.width - tipWidth) / 2
-	g.DrawTextTTF(tipText, tipX, int(h*0.958), color.RGBA{100, 110, 140, 255}, h*0.027, FontWeightRegular)
+	g.DrawTextTTF(tipText, tipX, int(h*0.94), color.RGBA{148, 163, 184, 255}, tipSize, FontWeightRegular)
 
 	return nil
 }
 
-// drawTopBar 绘制顶部标题栏（响应式）
+// drawTopBar 绘制顶部标题栏
 func (p *StatusPage) drawTopBar(g *Graphics, w, h float64) {
-	barHeight := int(h * 0.125) // 12.5% 高度
+	// 标题 (深黑色 #1E293B)
+	titleSize := h * 0.046   // 22px
+	titleY := int(h * 0.083) // 40px
+	g.DrawTextTTF("NWCT 客户端", int(w*0.0625), titleY, color.RGBA{30, 41, 59, 255}, titleSize, FontWeightMedium)
 
-	// 顶部状态栏背景（半透明）
-	g.DrawRect(0, 0, p.width, barHeight, color.RGBA{20, 24, 44, 200})
-
-	// 标题
-	titleSize := h * 0.046   // 约22px
-	titleY := int(h * 0.083) // 约40px
-	g.DrawTextTTF("NWCT 客户端", int(w*0.083), titleY, color.RGBA{255, 255, 255, 255}, titleSize, FontWeightMedium)
-
-	// 状态指示器（右上角绿点）
-	dotRadius := int(h * 0.0125) // 约6px
-	dotX := int(w * 0.896)       // 约430px
-	dotY := int(h * 0.0625)      // 约30px
-	g.DrawCircle(dotX, dotY, dotRadius, color.RGBA{52, 211, 153, 255})
+	// 状态指示器（保持绿色，加个浅灰色描边让它在白底更清晰）
+	dotRadius := int(h * 0.0125) // 6px
+	dotX := int(w * 0.896)       // 430px
+	dotY := int(h * 0.0625)      // 30px
+	// 描边
+	g.DrawCircle(dotX, dotY, dotRadius+1, color.RGBA{226, 232, 240, 255})
+	// 绿点
+	g.DrawCircle(dotX, dotY, dotRadius, color.RGBA{34, 197, 94, 255})
 }
 
-// drawLogo 绘制 LOGO 动画（响应式）
+// drawLogo 绘制 LOGO 动画
 func (p *StatusPage) drawLogo(g *Graphics, w, h float64) {
 	centerX := int(w * 0.5)
-	centerY := int(h * 0.3125) // 约150px
+	centerY := int(h * 0.33) // 158px (稍微下移一点，让上方留白均衡)
 
-	// 外圈动画（呼吸效果）
+	// 呼吸动画
 	breatheFactor := float64(p.logoFrame%120) / 120.0
 	if breatheFactor > 0.5 {
 		breatheFactor = 1.0 - breatheFactor
 	}
-	breatheFactor = breatheFactor * 2.0 // 0 到 1
+	breatheFactor = breatheFactor * 2.0
 
-	baseRadius := h * 0.104 // 基础半径约50px
+	baseRadius := h * 0.115 // 55px (稍微加大)
 	radius1 := int(baseRadius + breatheFactor*h*0.021)
-	alpha1 := uint8(150 + breatheFactor*50)
 
-	// 外圈渐变色（蓝紫到青色）
+	// 外圈 (使用较浅的蓝色，适应浅色背景)
+	// 这里的颜色需要比深色模式更轻盈
 	outerHue := float64(p.logoFrame%360) / 360.0
-	c1 := interpolateHarmonyColors(outerHue)
-	c1.A = alpha1
+	c1 := interpolateHarmonyColorsLight(outerHue)
+	c1.A = 100 // 降低透明度
 	g.DrawCircle(centerX, centerY, radius1, c1)
 
 	// 中圈
-	radius2 := int(h * 0.079) // 约38px
-	c2 := color.RGBA{75, 123, 236, 230}
-	g.DrawCircle(centerX, centerY, radius2, c2)
+	radius2 := int(h * 0.085) // 41px
+	g.DrawCircle(centerX, centerY, radius2, color.RGBA{59, 130, 246, 200})
 
-	// 内圈（最亮）
-	radius3 := int(h * 0.058) // 约28px
-	c3 := color.RGBA{100, 149, 255, 255}
-	g.DrawCircle(centerX, centerY, radius3, c3)
+	// 内圈
+	radius3 := int(h * 0.0625) // 30px
+	g.DrawCircle(centerX, centerY, radius3, color.RGBA{37, 99, 235, 255})
 
 	// 中心白点
-	centerDot := int(h * 0.017) // 约8px
-	g.DrawCircle(centerX, centerY, centerDot, color.RGBA{255, 255, 255, 200})
+	centerDot := int(h * 0.019) // 9px
+	g.DrawCircle(centerX, centerY, centerDot, color.RGBA{255, 255, 255, 255})
 }
 
-// interpolateHarmonyColors 鸿蒙风格颜色插值
-func interpolateHarmonyColors(t float64) color.RGBA {
-	// 鸿蒙主题色：蓝紫 -> 青色 -> 蓝紫
+// drawNetworkArea 绘制网络区域 (无卡片，大数字)
+func (p *StatusPage) drawNetworkArea(g *Graphics, w, h float64) {
+	startY := int(h * 0.52) // 250px 开始
+
+	// 区域标题
+	g.DrawTextTTF("实时速率", int(w*0.0625), startY, color.RGBA{100, 116, 139, 255}, h*0.029, FontWeightRegular)
+
+	// 分隔线 (横跨屏幕)
+	g.DrawRect(int(w*0.0625), startY+10, int(w*0.875), 1, color.RGBA{226, 232, 240, 255})
+
+	// 内容Y坐标
+	labelY := startY + int(h*0.083) // 290px
+	valueY := startY + int(h*0.146) // 320px
+
+	labelSize := h * 0.025  // 12px
+	valueSize := h * 0.0625 // 30px
+	unitSize := h * 0.029   // 14px
+
+	// 左侧 - 上传 (蓝色)
+	leftX := int(w * 0.0625) // 30px
+	g.DrawTextTTF("上传", leftX, labelY, color.RGBA{148, 163, 184, 255}, labelSize, FontWeightRegular)
+
+	uploadText := fmt.Sprintf("%.1f", p.uploadSpeed)
+	g.DrawTextTTF(uploadText, leftX, valueY, color.RGBA{59, 130, 246, 255}, valueSize, FontWeightMedium)
+	numWidth := g.MeasureText(uploadText, valueSize, FontWeightMedium)
+	g.DrawTextTTF("KB/s", leftX+numWidth+8, valueY, color.RGBA{148, 163, 184, 255}, unitSize, FontWeightRegular)
+
+	// 右侧 - 下载 (绿色)
+	rightX := int(w * 0.55) // 264px
+	g.DrawTextTTF("下载", rightX, labelY, color.RGBA{148, 163, 184, 255}, labelSize, FontWeightRegular)
+
+	downloadText := fmt.Sprintf("%.1f", p.downloadSpeed)
+	g.DrawTextTTF(downloadText, rightX, valueY, color.RGBA{16, 185, 129, 255}, valueSize, FontWeightMedium)
+	numWidth2 := g.MeasureText(downloadText, valueSize, FontWeightMedium)
+	g.DrawTextTTF("KB/s", rightX+numWidth2+8, valueY, color.RGBA{148, 163, 184, 255}, unitSize, FontWeightRegular)
+}
+
+// drawStatsArea 绘制统计区域
+func (p *StatusPage) drawStatsArea(g *Graphics, w, h float64) {
+	startY := int(h * 0.73) // 350px
+
+	// 竖向分隔线
+	g.DrawRect(int(w*0.5), startY, 1, int(h*0.125), color.RGBA{226, 232, 240, 255})
+
+	labelSize := h * 0.027 // 13px
+	valueSize := h * 0.058 // 28px
+	unitSize := h * 0.033  // 16px
+
+	// 左侧 - 隧道 (橙色)
+	leftX := int(w * 0.0625)
+	labelY := startY + int(h*0.03) // 365px
+	valueY := startY + int(h*0.1)  // 400px
+
+	g.DrawTextTTF("隧道数量", leftX, labelY, color.RGBA{100, 116, 139, 255}, labelSize, FontWeightRegular)
+
+	tunnelText := fmt.Sprintf("%d", p.tunnelCount)
+	g.DrawTextTTF(tunnelText, leftX, valueY, color.RGBA{245, 158, 11, 255}, valueSize, FontWeightMedium)
+	numWidth := g.MeasureText(tunnelText, valueSize, FontWeightMedium)
+	g.DrawTextTTF("个", leftX+numWidth+5, valueY, color.RGBA{148, 163, 184, 255}, unitSize, FontWeightRegular)
+
+	// 右侧 - 运行时间 (紫色)
+	rightX := int(w * 0.55)
+	g.DrawTextTTF("运行时间", rightX, labelY, color.RGBA{100, 116, 139, 255}, labelSize, FontWeightRegular)
+
+	uptime := time.Since(p.startTime)
+	hours := int(uptime.Hours())
+	minutes := int(uptime.Minutes()) % 60
+	var uptimeText string
+	if hours > 0 {
+		uptimeText = fmt.Sprintf("%dh %dm", hours, minutes)
+	} else {
+		uptimeText = fmt.Sprintf("%dm", minutes)
+	}
+	g.DrawTextTTF(uptimeText, rightX, valueY, color.RGBA{139, 92, 246, 255}, valueSize, FontWeightMedium)
+}
+
+// interpolateHarmonyColorsLight 浅色系颜色插值
+func interpolateHarmonyColorsLight(t float64) color.RGBA {
 	colors := []color.RGBA{
-		{102, 126, 234, 255}, // 蓝紫
-		{59, 130, 246, 255},  // 蓝色
-		{14, 165, 233, 255},  // 天蓝
-		{6, 182, 212, 255},   // 青色
-		{20, 184, 166, 255},  // 青绿
-		{59, 130, 246, 255},  // 蓝色
-		{102, 126, 234, 255}, // 回到蓝紫
+		{147, 197, 253, 255}, // 浅蓝
+		{167, 139, 250, 255}, // 浅紫
+		{52, 211, 153, 255},  // 浅绿
+		{147, 197, 253, 255}, // 回到浅蓝
 	}
 
 	segmentCount := len(colors) - 1
@@ -187,95 +256,4 @@ func interpolateHarmonyColors(t float64) color.RGBA {
 		B: uint8(float64(c1.B)*(1-localT) + float64(c2.B)*localT),
 		A: 255,
 	}
-}
-
-// drawNetworkCard 绘制网络速度卡片（响应式）
-func (p *StatusPage) drawNetworkCard(g *Graphics, w, h float64) {
-	// 卡片尺寸和位置（基于屏幕尺寸计算）
-	cardX := int(w * 0.0625)     // 30px @ 480
-	cardY := int(h * 0.479)      // 230px @ 480
-	cardW := int(w * 0.875)      // 420px @ 480
-	cardH := int(h * 0.208)      // 100px @ 480
-	cardRadius := int(w * 0.042) // 20px @ 480
-
-	// 绘制卡片背景
-	g.DrawRectRounded(cardX, cardY, cardW, cardH, cardRadius, color.RGBA{45, 55, 90, 180})
-
-	// 卡片标题 - 直接相对于卡片位置
-	titleSize := h * 0.029         // 14px @ 480
-	titleY := cardY + int(h*0.058) // 卡片顶部 + 28px
-	g.DrawTextTTF("网络速度", int(w*0.104), titleY, color.RGBA{160, 170, 200, 255}, titleSize, FontWeightRegular)
-
-	// 左侧 - 上传速度
-	leftX := int(w * 0.146)        // 70px @ 480
-	labelY := cardY + int(h*0.115) // 卡片顶部 + 55px
-	valueY := cardY + int(h*0.177) // 卡片顶部 + 85px
-	labelSize := h * 0.025         // 12px @ 480
-	valueSize := h * 0.058         // 28px @ 480
-	unitSize := h * 0.029          // 14px @ 480
-
-	g.DrawTextTTF("上传", leftX, labelY, color.RGBA{140, 150, 180, 255}, labelSize, FontWeightRegular)
-	uploadText := fmt.Sprintf("%.1f", p.uploadSpeed)
-	g.DrawTextTTF(uploadText, leftX, valueY, color.RGBA{99, 179, 237, 255}, valueSize, FontWeightMedium)
-	numWidth := g.MeasureText(uploadText, valueSize, FontWeightMedium)
-	g.DrawTextTTF("KB/s", leftX+numWidth+int(w*0.01), valueY, color.RGBA{140, 150, 180, 255}, unitSize, FontWeightRegular)
-
-	// 中间分隔线
-	lineX := int(w * 0.5)         // 240px @ 480
-	lineY := cardY + int(h*0.094) // 卡片顶部 + 45px
-	lineH := int(h * 0.104)       // 50px @ 480
-	g.DrawRect(lineX, lineY, 1, lineH, color.RGBA{80, 90, 120, 100})
-
-	// 右侧 - 下载速度
-	rightX := int(w * 0.583) // 280px @ 480
-	g.DrawTextTTF("下载", rightX, labelY, color.RGBA{140, 150, 180, 255}, labelSize, FontWeightRegular)
-	downloadText := fmt.Sprintf("%.1f", p.downloadSpeed)
-	g.DrawTextTTF(downloadText, rightX, valueY, color.RGBA{52, 211, 153, 255}, valueSize, FontWeightMedium)
-	numWidth2 := g.MeasureText(downloadText, valueSize, FontWeightMedium)
-	g.DrawTextTTF("KB/s", rightX+numWidth2+int(w*0.01), valueY, color.RGBA{140, 150, 180, 255}, unitSize, FontWeightRegular)
-}
-
-// drawStatsCards 绘制统计卡片（响应式）
-func (p *StatusPage) drawStatsCards(g *Graphics, w, h float64) {
-	cardY := int(h * 0.729)      // 350px @ 480
-	cardW := int(w * 0.417)      // 200px @ 480
-	cardH := int(h * 0.167)      // 80px @ 480
-	cardRadius := int(w * 0.033) // 16px @ 480
-
-	labelSize := h * 0.027 // 13px @ 480
-	valueSize := h * 0.067 // 32px @ 480
-	unitSize := h * 0.033  // 16px @ 480
-
-	// 隧道数量卡片
-	leftCardX := int(w * 0.0625) // 30px @ 480
-	g.DrawRectRounded(leftCardX, cardY, cardW, cardH, cardRadius, color.RGBA{45, 55, 90, 180})
-
-	labelX := int(w * 0.104)        // 50px @ 480
-	labelY := cardY + int(h*0.0625) // 卡片顶部 + 30px
-	valueY := cardY + int(h*0.135)  // 卡片顶部 + 65px
-
-	g.DrawTextTTF("隧道数量", labelX, labelY, color.RGBA{140, 150, 180, 255}, labelSize, FontWeightRegular)
-	tunnelText := fmt.Sprintf("%d", p.tunnelCount)
-	g.DrawTextTTF(tunnelText, labelX, valueY, color.RGBA{251, 191, 36, 255}, valueSize, FontWeightMedium)
-	numWidth := g.MeasureText(tunnelText, valueSize, FontWeightMedium)
-	g.DrawTextTTF("个", labelX+numWidth+int(w*0.017), valueY, color.RGBA{140, 150, 180, 255}, unitSize, FontWeightRegular)
-
-	// 运行时间卡片
-	rightCardX := int(w * 0.521) // 250px @ 480
-	g.DrawRectRounded(rightCardX, cardY, cardW, cardH, cardRadius, color.RGBA{45, 55, 90, 180})
-
-	rightLabelX := int(w * 0.5625) // 270px @ 480
-	g.DrawTextTTF("运行时间", rightLabelX, labelY, color.RGBA{140, 150, 180, 255}, labelSize, FontWeightRegular)
-
-	uptime := time.Since(p.startTime)
-	hours := int(uptime.Hours())
-	minutes := int(uptime.Minutes()) % 60
-	var uptimeText string
-	if hours > 0 {
-		uptimeText = fmt.Sprintf("%dh %dm", hours, minutes)
-	} else {
-		uptimeText = fmt.Sprintf("%dm", minutes)
-	}
-	uptimeSize := h * 0.054 // 26px @ 480
-	g.DrawTextTTF(uptimeText, rightLabelX, valueY, color.RGBA{167, 139, 250, 255}, uptimeSize, FontWeightMedium)
 }
