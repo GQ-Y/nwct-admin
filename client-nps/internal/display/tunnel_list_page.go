@@ -46,6 +46,24 @@ func (p *TunnelListPage) refresh() {
 	p.listView.Clear()
 	p.lastErr = ""
 
+	// 新增入口（始终显示）
+	p.listView.AddItem(&ListItem{
+		Title:     "新增隧道",
+		Subtitle:  "创建新的内网穿透隧道",
+		ShowArrow: true,
+		Icon: func(g *Graphics, x, y int) {
+			// 简单 + 号
+			g.DrawLine(x-6, y, x+6, y, ColorBrandBlue)
+			g.DrawLine(x, y-6, x, y+6, ColorBrandBlue)
+		},
+		OnClick: func() {
+			if ep := p.pm.GetTunnelEditPage(); ep != nil {
+				ep.BeginCreate()
+			}
+			p.pm.NavigateTo("tunnel_edit")
+		},
+	})
+
 	if p.services == nil {
 		p.listView.AddItem(&ListItem{Title: "隧道服务未初始化", Subtitle: "请先启动 FRP 客户端"})
 		return
@@ -57,7 +75,7 @@ func (p *TunnelListPage) refresh() {
 		return
 	}
 	if len(tunnels) == 0 {
-		p.listView.AddItem(&ListItem{Title: "暂无隧道", Subtitle: "请在主程序或后续页面添加隧道"})
+		p.listView.AddItem(&ListItem{Title: "暂无隧道", Subtitle: "点击上方“新增隧道”创建"})
 		return
 	}
 

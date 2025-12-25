@@ -67,11 +67,26 @@ func (p *TunnelEditPage) SetTunnel(t *frp.Tunnel) {
 	}
 }
 
+// BeginCreate 进入“新增隧道”模式（清空 originName，预填默认值）
+func (p *TunnelEditPage) BeginCreate() {
+	p.originName = ""
+	p.tunnel = nil
+	p.lastErr = ""
+	p.nameInput.SetText("")
+	p.localIPInput.SetText("127.0.0.1")
+	p.localPortInput.SetText("")
+	p.remotePortInput.SetText("0")
+}
+
 func (p *TunnelEditPage) Render(g *Graphics) error {
 	g.DrawRect(0, 0, 480, 480, ColorBackgroundStart)
 
 	// 标题提示
-	_ = g.DrawTextTTF("隧道配置", 24, 88, ColorTextSecondary, 14, FontWeightRegular)
+	title := "隧道配置"
+	if p.originName == "" {
+		title = "新增隧道"
+	}
+	_ = g.DrawTextTTF(title, 24, 88, ColorTextSecondary, 14, FontWeightRegular)
 
 	p.nameInput.Render(g)
 	p.localIPInput.Render(g)
@@ -86,9 +101,16 @@ func (p *TunnelEditPage) Render(g *Graphics) error {
 
 	// 删除按钮
 	delX := 24 + 224
-	g.DrawRectRounded(delX, saveY, 208, 50, 25, ColorErrorRed)
-	delW := g.MeasureText("删除", 18, FontWeightMedium)
-	_ = g.DrawTextTTF("删除", delX+(208-delW)/2, saveY+(50-int(18))/2, ColorBackgroundStart, 18, FontWeightMedium)
+	// 新增模式下禁用删除（置灰）
+	if p.originName == "" {
+		g.DrawRectRounded(delX, saveY, 208, 50, 25, ColorSeparator)
+		delW := g.MeasureText("删除", 18, FontWeightMedium)
+		_ = g.DrawTextTTF("删除", delX+(208-delW)/2, saveY+(50-int(18))/2, ColorTextLight, 18, FontWeightMedium)
+	} else {
+		g.DrawRectRounded(delX, saveY, 208, 50, 25, ColorErrorRed)
+		delW := g.MeasureText("删除", 18, FontWeightMedium)
+		_ = g.DrawTextTTF("删除", delX+(208-delW)/2, saveY+(50-int(18))/2, ColorBackgroundStart, 18, FontWeightMedium)
+	}
 
 	if p.lastErr != "" {
 		_ = g.DrawTextTTF(p.lastErr, 24, 406, ColorErrorRed, 14, FontWeightRegular)
@@ -145,7 +167,9 @@ func (p *TunnelEditPage) HandleTouch(x, y int, touchType TouchType) bool {
 		// 删除
 		if x >= 24+224 && x <= 24+224+208 {
 			if touchType == TouchUp {
-				p.delete()
+				if p.originName != "" {
+					p.delete()
+				}
 			}
 			return true
 		}
@@ -157,10 +181,6 @@ func (p *TunnelEditPage) save() {
 	p.lastErr = ""
 	if p.services == nil {
 		p.lastErr = "服务未初始化"
-		return
-	}
-	if p.originName == "" {
-		p.lastErr = "未选择隧道"
 		return
 	}
 	lp, err := strconv.Atoi(strings.TrimSpace(p.localPortInput.GetText()))
@@ -180,9 +200,17 @@ func (p *TunnelEditPage) save() {
 		LocalPort:  lp,
 		RemotePort: rp,
 	}
-	if err := p.services.UpdateTunnel(p.originName, t); err != nil {
-		p.lastErr = err.Error()
-		return
+	// 新增 or 更新
+	if p.originName == "" {
+		if err := p.services.FRP.AddTunnel(t); err != nil {
+			p.lastErr = err.Error()
+			return
+		}
+	} else {
+		if err := p.services.UpdateTunnel(p.originName, t); err != nil {
+			p.lastErr = err.Error()
+			return
+		}
 	}
 	p.pm.Back()
 }
