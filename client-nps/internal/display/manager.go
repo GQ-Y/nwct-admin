@@ -24,6 +24,7 @@ func NewManager(disp Display) *Manager {
 	// 创建所有页面
 	statusPage := NewStatusPage()
 	settingsPage := NewSettingsPage(pm)
+	aboutPage := NewAboutPage(pm)
 	networkPage := NewNetworkPage(pm)
 	ethernetPage := NewEthernetPage(pm)
 	wifiListPage := NewWiFiListPage(pm)
@@ -34,6 +35,7 @@ func NewManager(disp Display) *Manager {
 	// 注册页面
 	pm.RegisterPage("status", statusPage)
 	pm.RegisterPage("settings", settingsPage)
+	pm.RegisterPage("about", aboutPage)
 	pm.RegisterPage("network", networkPage)
 	pm.RegisterPage("ethernet", ethernetPage)
 	pm.RegisterPage("wifi_list", wifiListPage)

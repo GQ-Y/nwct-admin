@@ -24,7 +24,8 @@ func NewEthernetPage(pm *PageManager) *EthernetPage {
 	p.navBar.SetOnBack(func() { pm.Back() })
 	
 	// 输入框
-	p.ipInput = NewInputField(24, 100, 432, 50)
+	// 表单采用「Label 在上，输入框在下」的标准间距，避免文字与输入框重叠
+	p.ipInput = NewInputField(24, 120, 432, 50)
 	p.ipInput.placeholder = "输入静态 IP 地址"
 	p.ipInput.SetText("192.168.1.100")
 	
@@ -44,13 +45,13 @@ func NewEthernetPage(pm *PageManager) *EthernetPage {
 func (p *EthernetPage) Render(g *Graphics) error {
 	g.DrawRect(0, 0, 480, 480, ColorBackgroundStart)
 	
-	// 表单标题
-	_ = g.DrawTextTTF("IP 地址", 24, 90, ColorTextSecondary, 14, FontWeightRegular)
+	// 表单标题（放在输入框上方，留出足够间距）
+	_ = g.DrawTextTTF("IP 地址", 24, 88, ColorTextSecondary, 14, FontWeightRegular)
 	
 	p.ipInput.Render(g)
 	
 	// 保存按钮 (简单绘制)
-	btnY := 200
+	btnY := 240
 	g.DrawRectRounded(24, btnY, 432, 50, 25, ColorBrandBlue)
 	labelW := g.MeasureText("保存配置", 18, FontWeightMedium)
 	textTop := btnY + (50-int(18))/2
@@ -77,7 +78,7 @@ func (p *EthernetPage) HandleTouch(x, y int, touchType TouchType) bool {
 	}
 	
 	// 保存按钮点击检测
-	if x > 24 && x < 456 && y > 200 && y < 250 {
+	if x > 24 && x < 456 && y > 240 && y < 290 {
 		if touchType == TouchUp {
 			// TODO: 保存逻辑
 			p.pm.Back()

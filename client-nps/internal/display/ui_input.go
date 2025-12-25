@@ -66,14 +66,19 @@ func (input *InputField) Render(g *Graphics) {
 	showCursor := input.isFocused && (input.cursorFrame/30)%2 == 0
 	
 	textX := input.x + 8
-	textY := input.y + input.height/2 + 8
+	fontSize := 20.0
+	// DrawTextTTF 的 y 是“文字顶部”（内部会再 +size），因此用统一的居中计算
+	textTop := textTopForCenter(input.y, input.height, fontSize)
 	
-	g.DrawTextTTF(displayText, textX, textY, textColor, 20, FontWeightRegular)
+	_ = g.DrawTextTTF(displayText, textX, textTop, textColor, fontSize, FontWeightRegular)
 	
 	if showCursor {
-		width := g.MeasureText(displayText, 20, FontWeightRegular)
+		width := g.MeasureText(displayText, fontSize, FontWeightRegular)
 		if len(input.text) == 0 { width = 0 }
-		g.DrawRect(textX+width+2, input.y+10, 2, input.height-20, ColorBrandBlue)
+		// 光标同样在输入框内垂直居中
+		cursorTop := input.y + 10
+		cursorH := input.height - 20
+		g.DrawRect(textX+width+2, cursorTop, 2, cursorH, ColorBrandBlue)
 	}
 	
 	if input.isFocused {
@@ -210,17 +215,20 @@ func (vk *VirtualKeyboard) Render(g *Graphics) {
 			
 			// 绘制按键文字
 			text := key
-			if key == "SPACE" { text = " " }
+			if key == "SPACE" { text = "空格" }
 			if key == "UP" { text = "⇧" }
 			if key == "LOW" { text = "⇩" }
 			if key == "DEL" { text = "⌫" }
+			if key == "ENTER" { text = "确定" }
 			
 			textColor := ColorTextPrimary
-			if key == "ENTER" { textColor = color.RGBA{255,255,255,255} }
+			if key == "ENTER" { textColor = ColorBackgroundStart }
 			
-			textSize := 20
-			tw := g.MeasureText(text, float64(textSize), FontWeightMedium)
-			g.DrawTextTTF(text, int(currentX)+keyWidth/2-tw/2, rowY+keyHeight/2+8, textColor, float64(textSize), FontWeightMedium)
+			textSize := 18.0
+			// 按键内垂直居中（DrawTextTTF 传 topY）
+			tw := g.MeasureText(text, textSize, FontWeightMedium)
+			textTop := textTopForCenter(rowY, keyHeight, textSize)
+			_ = g.DrawTextTTF(text, int(currentX)+keyWidth/2-tw/2, textTop, textColor, textSize, FontWeightMedium)
 			
 			currentX += float64(keyWidth + padding)
 		}

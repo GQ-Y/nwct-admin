@@ -189,14 +189,19 @@ func (p *StatusPage) drawNetworkArea(g *Graphics, w, h float64) {
 	startY := int(h * 0.52) // 250px 开始
 
 	// 区域标题
-	g.DrawTextTTF("实时速率", int(w*0.0625), startY, color.RGBA{100, 116, 139, 255}, h*0.029, FontWeightRegular)
+	title := "实时速率"
+	titleSize := h * 0.029 // ~14px
+	titleX := int(w * 0.0625)
+	// DrawTextTTF 的 y 是 topY（内部会再 +size），因此这里直接传 topY
+	_ = g.DrawTextTTF(title, titleX, startY, color.RGBA{100, 116, 139, 255}, titleSize, FontWeightRegular)
 
-	// 分隔线 (横跨屏幕)
-	g.DrawRect(int(w*0.0625), startY+10, int(w*0.875), 1, color.RGBA{226, 232, 240, 255})
+	// 分隔线：放在标题下方，留出固定间距，避免与文字重叠
+	sepY := startY + int(titleSize) + 8
+	g.DrawRect(int(w*0.0625), sepY, int(w*0.875), 1, color.RGBA{226, 232, 240, 255})
 
 	// 内容Y坐标
-	labelY := startY + int(h*0.083) // 290px
-	valueY := startY + int(h*0.146) // 320px
+	labelY := sepY + 16
+	valueY := labelY + 28
 
 	labelSize := h * 0.025  // 12px
 	valueSize := h * 0.0625 // 30px
@@ -204,21 +209,21 @@ func (p *StatusPage) drawNetworkArea(g *Graphics, w, h float64) {
 
 	// 左侧 - 上传 (蓝色)
 	leftX := int(w * 0.0625) // 30px
-	g.DrawTextTTF("上传", leftX, labelY, color.RGBA{148, 163, 184, 255}, labelSize, FontWeightRegular)
+	_ = g.DrawTextTTF("上传", leftX, labelY, color.RGBA{148, 163, 184, 255}, labelSize, FontWeightRegular)
 
 	uploadText := fmt.Sprintf("%.1f", p.uploadSpeed)
-	g.DrawTextTTF(uploadText, leftX, valueY, color.RGBA{59, 130, 246, 255}, valueSize, FontWeightMedium)
+	_ = g.DrawTextTTF(uploadText, leftX, valueY, color.RGBA{59, 130, 246, 255}, valueSize, FontWeightMedium)
 	numWidth := g.MeasureText(uploadText, valueSize, FontWeightMedium)
-	g.DrawTextTTF("KB/s", leftX+numWidth+8, valueY, color.RGBA{148, 163, 184, 255}, unitSize, FontWeightRegular)
+	_ = g.DrawTextTTF("KB/s", leftX+numWidth+8, valueY, color.RGBA{148, 163, 184, 255}, unitSize, FontWeightRegular)
 
 	// 右侧 - 下载 (绿色)
 	rightX := int(w * 0.55) // 264px
-	g.DrawTextTTF("下载", rightX, labelY, color.RGBA{148, 163, 184, 255}, labelSize, FontWeightRegular)
+	_ = g.DrawTextTTF("下载", rightX, labelY, color.RGBA{148, 163, 184, 255}, labelSize, FontWeightRegular)
 
 	downloadText := fmt.Sprintf("%.1f", p.downloadSpeed)
-	g.DrawTextTTF(downloadText, rightX, valueY, color.RGBA{16, 185, 129, 255}, valueSize, FontWeightMedium)
+	_ = g.DrawTextTTF(downloadText, rightX, valueY, color.RGBA{16, 185, 129, 255}, valueSize, FontWeightMedium)
 	numWidth2 := g.MeasureText(downloadText, valueSize, FontWeightMedium)
-	g.DrawTextTTF("KB/s", rightX+numWidth2+8, valueY, color.RGBA{148, 163, 184, 255}, unitSize, FontWeightRegular)
+	_ = g.DrawTextTTF("KB/s", rightX+numWidth2+8, valueY, color.RGBA{148, 163, 184, 255}, unitSize, FontWeightRegular)
 }
 
 // drawStatsArea 绘制统计区域

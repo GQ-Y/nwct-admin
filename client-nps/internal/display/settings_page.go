@@ -48,7 +48,7 @@ func NewSettingsPage(pm *PageManager) *SettingsPage {
 		Subtitle: "Luckfox Pico Ultra RV1106",
 		ShowArrow: true,
 		OnClick: func() {
-			// TODO: 关于页面
+			pm.NavigateTo("about")
 		},
 	})
 	
