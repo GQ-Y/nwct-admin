@@ -1,11 +1,15 @@
 package display
 
+import "fmt"
+
 // WiFiListPage WiFi列表页
 type WiFiListPage struct {
 	BasePage
 	listView *ListView
 	navBar   *NavBar
 	pm       *PageManager
+	services *AppServices
+	lastErr  string
 }
 
 func NewWiFiListPage(pm *PageManager) *WiFiListPage {
@@ -18,38 +22,65 @@ func NewWiFiListPage(pm *PageManager) *WiFiListPage {
 	p.navBar.SetOnBack(func() { pm.Back() })
 	
 	p.listView = NewListView(0, 60, 480, 420)
-	
-	// 模拟数据
-	wifis := []struct{ ssid string; signal string; locked bool }{
-		{"ChinaNet-Home", "强", true},
-		{"Office-5G", "强", true},
-		{"Guest-WiFi", "中", false},
-		{"TP-LINK_8888", "弱", true},
-	}
-	
-	for _, wifi := range wifis {
-		item := &ListItem{
-			Title:    wifi.ssid,
-			Subtitle: "信号: " + wifi.signal,
-			ShowArrow: true,
-			// Icon: ... 锁图标
-		}
-		
-		// 闭包捕获
-		ssid := wifi.ssid
-		item.OnClick = func() {
-			// 跳转到连接页 (带参数传递通常通过设置目标页面的属性)
-			// 这里简单处理：假设 ConnectPage 有一个 SetTargetSSID 方法
-			if cp := pm.GetWiFiConnectPage(); cp != nil {
-				cp.SetTargetSSID(ssid)
-			}
-			pm.NavigateTo("wifi_connect")
-		}
-		
-		p.listView.AddItem(item)
-	}
+	p.refresh()
 	
 	return p
+}
+
+func (p *WiFiListPage) SetServices(s *AppServices) {
+	p.services = s
+	p.refresh()
+}
+
+func (p *WiFiListPage) OnEnter() {
+	p.refresh()
+}
+
+func (p *WiFiListPage) refresh() {
+	if p.listView == nil {
+		return
+	}
+	p.listView.Clear()
+	p.lastErr = ""
+
+	if p.services == nil {
+		p.lastErr = "服务未初始化"
+		p.listView.AddItem(&ListItem{Title: "无法扫描 WiFi", Subtitle: p.lastErr})
+		return
+	}
+
+	nets, err := p.services.ScanWiFi()
+	if err != nil {
+		p.lastErr = err.Error()
+		p.listView.AddItem(&ListItem{Title: "WiFi 扫描失败", Subtitle: p.lastErr})
+		return
+	}
+	if len(nets) == 0 {
+		p.listView.AddItem(&ListItem{Title: "未发现可用 WiFi", Subtitle: "请确认 WLAN 已开启"})
+		return
+	}
+
+	for _, n := range nets {
+		sub := "信号: " + fmt.Sprintf("%d%%", n.Signal) + " | " + n.Security
+		val := ""
+		if n.InUse {
+			val = "已连接"
+		}
+		ssid := n.SSID
+		item := &ListItem{
+			Title:     ssid,
+			Subtitle:  sub,
+			Value:     val,
+			ShowArrow: true,
+			OnClick: func() {
+				if cp := p.pm.GetWiFiConnectPage(); cp != nil {
+					cp.SetTargetSSID(ssid)
+				}
+				p.pm.NavigateTo("wifi_connect")
+			},
+		}
+		p.listView.AddItem(item)
+	}
 }
 
 func (p *WiFiListPage) Render(g *Graphics) error {

@@ -9,6 +9,9 @@ type WiFiConnectPage struct {
 	targetSSID  string
 	pwdInput    *InputField
 	keyboard    *VirtualKeyboard
+
+	services *AppServices
+	lastErr  string
 }
 
 func NewWiFiConnectPage(pm *PageManager) *WiFiConnectPage {
@@ -27,16 +30,21 @@ func NewWiFiConnectPage(pm *PageManager) *WiFiConnectPage {
 	p.keyboard = NewVirtualKeyboard(480-240, 480, 240)
 	p.keyboard.onEnter = func() {
 		p.keyboard.Hide()
-		// 模拟连接...
-		pm.Back() // 连接成功返回
+		// 触发连接
+		_ = p.connect()
 	}
 	
 	return p
 }
 
+func (p *WiFiConnectPage) SetServices(s *AppServices) {
+	p.services = s
+}
+
 func (p *WiFiConnectPage) SetTargetSSID(ssid string) {
 	p.targetSSID = ssid
 	p.pwdInput.SetText("") // 清空密码
+	p.lastErr = ""
 	// 更新标题
 	// p.navBar.title = ssid (需要 NavBar 支持修改 Title)
 }
@@ -47,6 +55,10 @@ func (p *WiFiConnectPage) Render(g *Graphics) error {
 	_ = g.DrawTextTTF("正在连接到: "+p.targetSSID, 24, 90, ColorTextPrimary, 18, FontWeightMedium)
 	
 	p.pwdInput.Render(g)
+
+	if p.lastErr != "" {
+		_ = g.DrawTextTTF(p.lastErr, 24, 160, ColorErrorRed, 14, FontWeightRegular)
+	}
 	
 	// 连接按钮
 	btnY := 220
@@ -57,6 +69,20 @@ func (p *WiFiConnectPage) Render(g *Graphics) error {
 	
 	p.navBar.Render(g)
 	p.keyboard.Render(g)
+	return nil
+}
+
+func (p *WiFiConnectPage) connect() error {
+	p.lastErr = ""
+	if p.services == nil {
+		p.lastErr = "服务未初始化"
+		return nil
+	}
+	if err := p.services.ConnectWiFi(p.targetSSID, p.pwdInput.GetText()); err != nil {
+		p.lastErr = err.Error()
+		return err
+	}
+	p.pm.Back()
 	return nil
 }
 
@@ -77,7 +103,7 @@ func (p *WiFiConnectPage) HandleTouch(x, y int, touchType TouchType) bool {
 	// 按钮点击
 	if x > 24 && x < 456 && y > 220 && y < 270 {
 		if touchType == TouchUp {
-			p.pm.Back()
+			_ = p.connect()
 		}
 		return true
 	}

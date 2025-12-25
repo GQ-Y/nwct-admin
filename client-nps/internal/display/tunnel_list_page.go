@@ -1,11 +1,18 @@
 package display
 
+import (
+	"fmt"
+	"strings"
+)
+
 // TunnelListPage 隧道列表页
 type TunnelListPage struct {
 	BasePage
 	listView *ListView
 	navBar   *NavBar
 	pm       *PageManager
+	services *AppServices
+	lastErr  string
 }
 
 func NewTunnelListPage(pm *PageManager) *TunnelListPage {
@@ -18,41 +25,76 @@ func NewTunnelListPage(pm *PageManager) *TunnelListPage {
 	p.navBar.SetOnBack(func() { pm.Back() })
 	
 	p.listView = NewListView(0, 60, 480, 420)
-	
-	// 模拟隧道数据
-	tunnels := []struct{ name string; status string; type_ string }{
-		{"SSH Remote", "在线", "TCP"},
-		{"Web Service", "在线", "HTTP"},
-		{"Database", "离线", "TCP"},
-		{"P2P Transfer", "在线", "P2P"},
-	}
-	
-	for _, t := range tunnels {
-		statusColor := ColorSuccessGreen
-		if t.status == "离线" { statusColor = ColorTextLight }
-		
-		item := &ListItem{
-			Title:    t.name,
-			Subtitle: t.type_ + " | " + t.status,
-			ShowArrow: true,
-			Icon: func(g *Graphics, x, y int) {
-				// 状态点
-				g.DrawCircle(x, y, 6, statusColor)
-			},
-		}
-		
-		tName := t.name
-		item.OnClick = func() {
-			if ep := pm.GetTunnelEditPage(); ep != nil {
-				ep.SetTunnelName(tName)
-			}
-			pm.NavigateTo("tunnel_edit")
-		}
-		
-		p.listView.AddItem(item)
-	}
+	p.refresh()
 	
 	return p
+}
+
+func (p *TunnelListPage) SetServices(s *AppServices) {
+	p.services = s
+	p.refresh()
+}
+
+func (p *TunnelListPage) OnEnter() {
+	p.refresh()
+}
+
+func (p *TunnelListPage) refresh() {
+	if p.listView == nil {
+		return
+	}
+	p.listView.Clear()
+	p.lastErr = ""
+
+	if p.services == nil {
+		p.listView.AddItem(&ListItem{Title: "隧道服务未初始化", Subtitle: "请先启动 FRP 客户端"})
+		return
+	}
+	tunnels, err := p.services.GetTunnels()
+	if err != nil {
+		p.lastErr = err.Error()
+		p.listView.AddItem(&ListItem{Title: "读取隧道失败", Subtitle: p.lastErr})
+		return
+	}
+	if len(tunnels) == 0 {
+		p.listView.AddItem(&ListItem{Title: "暂无隧道", Subtitle: "请在主程序或后续页面添加隧道"})
+		return
+	}
+
+	connected := false
+	if p.services.FRP != nil {
+		connected = p.services.FRP.IsConnected()
+	}
+	for _, t := range tunnels {
+		if t == nil {
+			continue
+		}
+		statusColor := ColorTextLight
+		statusText := "离线"
+		if connected {
+			statusColor = ColorSuccessGreen
+			statusText = "在线"
+		}
+		title := t.Name
+		sub := strings.ToUpper(t.Type) + " | " + statusText + " | " + fmt.Sprintf("%s:%d → :%d", t.LocalIP, t.LocalPort, t.RemotePort)
+
+		tt := t // capture
+		item := &ListItem{
+			Title:     title,
+			Subtitle:  sub,
+			ShowArrow: true,
+			Icon: func(g *Graphics, x, y int) {
+				g.DrawCircle(x, y, 6, statusColor)
+			},
+			OnClick: func() {
+				if ep := p.pm.GetTunnelEditPage(); ep != nil {
+					ep.SetTunnel(tt)
+				}
+				p.pm.NavigateTo("tunnel_edit")
+			},
+		}
+		p.listView.AddItem(item)
+	}
 }
 
 func (p *TunnelListPage) Render(g *Graphics) error {

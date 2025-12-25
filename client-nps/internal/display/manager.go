@@ -3,6 +3,10 @@ package display
 import (
 	"fmt"
 	"time"
+
+	appcfg "nwct/client-nps/config"
+	"nwct/client-nps/internal/frp"
+	"nwct/client-nps/internal/network"
 )
 
 // Manager 显示管理器
@@ -10,6 +14,7 @@ type Manager struct {
 	display     Display
 	graphics    *Graphics
 	pageManager *PageManager
+	services    *AppServices
 	running     bool
 }
 
@@ -21,6 +26,17 @@ func NewManager(disp Display) *Manager {
 	
 	pm := NewPageManager()
 
+	// 初始化业务服务（真实功能接入点）
+	cfg, _ := appcfg.LoadConfig()
+	nm := network.NewManager()
+	fc := frp.GetGlobalClient()
+	if fc == nil && cfg != nil {
+		// 仅用于 UI 读取/管理隧道；不主动 Connect，避免在预览阶段启动 frpc
+		fc = frp.NewClient(&cfg.FRPServer)
+		frp.SetGlobalClient(fc)
+	}
+	services := NewAppServices(cfg, nm, fc)
+
 	// 创建所有页面
 	statusPage := NewStatusPage()
 	settingsPage := NewSettingsPage(pm)
@@ -31,6 +47,15 @@ func NewManager(disp Display) *Manager {
 	wifiConnectPage := NewWiFiConnectPage(pm)
 	tunnelListPage := NewTunnelListPage(pm)
 	tunnelEditPage := NewTunnelEditPage(pm)
+
+	// 注入 services
+	statusPage.SetServices(services)
+	networkPage.SetServices(services)
+	ethernetPage.SetServices(services)
+	wifiListPage.SetServices(services)
+	wifiConnectPage.SetServices(services)
+	tunnelListPage.SetServices(services)
+	tunnelEditPage.SetServices(services)
 
 	// 注册页面
 	pm.RegisterPage("status", statusPage)
@@ -55,6 +80,7 @@ func NewManager(disp Display) *Manager {
 		display:     disp,
 		graphics:    graphics,
 		pageManager: pm,
+		services:    services,
 		running:     false,
 	}
 }
@@ -69,6 +95,7 @@ func (m *Manager) Run() error {
 	for m.running {
 		// 轮询事件
 		if shouldQuit := m.display.PollEvents(); shouldQuit {
+			fmt.Println("🛑 收到退出事件（PollEvents=true）")
 			m.running = false
 			break
 		}

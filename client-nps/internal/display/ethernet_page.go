@@ -7,11 +7,16 @@ type EthernetPage struct {
 	pm       *PageManager
 	
 	ipInput     *InputField
-	maskInput   *InputField // 预留
-	gatewayInput *InputField // 预留
+	maskInput    *InputField
+	gatewayInput *InputField
+	dnsInput     *InputField
 	
 	keyboard    *VirtualKeyboard
 	saveButton  *ListView // 借用 ListView 实现按钮效果，或者直接画
+
+	services *AppServices
+	iface    string
+	lastErr  string
 }
 
 func NewEthernetPage(pm *PageManager) *EthernetPage {
@@ -27,7 +32,19 @@ func NewEthernetPage(pm *PageManager) *EthernetPage {
 	// 表单采用「Label 在上，输入框在下」的标准间距，避免文字与输入框重叠
 	p.ipInput = NewInputField(24, 120, 432, 50)
 	p.ipInput.placeholder = "输入静态 IP 地址"
-	p.ipInput.SetText("192.168.1.100")
+	p.ipInput.SetText("")
+
+	p.maskInput = NewInputField(24, 200, 432, 50)
+	p.maskInput.placeholder = "子网掩码（如 255.255.255.0 或 /24）"
+	p.maskInput.SetText("")
+
+	p.gatewayInput = NewInputField(24, 280, 432, 50)
+	p.gatewayInput.placeholder = "网关（如 192.168.1.1）"
+	p.gatewayInput.SetText("")
+
+	p.dnsInput = NewInputField(24, 360, 432, 50)
+	p.dnsInput.placeholder = "DNS（如 8.8.8.8,1.1.1.1）"
+	p.dnsInput.SetText("")
 	
 	// 键盘
 	p.keyboard = NewVirtualKeyboard(480-240, 480, 240) // 底部半屏
@@ -42,20 +59,63 @@ func NewEthernetPage(pm *PageManager) *EthernetPage {
 	return p
 }
 
+func (p *EthernetPage) SetServices(s *AppServices) {
+	p.services = s
+}
+
+func (p *EthernetPage) OnEnter() {
+	p.lastErr = ""
+	if p.services == nil {
+		return
+	}
+	// 从 config 预填
+	if p.services.Config != nil {
+		p.ipInput.SetText(p.services.Config.Network.IP)
+		p.maskInput.SetText(p.services.Config.Network.Netmask)
+		p.gatewayInput.SetText(p.services.Config.Network.Gateway)
+		p.dnsInput.SetText(p.services.Config.Network.DNS)
+		p.iface = p.services.Config.Network.Interface
+	}
+	// 从当前网络状态补充接口/IP
+	if st, err := p.services.GetNetworkStatus(); err == nil && st != nil {
+		if st.CurrentInterface != "" {
+			p.iface = st.CurrentInterface
+		}
+		if p.ipInput.GetText() == "" && st.IP != "" {
+			p.ipInput.SetText(st.IP)
+		}
+		if p.gatewayInput.GetText() == "" && st.Gateway != "" {
+			p.gatewayInput.SetText(st.Gateway)
+		}
+	}
+}
+
 func (p *EthernetPage) Render(g *Graphics) error {
 	g.DrawRect(0, 0, 480, 480, ColorBackgroundStart)
 	
 	// 表单标题（放在输入框上方，留出足够间距）
-	_ = g.DrawTextTTF("IP 地址", 24, 88, ColorTextSecondary, 14, FontWeightRegular)
+	title := "IP 配置（静态）"
+	if p.iface != "" {
+		title = "IP 配置（" + p.iface + "）"
+	}
+	_ = g.DrawTextTTF(title, 24, 88, ColorTextSecondary, 14, FontWeightRegular)
 	
 	p.ipInput.Render(g)
+	p.maskInput.Render(g)
+	p.gatewayInput.Render(g)
+	p.dnsInput.Render(g)
 	
 	// 保存按钮 (简单绘制)
-	btnY := 240
+	btnY := 430
 	g.DrawRectRounded(24, btnY, 432, 50, 25, ColorBrandBlue)
 	labelW := g.MeasureText("保存配置", 18, FontWeightMedium)
 	textTop := btnY + (50-int(18))/2
 	_ = g.DrawTextTTF("保存配置", 24+(432-labelW)/2, textTop, ColorBackgroundStart, 18, FontWeightMedium)
+
+	// 错误提示
+	if p.lastErr != "" {
+		_ = g.DrawTextTTF(p.lastErr, 24, 406, ColorErrorRed, 14, FontWeightRegular)
+	}
 	
 	p.navBar.Render(g)
 	p.keyboard.Render(g)
@@ -76,11 +136,38 @@ func (p *EthernetPage) HandleTouch(x, y int, touchType TouchType) bool {
 		}
 		return true
 	}
+	if p.maskInput.HandleTouch(x, y, touchType) {
+		if p.maskInput.isFocused {
+			p.keyboard.Show(p.maskInput)
+		}
+		return true
+	}
+	if p.gatewayInput.HandleTouch(x, y, touchType) {
+		if p.gatewayInput.isFocused {
+			p.keyboard.Show(p.gatewayInput)
+		}
+		return true
+	}
+	if p.dnsInput.HandleTouch(x, y, touchType) {
+		if p.dnsInput.isFocused {
+			p.keyboard.Show(p.dnsInput)
+		}
+		return true
+	}
 	
 	// 保存按钮点击检测
-	if x > 24 && x < 456 && y > 240 && y < 290 {
+	if x > 24 && x < 456 && y > 430 && y < 480 {
 		if touchType == TouchUp {
-			// TODO: 保存逻辑
+			// 下发静态IP
+			p.lastErr = ""
+			if p.services == nil {
+				p.lastErr = "服务未初始化"
+				return true
+			}
+			if err := p.services.ApplyStaticIP(p.iface, p.ipInput.GetText(), p.maskInput.GetText(), p.gatewayInput.GetText(), p.dnsInput.GetText()); err != nil {
+				p.lastErr = err.Error()
+				return true
+			}
 			p.pm.Back()
 		}
 		return true

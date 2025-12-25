@@ -19,6 +19,10 @@ type StatusPage struct {
 	onEnterSettings  func()
 	width            int // 屏幕宽度
 	height           int // 屏幕高度
+
+	services        *AppServices
+	lastBizRefresh  time.Time
+	cachedIfaceName string
 }
 
 // NewStatusPage 创建状态页
@@ -30,6 +34,10 @@ func NewStatusPage() *StatusPage {
 		width:            480,
 		height:           480,
 	}
+}
+
+func (p *StatusPage) SetServices(s *AppServices) {
+	p.services = s
 }
 
 // SetOnEnterSettings 设置进入设置回调
@@ -55,6 +63,36 @@ func (p *StatusPage) SetTunnelCount(count int) {
 // Update 更新页面状态
 func (p *StatusPage) Update(deltaTime int64) {
 	p.logoFrame++
+
+	// 业务数据刷新：500ms 一次，避免抖动和过度开销
+	if p.services == nil {
+		return
+	}
+	now := time.Now()
+	if !p.lastBizRefresh.IsZero() && now.Sub(p.lastBizRefresh) < 500*time.Millisecond {
+		return
+	}
+	p.lastBizRefresh = now
+
+	// 当前网卡
+	if st, err := p.services.GetNetworkStatus(); err == nil && st != nil {
+		if st.CurrentInterface != "" {
+			p.cachedIfaceName = st.CurrentInterface
+		}
+	}
+
+	// 网络速率（KB/s）
+	if p.cachedIfaceName != "" {
+		up, down := p.services.GetTransferRateKBps(p.cachedIfaceName)
+		// 采样首次可能为 0，允许展示
+		p.uploadSpeed = up
+		p.downloadSpeed = down
+	}
+
+	// 隧道数量
+	if tunnels, err := p.services.GetTunnels(); err == nil {
+		p.tunnelCount = len(tunnels)
+	}
 }
 
 // HandleTouch 处理触摸（点击任意位置进入设置）
