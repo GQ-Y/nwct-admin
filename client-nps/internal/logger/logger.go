@@ -38,7 +38,15 @@ func InitLogger() error {
 	// 打开日志文件（追加模式）
 	file, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
 	if err != nil {
-		return err
+		// 目录可能创建成功，但文件打开仍可能因权限失败（macOS 非 root 常见）
+		fallback := filepath.Join(os.TempDir(), "nwct")
+		_ = os.MkdirAll(fallback, 0755)
+		logDir = fallback
+		logPath = filepath.Join(logDir, "system.log")
+		file, err = os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+		if err != nil {
+			return err
+		}
 	}
 	logFile = file
 

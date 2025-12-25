@@ -20,12 +20,6 @@ type Manager struct {
 
 // NewManager 创建显示管理器
 func NewManager(disp Display) *Manager {
-	// 获取后缓冲区用于绘图
-	backBuffer := disp.GetBackBuffer()
-	graphics := NewGraphics(backBuffer)
-	
-	pm := NewPageManager()
-
 	// 初始化业务服务（真实功能接入点）
 	cfg, _ := appcfg.LoadConfig()
 	nm := network.NewManager()
@@ -36,6 +30,15 @@ func NewManager(disp Display) *Manager {
 		frp.SetGlobalClient(fc)
 	}
 	services := NewAppServices(cfg, nm, fc)
+	return NewManagerWithServices(disp, services)
+}
+
+// NewManagerWithServices 使用外部注入的 services（用于与主程序共享 netManager/frpClient/config）
+func NewManagerWithServices(disp Display, services *AppServices) *Manager {
+	// 获取后缓冲区用于绘图
+	backBuffer := disp.GetBackBuffer()
+	graphics := NewGraphics(backBuffer)
+	pm := NewPageManager()
 
 	// 创建所有页面
 	statusPage := NewStatusPage()
