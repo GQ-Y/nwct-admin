@@ -21,43 +21,11 @@ type sdlDisplay struct {
 }
 
 // NewSDL2 创建 SDL2 显示
-func NewSDL2(title string, width, height int) (Display, error) {
-	d := &sdlDisplay{
+func NewSDL2(title string, width, height int) Display {
+	return &sdlDisplay{
 		width:  width,
 		height: height,
 	}
-	
-	if err := sdl.Init(sdl.INIT_VIDEO); err != nil {
-		return nil, fmt.Errorf("SDL初始化失败: %w", err)
-	}
-
-	window, err := sdl.CreateWindow(title, sdl.WINDOWPOS_CENTERED, sdl.WINDOWPOS_CENTERED,
-		int32(width), int32(height), sdl.WINDOW_SHOWN)
-	if err != nil {
-		return nil, fmt.Errorf("创建窗口失败: %w", err)
-	}
-	d.window = window
-
-	renderer, err := sdl.CreateRenderer(window, -1, sdl.RENDERER_ACCELERATED|sdl.RENDERER_PRESENTVSYNC)
-	if err != nil {
-		window.Destroy()
-		return nil, fmt.Errorf("创建渲染器失败: %w", err)
-	}
-	d.renderer = renderer
-
-	texture, err := renderer.CreateTexture(sdl.PIXELFORMAT_ABGR8888, sdl.TEXTUREACCESS_STREAMING,
-		int32(width), int32(height))
-	if err != nil {
-		renderer.Destroy()
-		window.Destroy()
-		return nil, fmt.Errorf("创建纹理失败: %w", err)
-	}
-	d.texture = texture
-
-	d.backBuffer = image.NewRGBA(image.Rect(0, 0, width, height))
-	d.touchEvents = make([]TouchEvent, 0)
-
-	return d, nil
 }
 
 func (d *sdlDisplay) Init() error {

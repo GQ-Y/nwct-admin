@@ -2,50 +2,58 @@ package display
 
 import (
 	"fmt"
-	"image"
 	"time"
 )
 
 // Manager 显示管理器
 type Manager struct {
-	display      Display
-	graphics     *Graphics
-	pageManager  *PageManager
-	statusPage   *StatusPage
-	settingsPage *SettingsPage
-	running      bool
+	display     Display
+	graphics    *Graphics
+	pageManager *PageManager
+	running     bool
 }
 
 // NewManager 创建显示管理器
-func NewManager(display Display) *Manager {
-	// 从 display 获取 backBuffer
-	var backBuffer *image.RGBA
-	if sdl, ok := display.(*sdlDisplay); ok {
-		backBuffer = sdl.backBuffer
-	}
-	
+func NewManager(disp Display) *Manager {
+	// 获取后缓冲区用于绘图
+	backBuffer := disp.GetBackBuffer()
 	graphics := NewGraphics(backBuffer)
 	
-	pageManager := NewPageManager()
+	pm := NewPageManager()
 
-	// 创建页面
+	// 创建所有页面
 	statusPage := NewStatusPage()
-	settingsPage := NewSettingsPage()
+	settingsPage := NewSettingsPage(pm)
+	networkPage := NewNetworkPage(pm)
+	ethernetPage := NewEthernetPage(pm)
+	wifiListPage := NewWiFiListPage(pm)
+	wifiConnectPage := NewWiFiConnectPage(pm)
+	tunnelListPage := NewTunnelListPage(pm)
+	tunnelEditPage := NewTunnelEditPage(pm)
 
 	// 注册页面
-	pageManager.RegisterPage("status", statusPage)
-	pageManager.RegisterPage("settings", settingsPage)
+	pm.RegisterPage("status", statusPage)
+	pm.RegisterPage("settings", settingsPage)
+	pm.RegisterPage("network", networkPage)
+	pm.RegisterPage("ethernet", ethernetPage)
+	pm.RegisterPage("wifi_list", wifiListPage)
+	pm.RegisterPage("wifi_connect", wifiConnectPage)
+	pm.RegisterPage("tunnel_list", tunnelListPage)
+	pm.RegisterPage("tunnel_edit", tunnelEditPage)
+
+	// 设置主页跳转逻辑
+	statusPage.SetOnEnterSettings(func() {
+		pm.NavigateTo("settings")
+	})
 
 	// 设置默认页面
-	pageManager.NavigateTo("status")
+	pm.NavigateTo("status")
 
 	return &Manager{
-		display:      display,
-		graphics:     graphics,
-		pageManager:  pageManager,
-		statusPage:   statusPage,
-		settingsPage: settingsPage,
-		running:      false,
+		display:     disp,
+		graphics:    graphics,
+		pageManager: pm,
+		running:     false,
 	}
 }
 
@@ -56,17 +64,11 @@ func (m *Manager) Run() error {
 	frameCount := 0
 	fpsTime := time.Now()
 
-	fmt.Println("🚀 启动 NWCT 显示预览...")
-	fmt.Printf("✅ 显示系统已启动，%dx%d 窗口\n", m.display.GetWidth(), m.display.GetHeight())
-	fmt.Println("💡 按 ESC 或关闭窗口退出")
-
 	for m.running {
-		// 先处理 SDL 事件（必须在主线程）
-		if sdl, ok := m.display.(*sdlDisplay); ok {
-			if sdl.PollEvents() {
-				m.running = false
-				break
-			}
+		// 轮询事件
+		if shouldQuit := m.display.PollEvents(); shouldQuit {
+			m.running = false
+			break
 		}
 		
 		// 计算帧时间
@@ -78,11 +80,14 @@ func (m *Manager) Run() error {
 		m.pageManager.Update(deltaTime)
 
 		// 渲染
+		// 清空背景
+		m.graphics.Clear(ColorBackgroundStart)
+		
 		if err := m.pageManager.Render(m.graphics); err != nil {
 			return fmt.Errorf("渲染失败: %w", err)
 		}
 
-		// 更新显示
+		// 更新显示硬件/窗口
 		if err := m.display.Update(); err != nil {
 			return fmt.Errorf("更新显示失败: %w", err)
 		}
@@ -113,7 +118,7 @@ func (m *Manager) Stop() {
 	m.running = false
 }
 
-// GetStatusPage 获取状态页
+// GetStatusPage 获取状态页 (暴露给外部更新数据)
 func (m *Manager) GetStatusPage() *StatusPage {
-	return m.statusPage
+	return m.pageManager.GetStatusPage()
 }

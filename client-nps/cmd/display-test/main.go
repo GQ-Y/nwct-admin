@@ -18,8 +18,8 @@ func init() {
 func main() {
 	fmt.Println("🚀 启动 NWCT 显示预览...")
 
-	// 创建 SDL2 显示
-	disp, err := display.NewSDL2("NWCT Display Preview - 480x480", 480, 480)
+	// 创建显示实例
+	disp, err := display.NewDisplay("NWCT Display Preview - 480x480", 480, 480)
 	if err != nil {
 		log.Fatalf("❌ 初始化显示失败: %v", err)
 	}

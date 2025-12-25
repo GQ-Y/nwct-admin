@@ -3,6 +3,7 @@ package display
 import (
 	"fmt"
 	"image/color"
+	"math"
 	"time"
 )
 
@@ -119,39 +120,68 @@ func (p *StatusPage) drawTopBar(g *Graphics, w, h float64) {
 	g.DrawCircle(dotX, dotY, dotRadius, color.RGBA{34, 197, 94, 255})
 }
 
-// drawLogo 绘制 LOGO 动画
+// drawLogo 绘制 LOGO 动画 - 悬浮灵动球 (Smooth & Cute)
 func (p *StatusPage) drawLogo(g *Graphics, w, h float64) {
 	centerX := int(w * 0.5)
-	centerY := int(h * 0.33) // 158px (稍微下移一点，让上方留白均衡)
+	centerY := int(h * 0.33) // 基础中心位置
 
-	// 呼吸动画
-	breatheFactor := float64(p.logoFrame%120) / 120.0
-	if breatheFactor > 0.5 {
-		breatheFactor = 1.0 - breatheFactor
+	// 动画参数 (使用 float64 保证计算平滑)
+	t := float64(p.logoFrame) * 0.08 // 时间步长，控制速度
+
+	// 1. 悬浮运动 (正弦波)
+	// 上下浮动范围 +/- 8像素
+	hoverOffset := math.Sin(t) * 8.0
+
+	// 2. 呼吸效果 (轻微缩放)
+	// 大小变化 +/- 1像素
+	scaleOffset := math.Sin(t*0.5) * 1.0
+
+	// 实际绘制坐标
+	drawY := centerY + int(hoverOffset)
+
+	// --- 绘制阴影 ---
+	// 阴影随悬浮高度变化：越高越小越淡，越低越大越深
+	shadowScale := (hoverOffset + 8.0) / 16.0 // 0.0 ~ 1.0
+	shadowW := 40 - int(shadowScale*5)
+	shadowH := 6
+	shadowAlpha := uint8(40 + (1.0-shadowScale)*20)
+	// 阴影位于球体下方
+	g.DrawRectRounded(centerX-shadowW/2, centerY+50, shadowW, shadowH, 3, color.RGBA{148, 163, 184, shadowAlpha})
+
+	// --- 绘制身体 ---
+	// 鸿蒙蓝灵动球
+	bodyRadius := 42 + int(scaleOffset)
+	g.DrawCircle(centerX, drawY, bodyRadius, color.RGBA{59, 130, 246, 255})
+
+	// --- 绘制肚子 (白色半圆) ---
+	bellyRadius := 28
+	g.DrawCircle(centerX, drawY+12, bellyRadius, color.RGBA{255, 255, 255, 240})
+
+	// --- 绘制眼睛 ---
+	eyeOffsetX := 14
+	eyeOffsetY := drawY - 8
+	eyeRadius := 4
+
+	// 眨眼动画：每 4 秒眨一次眼
+	// 周期约 300 帧 (假设 60fps)
+	isBlinking := (p.logoFrame % 240) < 10
+
+	if isBlinking {
+		// 闭眼 (画线)
+		g.DrawRect(centerX-eyeOffsetX-4, eyeOffsetY, 8, 2, color.RGBA{30, 41, 59, 255})
+		g.DrawRect(centerX+eyeOffsetX-4, eyeOffsetY, 8, 2, color.RGBA{30, 41, 59, 255})
+	} else {
+		// 睁眼 (眼白 + 眼珠)
+		// 眼白
+		g.DrawCircle(centerX-eyeOffsetX, eyeOffsetY, eyeRadius+2, color.RGBA{255, 255, 255, 255})
+		g.DrawCircle(centerX+eyeOffsetX, eyeOffsetY, eyeRadius+2, color.RGBA{255, 255, 255, 255})
+		// 眼珠 (黑色)
+		g.DrawCircle(centerX-eyeOffsetX, eyeOffsetY, eyeRadius-1, color.RGBA{30, 41, 59, 255})
+		g.DrawCircle(centerX+eyeOffsetX, eyeOffsetY, eyeRadius-1, color.RGBA{30, 41, 59, 255})
 	}
-	breatheFactor = breatheFactor * 2.0
 
-	baseRadius := h * 0.115 // 55px (稍微加大)
-	radius1 := int(baseRadius + breatheFactor*h*0.021)
-
-	// 外圈 (使用较浅的蓝色，适应浅色背景)
-	// 这里的颜色需要比深色模式更轻盈
-	outerHue := float64(p.logoFrame%360) / 360.0
-	c1 := interpolateHarmonyColorsLight(outerHue)
-	c1.A = 100 // 降低透明度
-	g.DrawCircle(centerX, centerY, radius1, c1)
-
-	// 中圈
-	radius2 := int(h * 0.085) // 41px
-	g.DrawCircle(centerX, centerY, radius2, color.RGBA{59, 130, 246, 200})
-
-	// 内圈
-	radius3 := int(h * 0.0625) // 30px
-	g.DrawCircle(centerX, centerY, radius3, color.RGBA{37, 99, 235, 255})
-
-	// 中心白点
-	centerDot := int(h * 0.019) // 9px
-	g.DrawCircle(centerX, centerY, centerDot, color.RGBA{255, 255, 255, 255})
+	// --- 绘制小装饰 (光泽) ---
+	g.DrawCircle(centerX+18, drawY-22, 6, color.RGBA{255, 255, 255, 60})
 }
 
 // drawNetworkArea 绘制网络区域 (无卡片，大数字)

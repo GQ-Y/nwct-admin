@@ -33,6 +33,47 @@ func (g *Graphics) DrawRect(x, y, w, h int, c color.Color) {
 	draw.Draw(g.buffer, rect, &image.Uniform{c}, image.Point{}, draw.Src)
 }
 
+// DrawLine 绘制直线（Bresenham）
+func (g *Graphics) DrawLine(x0, y0, x1, y1 int, c color.Color) {
+	dx := x1 - x0
+	if dx < 0 {
+		dx = -dx
+	}
+	dy := y1 - y0
+	if dy < 0 {
+		dy = -dy
+	}
+
+	sx := -1
+	if x0 < x1 {
+		sx = 1
+	}
+	sy := -1
+	if y0 < y1 {
+		sy = 1
+	}
+
+	err := dx - dy
+
+	for {
+		if x0 >= 0 && x0 < g.buffer.Bounds().Dx() && y0 >= 0 && y0 < g.buffer.Bounds().Dy() {
+			g.buffer.Set(x0, y0, c)
+		}
+		if x0 == x1 && y0 == y1 {
+			break
+		}
+		e2 := err * 2
+		if e2 > -dy {
+			err -= dy
+			x0 += sx
+		}
+		if e2 < dx {
+			err += dx
+			y0 += sy
+		}
+	}
+}
+
 // DrawRectRounded 绘制圆角矩形
 func (g *Graphics) DrawRectRounded(x, y, w, h, radius int, c color.Color) {
 	// 绘制中心矩形
