@@ -94,9 +94,23 @@ func (p *TunnelListPage) refresh() {
 			statusText = "在线"
 		}
 		title := t.Name
-		sub := strings.ToUpper(t.Type) + " | " + statusText + " | " + fmt.Sprintf("%s:%d → :%d", t.LocalIP, t.LocalPort, t.RemotePort)
+		typeLabel := strings.ToUpper(strings.TrimSpace(t.Type))
+		if typeLabel == "" {
+			typeLabel = "TCP"
+		}
+		sub := typeLabel + " | " + statusText + " | "
+		// HTTP/HTTPS 优先展示域名
+		if strings.EqualFold(t.Type, "http") || strings.EqualFold(t.Type, "https") {
+			d := strings.TrimSpace(t.Domain)
+			if d == "" {
+				d = "（未设置域名，将自动生成）"
+			}
+			sub += fmt.Sprintf("%s:%d → %s", t.LocalIP, t.LocalPort, d)
+		} else {
+			sub += fmt.Sprintf("%s:%d → :%d", t.LocalIP, t.LocalPort, t.RemotePort)
+		}
 
-		tt := t // capture
+		tunnelCopy := t // capture
 		item := &ListItem{
 			Title:     title,
 			Subtitle:  sub,
@@ -106,7 +120,7 @@ func (p *TunnelListPage) refresh() {
 			},
 			OnClick: func() {
 				if ep := p.pm.GetTunnelEditPage(); ep != nil {
-					ep.SetTunnel(tt)
+					ep.SetTunnel(tunnelCopy)
 				}
 				p.pm.NavigateTo("tunnel_edit")
 			},

@@ -290,7 +290,12 @@ func main() {
 
 	// 启动屏幕交互系统（与主程序共享 cfg/netManager/frpClient）
 	if *enableDisplay {
-		d, err := display.NewDisplay("NWCT Display - 480x480", 480, 480)
+		// 预览：macOS 下用更高分辨率窗口模拟（逻辑坐标仍按 480 设计稿缩放）
+		w, h := 480, 480
+		if runtime.GOOS == "darwin" {
+			w, h = 720, 720
+		}
+		d, err := display.NewDisplay("NWCT Display Preview", w, h)
 		if err != nil {
 			logger.Error("初始化显示失败: %v", err)
 		} else {

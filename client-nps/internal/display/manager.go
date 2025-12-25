@@ -2,6 +2,7 @@ package display
 
 import (
 	"fmt"
+	"math"
 	"time"
 
 	appcfg "nwct/client-nps/config"
@@ -134,8 +135,19 @@ func (m *Manager) Run() error {
 
 		// 处理触摸事件
 		events := m.display.GetTouchEvents()
+		// 触摸坐标从“真实像素”映射回 480 逻辑坐标，保证布局/命中区域一致
+		sx := float64(m.display.GetWidth()) / float64(designW)
+		sy := float64(m.display.GetHeight()) / float64(designH)
+		if sx <= 0 {
+			sx = 1
+		}
+		if sy <= 0 {
+			sy = 1
+		}
 		for _, event := range events {
-			m.pageManager.HandleTouch(event.X, event.Y, event.Type)
+			x := int(math.Round(float64(event.X) / sx))
+			y := int(math.Round(float64(event.Y) / sy))
+			m.pageManager.HandleTouch(x, y, event.Type)
 		}
 
 		// 限制帧率

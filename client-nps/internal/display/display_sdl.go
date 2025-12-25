@@ -5,6 +5,7 @@ package display
 import (
 	"fmt"
 	"image"
+	"strings"
 	"unsafe"
 
 	"github.com/veandco/go-sdl2/sdl"
@@ -14,15 +15,19 @@ type sdlDisplay struct {
 	window      *sdl.Window
 	renderer    *sdl.Renderer
 	texture     *sdl.Texture
+	title       string
 	width       int
 	height      int
 	backBuffer  *image.RGBA
 	touchEvents []TouchEvent
+
+	mouseDown bool
 }
 
 // NewSDL2 创建 SDL2 显示
 func NewSDL2(title string, width, height int) Display {
 	return &sdlDisplay{
+		title:  title,
 		width:  width,
 		height: height,
 	}
@@ -35,8 +40,12 @@ func (d *sdlDisplay) Init() error {
 	}
 
 	// 创建窗口
+	winTitle := d.title
+	if strings.TrimSpace(winTitle) == "" {
+		winTitle = "NWCT Display Preview"
+	}
 	window, err := sdl.CreateWindow(
-		"NWCT Display Preview - 480x480",
+		winTitle,
 		sdl.WINDOWPOS_CENTERED,
 		sdl.WINDOWPOS_CENTERED,
 		int32(d.width),
@@ -131,6 +140,9 @@ func (d *sdlDisplay) PollEvents() (shouldQuit bool) {
 		case *sdl.MouseButtonEvent:
 			// 处理鼠标点击事件
 			d.handleMouseEvent(e)
+		case *sdl.MouseMotionEvent:
+			// 处理拖动（按下左键时才作为 TouchMove）
+			d.handleMouseMotion(e)
 		}
 	}
 	return false
@@ -141,14 +153,34 @@ func (d *sdlDisplay) handleMouseEvent(e *sdl.MouseButtonEvent) {
 	var touchType TouchType
 	if e.Type == sdl.MOUSEBUTTONDOWN {
 		touchType = TouchDown
+		if e.Button == sdl.BUTTON_LEFT {
+			d.mouseDown = true
+		}
 	} else if e.Type == sdl.MOUSEBUTTONUP {
 		touchType = TouchUp
+		if e.Button == sdl.BUTTON_LEFT {
+			d.mouseDown = false
+		}
 	} else {
 		return
 	}
 	
 	d.touchEvents = append(d.touchEvents, TouchEvent{
 		Type:      touchType,
+		X:         int(e.X),
+		Y:         int(e.Y),
+		Timestamp: int64(e.Timestamp),
+	})
+}
+
+func (d *sdlDisplay) handleMouseMotion(e *sdl.MouseMotionEvent) {
+	// 只在按下状态下产生 TouchMove（用于模拟触摸拖动）
+	// 注意：Trackpad/鼠标的“移动”事件只有 motion，本项目页面滚动依赖 TouchMove。
+	if !d.mouseDown && (e.State&sdl.ButtonLMask()) == 0 {
+		return
+	}
+	d.touchEvents = append(d.touchEvents, TouchEvent{
+		Type:      TouchMove,
 		X:         int(e.X),
 		Y:         int(e.Y),
 		Timestamp: int64(e.Timestamp),

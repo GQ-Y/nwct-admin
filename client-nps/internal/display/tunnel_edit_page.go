@@ -18,13 +18,31 @@ type TunnelEditPage struct {
 	originName string
 	tunnel     *frp.Tunnel
 
+	selectedType string
+	fallbackEnabled bool
+
 	nameInput      *InputField
 	localIPInput   *InputField
 	localPortInput *InputField
 	remotePortInput *InputField
+	domainInput     *InputField
 
 	keyboard *VirtualKeyboard
 	lastErr  string
+
+	// 滚动：内容区可滚动，操作按钮在内容最底部（不吸底）
+	scrollOffset int
+	dragging     bool
+	dragStartY   int
+	lastDragY    int
+
+	// 布局缓存（用于点击命中）
+	saveBtnY int
+	delBtnY  int
+	errTextY int
+
+	// 防止切换协议时丢失远程端口
+	cachedRemotePort string
 }
 
 func NewTunnelEditPage(pm *PageManager) *TunnelEditPage {
@@ -35,17 +53,24 @@ func NewTunnelEditPage(pm *PageManager) *TunnelEditPage {
 	p.navBar = NewNavBar("编辑隧道", true, 480)
 	p.navBar.SetOnBack(func() { pm.Back() })
 
-	p.nameInput = NewInputField(24, 120, 432, 50)
+	// 默认类型
+	p.selectedType = "tcp"
+	p.fallbackEnabled = true
+
+	p.nameInput = NewInputField(24, 170, 432, 46)
 	p.nameInput.placeholder = "隧道名称"
 
-	p.localIPInput = NewInputField(24, 200, 432, 50)
+	p.localIPInput = NewInputField(24, 226, 432, 46)
 	p.localIPInput.placeholder = "本地 IP（如 127.0.0.1）"
 
-	p.localPortInput = NewInputField(24, 280, 432, 50)
+	p.localPortInput = NewInputField(24, 282, 432, 46)
 	p.localPortInput.placeholder = "本地端口（如 8080）"
 
-	p.remotePortInput = NewInputField(24, 360, 432, 50)
+	p.remotePortInput = NewInputField(24, 338, 432, 46)
 	p.remotePortInput.placeholder = "远程端口（0=自动分配）"
+
+	p.domainInput = NewInputField(24, 338, 432, 46)
+	p.domainInput.placeholder = "域名（custom_domains，留空自动生成）"
 
 	p.keyboard = NewVirtualKeyboard(480-240, 480, 240)
 	p.keyboard.onEnter = func() { p.keyboard.Hide() }
@@ -54,6 +79,89 @@ func NewTunnelEditPage(pm *PageManager) *TunnelEditPage {
 }
 
 func (p *TunnelEditPage) SetServices(s *AppServices) { p.services = s }
+
+func (p *TunnelEditPage) contentTop() int { return 60 }   // NavBar 高度
+func (p *TunnelEditPage) visibleBottom() int {
+	// 键盘弹出时，内容区底部受键盘遮挡
+	if p.keyboard != nil && p.keyboard.isVisible {
+		return p.keyboard.y
+	}
+	return 480
+}
+
+func (p *TunnelEditPage) clampScroll(contentBottom int) {
+	visibleH := p.visibleBottom() - p.contentTop()
+	contentH := contentBottom - p.contentTop()
+	minOffset := visibleH - contentH
+	if minOffset > 0 {
+		minOffset = 0
+	}
+	if p.scrollOffset > 0 {
+		p.scrollOffset = 0
+	}
+	if p.scrollOffset < minOffset {
+		p.scrollOffset = minOffset
+	}
+}
+
+// layout 根据 scrollOffset & selectedType 更新控件 y 坐标，并返回内容底部
+func (p *TunnelEditPage) layout() (contentBottom int) {
+	base := p.contentTop() + p.scrollOffset
+
+	// 协议区域（文字/按钮是用 Render 画，不是控件）
+	nameY := base + 170
+	p.nameInput.y = nameY
+	p.localIPInput.y = base + 226
+	p.localPortInput.y = base + 282
+
+	// 第四个输入框：remote 或 domain
+	p.remotePortInput.y = base + 338
+	p.domainInput.y = base + 338
+
+	cursorBottom := base + 338 + 46
+	if p.selectedType == "http" || p.selectedType == "https" {
+		// toggle 放在 domain input 下方
+		toggleLabelTop := p.domainInput.y + p.domainInput.height + 16
+		toggleY := toggleLabelTop + 22 // pill top
+		cursorBottom = toggleY + 24
+	}
+
+	// 错误提示（跟随内容）
+	p.errTextY = cursorBottom + 12
+	cursorBottom = p.errTextY
+	if strings.TrimSpace(p.lastErr) != "" {
+		cursorBottom += 22
+	}
+
+	// 操作按钮（在内容最底部）
+	btnY := cursorBottom + 10
+	p.saveBtnY = btnY
+	p.delBtnY = btnY
+	contentBottom = btnY + 50 + 16
+
+	// 夹紧滚动边界
+	p.clampScroll(contentBottom)
+	return contentBottom
+}
+
+func (p *TunnelEditPage) showKeyboardFor(input *InputField) {
+	p.keyboard.Show(input)
+	// 确保输入框在可见区域内（考虑键盘遮挡）
+	visibleTop := p.contentTop()
+	visibleBottom := p.visibleBottom()
+	inTop := input.y
+	inBottom := input.y + input.height
+	padding := 10
+	if inBottom > visibleBottom-padding {
+		delta := (visibleBottom - padding) - inBottom
+		p.scrollOffset += delta
+		p.layout()
+	} else if inTop < visibleTop+padding {
+		delta := (visibleTop + padding) - inTop
+		p.scrollOffset += delta
+		p.layout()
+	}
+}
 
 func (p *TunnelEditPage) SetTunnel(t *frp.Tunnel) {
 	p.tunnel = t
@@ -64,6 +172,15 @@ func (p *TunnelEditPage) SetTunnel(t *frp.Tunnel) {
 		p.localIPInput.SetText(t.LocalIP)
 		p.localPortInput.SetText(strconv.Itoa(t.LocalPort))
 		p.remotePortInput.SetText(strconv.Itoa(t.RemotePort))
+		p.domainInput.SetText(strings.TrimSpace(t.Domain))
+		if strings.TrimSpace(t.Type) != "" {
+			p.selectedType = strings.ToLower(strings.TrimSpace(t.Type))
+		} else {
+			p.selectedType = "tcp"
+		}
+		p.fallbackEnabled = t.FallbackEnabled
+		p.cachedRemotePort = p.remotePortInput.GetText()
+		p.scrollOffset = 0
 	}
 }
 
@@ -76,25 +193,87 @@ func (p *TunnelEditPage) BeginCreate() {
 	p.localIPInput.SetText("127.0.0.1")
 	p.localPortInput.SetText("")
 	p.remotePortInput.SetText("0")
+	p.domainInput.SetText("")
+	p.selectedType = "tcp"
+	p.fallbackEnabled = true
+	p.cachedRemotePort = p.remotePortInput.GetText()
+	p.scrollOffset = 0
 }
 
 func (p *TunnelEditPage) Render(g *Graphics) error {
 	g.DrawRect(0, 0, 480, 480, ColorBackgroundStart)
+	p.layout()
 
 	// 标题提示
 	title := "隧道配置"
 	if p.originName == "" {
 		title = "新增隧道"
 	}
-	_ = g.DrawTextTTF(title, 24, 88, ColorTextSecondary, 14, FontWeightRegular)
+	// 动态更新 navBar 标题
+	if p.originName == "" {
+		p.navBar.title = "新增隧道"
+	} else {
+		p.navBar.title = "编辑隧道"
+	}
+	_ = g.DrawTextTTF(title, 24, 88+p.scrollOffset, ColorTextSecondary, 14, FontWeightRegular)
+
+	// 协议类型选择（五个按钮）
+	_ = g.DrawTextTTF("协议类型", 24, 112+p.scrollOffset, ColorTextSecondary, 14, FontWeightRegular)
+	typeY := 132 + p.scrollOffset
+	typeH := 34
+	types := []string{"tcp", "udp", "http", "https", "stcp"}
+	gap := 8
+	btnW := (432 - gap*(len(types)-1)) / len(types)
+	for i, t := range types {
+		x := 24 + i*(btnW+gap)
+		isSel := strings.EqualFold(p.selectedType, t)
+		bg := ColorSeparator
+		fg := ColorTextSecondary
+		if isSel {
+			bg = ColorBrandBlue
+			fg = ColorBackgroundStart
+		}
+		g.DrawRectRounded(x, typeY, btnW, typeH, 10, bg)
+		label := strings.ToUpper(t)
+		tw := g.MeasureText(label, 14, FontWeightMedium)
+		_ = g.DrawTextTTF(label, x+(btnW-tw)/2, textTopForCenter(typeY, typeH, 14), fg, 14, FontWeightMedium)
+	}
 
 	p.nameInput.Render(g)
 	p.localIPInput.Render(g)
 	p.localPortInput.Render(g)
-	p.remotePortInput.Render(g)
+
+	// 根据类型显示 RemotePort 或 Domain
+	if p.selectedType == "http" || p.selectedType == "https" {
+		p.domainInput.Render(g)
+		// 兜底页开关
+		toggleW := 432
+		toggleH := 24
+		label := "兜底页（目标不可达时展示默认页）"
+		toggleLabelTop := p.domainInput.y + p.domainInput.height + 16
+		toggleY := toggleLabelTop + 22
+		_ = g.DrawTextTTF(label, 24, toggleLabelTop, ColorTextSecondary, 14, FontWeightRegular)
+
+		// 右侧 pill
+		pillW := 100
+		pillX := 24 + toggleW - pillW
+		bg := ColorSeparator
+		txt := "关闭"
+		txtC := ColorTextSecondary
+		if p.fallbackEnabled {
+			bg = ColorSuccessGreen
+			txt = "开启"
+			txtC = ColorBackgroundStart
+		}
+		g.DrawRectRounded(pillX, toggleY, pillW, toggleH, 12, bg)
+		tw := g.MeasureText(txt, 14, FontWeightMedium)
+		_ = g.DrawTextTTF(txt, pillX+(pillW-tw)/2, textTopForCenter(toggleY, toggleH, 14), txtC, 14, FontWeightMedium)
+	} else {
+		p.remotePortInput.Render(g)
+	}
 
 	// 保存按钮
-	saveY := 430
+	saveY := p.saveBtnY
 	g.DrawRectRounded(24, saveY, 208, 50, 25, ColorBrandBlue)
 	saveW := g.MeasureText("保存", 18, FontWeightMedium)
 	_ = g.DrawTextTTF("保存", 24+(208-saveW)/2, saveY+(50-int(18))/2, ColorBackgroundStart, 18, FontWeightMedium)
@@ -112,8 +291,9 @@ func (p *TunnelEditPage) Render(g *Graphics) error {
 		_ = g.DrawTextTTF("删除", delX+(208-delW)/2, saveY+(50-int(18))/2, ColorBackgroundStart, 18, FontWeightMedium)
 	}
 
-	if p.lastErr != "" {
-		_ = g.DrawTextTTF(p.lastErr, 24, 406, ColorErrorRed, 14, FontWeightRegular)
+	// 错误提示（跟随内容）
+	if strings.TrimSpace(p.lastErr) != "" {
+		_ = g.DrawTextTTF(p.lastErr, 24, p.errTextY, ColorErrorRed, 14, FontWeightRegular)
 	}
 
 	p.navBar.Render(g)
@@ -129,33 +309,39 @@ func (p *TunnelEditPage) HandleTouch(x, y int, touchType TouchType) bool {
 		return true
 	}
 
-	if p.nameInput.HandleTouch(x, y, touchType) {
-		if p.nameInput.isFocused {
-			p.keyboard.Show(p.nameInput)
+	// 内容区滚动（TouchMove 以 dy 驱动）
+	inContent := y >= p.contentTop() && y < p.visibleBottom()
+	if inContent {
+		if touchType == TouchDown {
+			p.dragging = false
+			p.dragStartY = y
+			p.lastDragY = y
+			// 只要按下在内容区，就认为后续可能滚动
+			return true
 		}
-		return true
-	}
-	if p.localIPInput.HandleTouch(x, y, touchType) {
-		if p.localIPInput.isFocused {
-			p.keyboard.Show(p.localIPInput)
+		if touchType == TouchMove {
+			dy := y - p.lastDragY
+			if !p.dragging && (y-p.dragStartY > 6 || p.dragStartY-y > 6) {
+				p.dragging = true
+			}
+			if p.dragging {
+				p.scrollOffset += dy
+				p.layout()
+			}
+			p.lastDragY = y
+			return true
 		}
-		return true
-	}
-	if p.localPortInput.HandleTouch(x, y, touchType) {
-		if p.localPortInput.isFocused {
-			p.keyboard.Show(p.localPortInput)
+		if touchType == TouchUp && p.dragging {
+			p.dragging = false
+			return true
 		}
-		return true
-	}
-	if p.remotePortInput.HandleTouch(x, y, touchType) {
-		if p.remotePortInput.isFocused {
-			p.keyboard.Show(p.remotePortInput)
-		}
-		return true
 	}
 
-	// 按钮区域
-	saveY := 430
+	// 更新控件位置后再命中测试
+	p.layout()
+
+	// 操作按钮在内容里（跟随滚动）
+	saveY := p.saveBtnY
 	if y >= saveY && y <= saveY+50 {
 		// 保存
 		if x >= 24 && x <= 24+208 {
@@ -174,6 +360,85 @@ func (p *TunnelEditPage) HandleTouch(x, y int, touchType TouchType) bool {
 			return true
 		}
 	}
+
+	// 协议按钮点击
+	if touchType == TouchUp {
+		typeY := 132 + p.scrollOffset
+		typeH := 34
+		if y >= typeY && y <= typeY+typeH && x >= 24 && x <= 24+432 {
+			types := []string{"tcp", "udp", "http", "https", "stcp"}
+			gap := 8
+			btnW := (432 - gap*(len(types)-1)) / len(types)
+			for i, t := range types {
+				bx := 24 + i*(btnW+gap)
+				if x >= bx && x <= bx+btnW {
+					prev := p.selectedType
+					p.selectedType = t
+					// 切换协议时不丢失远程端口：从非 HTTP -> HTTP 缓存；从 HTTP -> 非 HTTP 恢复
+					if (prev != "http" && prev != "https") && (t == "http" || t == "https") {
+						p.cachedRemotePort = strings.TrimSpace(p.remotePortInput.GetText())
+					}
+					if (prev == "http" || prev == "https") && (t != "http" && t != "https") {
+						if strings.TrimSpace(p.remotePortInput.GetText()) == "" || strings.TrimSpace(p.remotePortInput.GetText()) == "0" {
+							if strings.TrimSpace(p.cachedRemotePort) != "" {
+								p.remotePortInput.SetText(p.cachedRemotePort)
+							}
+						}
+					}
+					return true
+				}
+			}
+		}
+	}
+
+	if p.nameInput.HandleTouch(x, y, touchType) {
+		if p.nameInput.isFocused {
+			p.showKeyboardFor(p.nameInput)
+		}
+		return true
+	}
+	if p.localIPInput.HandleTouch(x, y, touchType) {
+		if p.localIPInput.isFocused {
+			p.showKeyboardFor(p.localIPInput)
+		}
+		return true
+	}
+	if p.localPortInput.HandleTouch(x, y, touchType) {
+		if p.localPortInput.isFocused {
+			p.showKeyboardFor(p.localPortInput)
+		}
+		return true
+	}
+	if p.selectedType == "http" || p.selectedType == "https" {
+		// domain 输入
+		if p.domainInput.HandleTouch(x, y, touchType) {
+			if p.domainInput.isFocused {
+				p.showKeyboardFor(p.domainInput)
+			}
+			return true
+		}
+		// fallback toggle
+		if touchType == TouchUp {
+			toggleLabelTop := p.domainInput.y + p.domainInput.height + 16
+			toggleY := toggleLabelTop + 22
+			toggleH := 24
+			pillW := 100
+			pillX := 24 + 432 - pillW
+			if y >= toggleY && y <= toggleY+toggleH && x >= pillX && x <= pillX+pillW {
+				p.fallbackEnabled = !p.fallbackEnabled
+				return true
+			}
+		}
+	} else {
+		// remote port 输入
+		if p.remotePortInput.HandleTouch(x, y, touchType) {
+			if p.remotePortInput.isFocused {
+				p.showKeyboardFor(p.remotePortInput)
+			}
+			return true
+		}
+	}
+
 	return false
 }
 
@@ -183,22 +448,56 @@ func (p *TunnelEditPage) save() {
 		p.lastErr = "服务未初始化"
 		return
 	}
+	tt := strings.ToLower(strings.TrimSpace(p.selectedType))
+	if tt == "" {
+		tt = "tcp"
+	}
+	switch tt {
+	case "tcp", "udp", "http", "https", "stcp":
+	default:
+		p.lastErr = "协议类型无效"
+		return
+	}
+	name := strings.TrimSpace(p.nameInput.GetText())
+	if name == "" {
+		p.lastErr = "隧道名称不能为空"
+		return
+	}
+	localIP := strings.TrimSpace(p.localIPInput.GetText())
+	if localIP == "" {
+		p.lastErr = "本地IP不能为空"
+		return
+	}
 	lp, err := strconv.Atoi(strings.TrimSpace(p.localPortInput.GetText()))
 	if err != nil || lp < 0 || lp > 65535 {
 		p.lastErr = "本地端口无效"
 		return
 	}
-	rp, err := strconv.Atoi(strings.TrimSpace(p.remotePortInput.GetText()))
-	if err != nil || rp < 0 || rp > 65535 {
-		p.lastErr = "远程端口无效"
-		return
+
+	rp := 0
+	domain := ""
+	fb := false
+	if tt == "http" || tt == "https" {
+		domain = strings.TrimSpace(p.domainInput.GetText())
+		fb = p.fallbackEnabled
+		// http/https 不需要 remote port；强制 0
+		rp = 0
+	} else {
+		rp, err = strconv.Atoi(strings.TrimSpace(p.remotePortInput.GetText()))
+		if err != nil || rp < 0 || rp > 65535 {
+			p.lastErr = "远程端口无效"
+			return
+		}
 	}
+
 	t := &frp.Tunnel{
-		Name:       strings.TrimSpace(p.nameInput.GetText()),
-		Type:       "tcp",
-		LocalIP:    strings.TrimSpace(p.localIPInput.GetText()),
+		Name:       name,
+		Type:       tt,
+		LocalIP:    localIP,
 		LocalPort:  lp,
 		RemotePort: rp,
+		Domain:     domain,
+		FallbackEnabled: fb,
 	}
 	// 新增 or 更新
 	if p.originName == "" {

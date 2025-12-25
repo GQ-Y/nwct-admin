@@ -4,22 +4,59 @@ import (
 	"image"
 	"image/color"
 	"image/draw"
+	"math"
 
 	"github.com/golang/freetype"
 	"github.com/golang/freetype/truetype"
 	"golang.org/x/image/math/fixed"
 )
 
+const (
+	// 设计稿基准尺寸：所有页面/组件以 480x480 作为逻辑坐标系
+	designW = 480
+	designH = 480
+)
+
 // Graphics 图形绘制库
 type Graphics struct {
 	buffer *image.RGBA
+	scaleX float64
+	scaleY float64
 }
 
 // NewGraphics 创建图形库实例
 func NewGraphics(buffer *image.RGBA) *Graphics {
+	w := buffer.Bounds().Dx()
+	h := buffer.Bounds().Dy()
+	sx := float64(w) / float64(designW)
+	sy := float64(h) / float64(designH)
+	if sx <= 0 {
+		sx = 1
+	}
+	if sy <= 0 {
+		sy = 1
+	}
 	return &Graphics{
 		buffer: buffer,
+		scaleX: sx,
+		scaleY: sy,
 	}
+}
+
+func (g *Graphics) sx(v int) int { return int(math.Round(float64(v) * g.scaleX)) }
+func (g *Graphics) sy(v int) int { return int(math.Round(float64(v) * g.scaleY)) }
+func (g *Graphics) sr(v int) int {
+	// 半径取平均缩放（目标是方形缩放）
+	s := (g.scaleX + g.scaleY) * 0.5
+	return int(math.Round(float64(v) * s))
+}
+
+func (g *Graphics) drawRectPx(x, y, w, h int, c color.Color) {
+	if w <= 0 || h <= 0 {
+		return
+	}
+	rect := image.Rect(x, y, x+w, y+h)
+	draw.Draw(g.buffer, rect, &image.Uniform{c}, image.Point{}, draw.Src)
 }
 
 // Clear 清空画布
@@ -29,12 +66,20 @@ func (g *Graphics) Clear(c color.Color) {
 
 // DrawRect 绘制矩形
 func (g *Graphics) DrawRect(x, y, w, h int, c color.Color) {
-	rect := image.Rect(x, y, x+w, y+h)
-	draw.Draw(g.buffer, rect, &image.Uniform{c}, image.Point{}, draw.Src)
+	x2 := g.sx(x)
+	y2 := g.sy(y)
+	w2 := g.sx(w)
+	h2 := g.sy(h)
+	g.drawRectPx(x2, y2, w2, h2, c)
 }
 
 // DrawLine 绘制直线（Bresenham）
 func (g *Graphics) DrawLine(x0, y0, x1, y1 int, c color.Color) {
+	x0 = g.sx(x0)
+	y0 = g.sy(y0)
+	x1 = g.sx(x1)
+	y1 = g.sy(y1)
+
 	dx := x1 - x0
 	if dx < 0 {
 		dx = -dx
@@ -76,9 +121,14 @@ func (g *Graphics) DrawLine(x0, y0, x1, y1 int, c color.Color) {
 
 // DrawRectRounded 绘制圆角矩形
 func (g *Graphics) DrawRectRounded(x, y, w, h, radius int, c color.Color) {
+	x = g.sx(x)
+	y = g.sy(y)
+	w = g.sx(w)
+	h = g.sy(h)
+	radius = g.sr(radius)
 	// 绘制中心矩形
-	g.DrawRect(x+radius, y, w-2*radius, h, c)
-	g.DrawRect(x, y+radius, w, h-2*radius, c)
+	g.drawRectPx(x+radius, y, w-2*radius, h, c)
+	g.drawRectPx(x, y+radius, w, h-2*radius, c)
 
 	// 绘制四个圆角
 	g.drawFilledCircleCorner(x+radius, y+radius, radius, c, 2)     // 左上
@@ -130,6 +180,9 @@ func (g *Graphics) drawFilledCircleCorner(cx, cy, r int, c color.Color, quadrant
 
 // DrawCircle 绘制实心圆
 func (g *Graphics) DrawCircle(cx, cy, r int, c color.Color) {
+	cx = g.sx(cx)
+	cy = g.sy(cy)
+	r = g.sr(r)
 	for y := cy - r; y <= cy+r; y++ {
 		for x := cx - r; x <= cx+r; x++ {
 			dx := x - cx
@@ -156,6 +209,11 @@ func (g *Graphics) DrawGradient(x, y, w, h int, colors []color.Color, direction 
 	if len(colors) < 2 {
 		return
 	}
+
+	x = g.sx(x)
+	y = g.sy(y)
+	w = g.sx(w)
+	h = g.sy(h)
 
 	for py := 0; py < h; py++ {
 		for px := 0; px < w; px++ {
@@ -214,17 +272,25 @@ func (g *Graphics) DrawTextTTF(text string, x, y int, c color.Color, size float6
 		return nil
 	}
 
+	// 渲染层按屏幕缩放，保持布局仍以 480 逻辑坐标计算
+	sx := float64(x) * g.scaleX
+	sy := float64(y) * g.scaleY
+	sz := size * g.scaleX
+	if sz < 1 {
+		sz = 1
+	}
+
 	// 创建 freetype context
 	ctx := freetype.NewContext()
 	ctx.SetDPI(72)
 	ctx.SetFont(ttfFont)
-	ctx.SetFontSize(size)
+	ctx.SetFontSize(sz)
 	ctx.SetClip(g.buffer.Bounds())
 	ctx.SetDst(g.buffer)
 	ctx.SetSrc(&image.Uniform{c})
 
 	// 绘制文本
-	pt := freetype.Pt(x, y+int(size))
+	pt := freetype.Pt(int(math.Round(sx)), int(math.Round(sy+sz)))
 	_, err := ctx.DrawString(text, pt)
 	
 	return err

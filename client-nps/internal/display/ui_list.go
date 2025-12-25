@@ -23,6 +23,9 @@ type ListView struct {
 	
 	// 交互状态
 	pressedIndex int
+	dragging     bool
+	dragStartY   int
+	lastDragY    int
 }
 
 // NewListView 创建列表
@@ -35,6 +38,9 @@ func NewListView(x, y, width, height int) *ListView {
 		height:     height,
 		itemHeight: 72,
 		pressedIndex: -1,
+		dragging:   false,
+		dragStartY: 0,
+		lastDragY:  0,
 	}
 }
 
@@ -48,6 +54,7 @@ func (lv *ListView) Clear() {
 	lv.items = make([]*ListItem, 0)
 	lv.offsetY = 0
 	lv.pressedIndex = -1
+	lv.dragging = false
 }
 
 // Render 渲染列表
@@ -125,6 +132,37 @@ func (lv *ListView) HandleTouch(x, y int, touchType TouchType) bool {
 		return false
 	}
 	
+	// 拖动滚动：基于 TouchMove 的 dy
+	if touchType == TouchDown {
+		lv.dragging = false
+		lv.dragStartY = y
+		lv.lastDragY = y
+	}
+	if touchType == TouchMove {
+		dy := y - lv.lastDragY
+		if !lv.dragging {
+			d := y - lv.dragStartY
+			if d < 0 {
+				d = -d
+			}
+			if d > 6 {
+				lv.dragging = true
+			}
+		}
+		if lv.dragging {
+			lv.Scroll(dy)
+			lv.pressedIndex = -1
+			lv.lastDragY = y
+			return true
+		}
+		lv.lastDragY = y
+	}
+	if touchType == TouchUp && lv.dragging {
+		lv.dragging = false
+		lv.pressedIndex = -1
+		return true
+	}
+
 	// 计算点击了哪个 Item
 	// y = startY + index * h => index = (y - startY) / h
 	// startY = lv.y + lv.offsetY
@@ -143,13 +181,6 @@ func (lv *ListView) HandleTouch(x, y int, touchType TouchType) bool {
 				}
 			}
 			lv.pressedIndex = -1
-			return true
-		} else if touchType == TouchMove {
-			// 简单的滚动逻辑 (需要 deltaY，这里简化处理)
-			// 实际生产环境需要记录上次 Y 坐标来计算 delta
-			if lv.pressedIndex != -1 {
-				lv.pressedIndex = -1 // 移动则取消点击
-			}
 			return true
 		}
 	}
