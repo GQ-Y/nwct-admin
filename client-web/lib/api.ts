@@ -147,28 +147,6 @@ export const api = {
     }),
   frpReload: () => request<any>("/api/v1/frp/reload", { method: "POST", body: "{}" }),
 
-  mqttStatus: () => request<any>("/api/v1/mqtt/status"),
-  mqttConnect: (req: {
-    server: string;
-    port: number;
-    username?: string;
-    password?: string;
-    client_id: string;
-    tls?: boolean;
-  }) => request<any>("/api/v1/mqtt/connect", { method: "POST", body: JSON.stringify(req) }),
-  mqttDisconnect: () => request<any>("/api/v1/mqtt/disconnect", { method: "POST", body: "{}" }),
-  mqttPublish: (req: { topic: string; payload: string }) =>
-    request<any>("/api/v1/mqtt/publish", { method: "POST", body: JSON.stringify(req) }),
-  mqttLogs: (params?: { topic?: string; direction?: string; page?: number; page_size?: number }) => {
-    const q = new URLSearchParams();
-    if (params?.topic) q.set("topic", params.topic);
-    if (params?.direction) q.set("direction", params.direction);
-    if (params?.page) q.set("page", String(params.page));
-    if (params?.page_size) q.set("page_size", String(params.page_size));
-    const qs = q.toString();
-    return request<any>(`/api/v1/mqtt/logs${qs ? `?${qs}` : ""}`);
-  },
-
   networkStatus: (opts?: { skipAuth?: boolean }) =>
     request<any>("/api/v1/network/status", { skipAuth: Boolean(opts?.skipAuth) }),
   networkInterfaces: (opts?: { skipAuth?: boolean }) =>

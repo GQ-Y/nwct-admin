@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, Server, Activity, Settings, Box, Globe, Shield, Languages, LogOut, KeyRound, X } from 'lucide-react';
+import { LayoutDashboard, Server, Activity, Settings, Globe, Shield, Languages, LogOut, KeyRound, X } from 'lucide-react';
 import { useLanguage } from '../contexts/LanguageContext';
 import { useAuth } from '../contexts/AuthContext';
 import { api } from '../lib/api';
@@ -32,7 +32,6 @@ export const MainLayout: React.FC<LayoutProps> = ({ children }) => {
     { path: '/devices', label: t('nav.devices'), icon: <Server size={20} /> },
     { path: '/tools', label: t('nav.tools'), icon: <Activity size={20} /> },
     { path: '/frp', label: 'FRP 服务', icon: <Globe size={20} /> },
-    { path: '/mqtt', label: t('nav.mqtt'), icon: <Box size={20} /> },
     { path: '/system', label: t('nav.system'), icon: <Settings size={20} /> },
   ];
 

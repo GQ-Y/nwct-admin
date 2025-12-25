@@ -41,7 +41,6 @@ export const translations = {
       devices: 'Devices',
       tools: 'Network Tools',
       nps: 'NPS Service',
-      mqtt: 'MQTT Broker',
       system: 'System'
     },
     header: {
@@ -57,7 +56,6 @@ export const translations = {
       service_status: 'Service Status',
       recent_activity: 'Recent Activity',
       nps_client: 'NPS Client',
-      mqtt_broker: 'MQTT Broker',
       web_server: 'Web Server',
       ssh_service: 'SSH Service',
       device_connected: 'Device {ip} connected to network.',
@@ -150,7 +148,6 @@ export const translations = {
       nps_config: 'NPS Configuration',
       server_addr: 'Server Address',
       vkey: 'VKey',
-      mqtt_config: 'MQTT Configuration',
       client_id: 'Client ID',
       admin_security: 'Admin Security',
       new_pass: 'New Password',
@@ -208,7 +205,6 @@ export const translations = {
       devices: '设备管理',
       tools: '网络工具',
       nps: 'NPS 服务',
-      mqtt: 'MQTT 代理',
       system: '系统设置'
     },
     header: {
@@ -224,7 +220,6 @@ export const translations = {
       service_status: '服务状态',
       recent_activity: '最近活动',
       nps_client: 'NPS 客户端',
-      mqtt_broker: 'MQTT 代理',
       web_server: 'Web 服务器',
       ssh_service: 'SSH 服务',
       device_connected: '设备 {ip} 已连接到网络。',
@@ -317,7 +312,6 @@ export const translations = {
       nps_config: 'NPS 配置',
       server_addr: '服务器地址',
       vkey: '验证密钥',
-      mqtt_config: 'MQTT 配置',
       client_id: '客户端 ID',
       admin_security: '管理员安全',
       new_pass: '新密码',

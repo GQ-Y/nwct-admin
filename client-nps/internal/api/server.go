@@ -5,7 +5,6 @@ import (
 	"io/fs"
 	"net/http"
 	"nwct/client-nps/config"
-	"nwct/client-nps/internal/mqtt"
 	"nwct/client-nps/internal/network"
 	"nwct/client-nps/internal/frp"
 	"nwct/client-nps/internal/scanner"
@@ -26,13 +25,12 @@ type Server struct {
 	db         *sql.DB
 	netManager network.Manager
 	frpClient  frp.Client
-	mqttClient mqtt.Client
 	scanner    scanner.Scanner
 	router     *gin.Engine
 }
 
 // NewServer 创建API服务器
-func NewServer(cfg *config.Config, db *sql.DB, netManager network.Manager, frpClient frp.Client, mqttClient mqtt.Client) *Server {
+func NewServer(cfg *config.Config, db *sql.DB, netManager network.Manager, frpClient frp.Client) *Server {
 	// 初始化扫描器
 	deviceScanner := scanner.NewScanner(db)
 
@@ -41,7 +39,6 @@ func NewServer(cfg *config.Config, db *sql.DB, netManager network.Manager, frpCl
 		db:         db,
 		netManager: netManager,
 		frpClient:  frpClient,
-		mqttClient: mqttClient,
 		scanner:    deviceScanner,
 	}
 
@@ -125,13 +122,6 @@ func (s *Server) initRouter() {
 		api.DELETE("/frp/tunnels/:name", s.authMiddleware(), s.handleFRPRemoveTunnel)
 		api.PUT("/frp/tunnels/:name", s.authMiddleware(), s.handleFRPUpdateTunnel)
 		api.POST("/frp/reload", s.authMiddleware(), s.handleFRPReload)
-
-		// MQTT管理
-		api.GET("/mqtt/status", s.authMiddleware(), s.handleMQTTStatus)
-		api.POST("/mqtt/connect", s.authMiddleware(), s.handleMQTTConnect)
-		api.POST("/mqtt/disconnect", s.authMiddleware(), s.handleMQTTDisconnect)
-		api.POST("/mqtt/publish", s.authMiddleware(), s.handleMQTTPublish)
-		api.GET("/mqtt/logs", s.authMiddleware(), s.handleMQTTLogs)
 
 		// 配置管理
 		api.GET("/config", s.authMiddleware(), s.handleConfigGet)

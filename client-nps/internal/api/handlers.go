@@ -1254,169 +1254,6 @@ func (s *Server) handleFRPReload(c *gin.Context) {
 	c.JSON(http.StatusOK, models.SuccessResponse(nil))
 }
 
-// handleMQTTStatus 处理获取MQTT状态请求
-func (s *Server) handleMQTTStatus(c *gin.Context) {
-	status, err := s.mqttClient.GetStatus()
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, models.ErrorResponse(500, err.Error()))
-		return
-	}
-
-	c.JSON(http.StatusOK, models.SuccessResponse(status))
-}
-
-// handleMQTTConnect 处理MQTT连接请求
-func (s *Server) handleMQTTConnect(c *gin.Context) {
-	var req struct {
-		Server   string `json:"server"`
-		Port     int    `json:"port"`
-		Username string `json:"username"`
-		Password string `json:"password"`
-		ClientID string `json:"client_id"`
-		TLS      bool   `json:"tls"`
-	}
-
-	if err := c.ShouldBindJSON(&req); err != nil {
-		// 允许空请求体，使用已有配置或默认配置
-	}
-
-	// 合并配置：请求未提供的字段则沿用已有配置（实现“内置默认服务”一键连接）
-	if strings.TrimSpace(req.Server) == "" {
-		req.Server = s.config.MQTT.Server
-	}
-	if req.Port <= 0 {
-		if s.config.MQTT.Port > 0 {
-			req.Port = s.config.MQTT.Port
-		} else {
-			req.Port = 1883
-		}
-	}
-	if strings.TrimSpace(req.Username) == "" {
-		req.Username = s.config.MQTT.Username
-	}
-	if strings.TrimSpace(req.Password) == "" {
-		req.Password = s.config.MQTT.Password
-	}
-	if strings.TrimSpace(req.ClientID) == "" {
-		if cid := strings.TrimSpace(s.config.MQTT.ClientID); cid != "" {
-			req.ClientID = cid
-		} else {
-			req.ClientID = strings.TrimSpace(s.config.Device.ID)
-		}
-	}
-
-	if strings.TrimSpace(req.Server) == "" || strings.TrimSpace(req.ClientID) == "" {
-		c.JSON(http.StatusBadRequest, models.ErrorResponse(400, "请先配置 MQTT server/client_id"))
-		return
-	}
-
-	// 更新配置
-	s.config.MQTT.Server = strings.TrimSpace(req.Server)
-	s.config.MQTT.Port = req.Port
-	s.config.MQTT.Username = strings.TrimSpace(req.Username)
-	s.config.MQTT.Password = req.Password
-	s.config.MQTT.ClientID = strings.TrimSpace(req.ClientID)
-	s.config.MQTT.TLS = req.TLS
-	s.config.MQTT.AutoConnect = true
-
-	if err := s.mqttClient.Connect(); err != nil {
-		c.JSON(http.StatusInternalServerError, models.ErrorResponse(500, err.Error()))
-		return
-	}
-	_ = s.config.Save()
-
-	c.JSON(http.StatusOK, models.SuccessResponse(nil))
-}
-
-// handleMQTTDisconnect 处理MQTT断开请求
-func (s *Server) handleMQTTDisconnect(c *gin.Context) {
-	if err := s.mqttClient.Disconnect(); err != nil {
-		c.JSON(http.StatusInternalServerError, models.ErrorResponse(500, err.Error()))
-		return
-	}
-	// 用户主动断开：关闭自动连接，避免重启/启动逻辑再次自动拉起
-	s.config.MQTT.AutoConnect = false
-	_ = s.config.Save()
-
-	c.JSON(http.StatusOK, models.SuccessResponse(nil))
-}
-
-// handleMQTTPublish 处理MQTT发布消息请求
-func (s *Server) handleMQTTPublish(c *gin.Context) {
-	var req struct {
-		Topic   string `json:"topic" binding:"required"`
-		Payload string `json:"payload"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, models.ErrorResponse(400, "参数错误: "+err.Error()))
-		return
-	}
-	topic := strings.TrimSpace(req.Topic)
-	if topic == "" {
-		c.JSON(http.StatusBadRequest, models.ErrorResponse(400, "topic 不能为空"))
-		return
-	}
-	if err := s.mqttClient.Publish(topic, req.Payload); err != nil {
-		c.JSON(http.StatusInternalServerError, models.ErrorResponse(500, err.Error()))
-		return
-	}
-	c.JSON(http.StatusOK, models.SuccessResponse(nil))
-}
-
-// handleMQTTLogs 处理获取MQTT日志请求
-func (s *Server) handleMQTTLogs(c *gin.Context) {
-	topic := c.Query("topic")
-	direction := c.Query("direction")
-	if direction == "" {
-		direction = "all"
-	}
-
-	var startTime, endTime time.Time
-	if st := c.Query("start_time"); st != "" {
-		startTime, _ = time.Parse(time.RFC3339, st)
-	}
-	if et := c.Query("end_time"); et != "" {
-		endTime, _ = time.Parse(time.RFC3339, et)
-	}
-
-	page := 1
-	pageSize := 50
-	if p := c.Query("page"); p != "" {
-		fmt.Sscanf(p, "%d", &page)
-	}
-	if ps := c.Query("page_size"); ps != "" {
-		fmt.Sscanf(ps, "%d", &pageSize)
-	}
-
-	offset := (page - 1) * pageSize
-
-	logs, total, err := database.GetMQTTLogs(s.db, topic, direction, startTime, endTime, pageSize, offset)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, models.ErrorResponse(500, err.Error()))
-		return
-	}
-
-	// 转换为JSON格式
-	logList := make([]gin.H, len(logs))
-	for i, l := range logs {
-		logList[i] = gin.H{
-			"timestamp": l.Timestamp.Format(time.RFC3339),
-			"direction": l.Direction,
-			"topic":     l.Topic,
-			"qos":       l.QoS,
-			"payload":   l.Payload,
-			"status":    l.Status,
-		}
-	}
-
-	c.JSON(http.StatusOK, models.SuccessResponse(gin.H{
-		"logs":      logList,
-		"total":     total,
-		"page":      page,
-		"page_size": pageSize,
-	}))
-}
-
 // handleConfigGet 处理获取配置请求
 func (s *Server) handleConfigGet(c *gin.Context) {
 	// 隐藏敏感信息
@@ -1448,14 +1285,6 @@ func (s *Server) handleConfigGet(c *gin.Context) {
 			"admin_user":    s.config.FRPServer.AdminUser,
 			"domain_suffix": s.config.FRPServer.DomainSuffix,
 		},
-		"mqtt": gin.H{
-			"server":       s.config.MQTT.Server,
-			"port":         s.config.MQTT.Port,
-			"username":     s.config.MQTT.Username,
-			"client_id":    s.config.MQTT.ClientID,
-			"tls":          s.config.MQTT.TLS,
-			"auto_connect": s.config.MQTT.AutoConnect,
-		},
 		"scanner": s.config.Scanner,
 	}
 
@@ -1470,12 +1299,11 @@ func (s *Server) handleConfigUpdate(c *gin.Context) {
 		return
 	}
 
-	// 允许更新的字段：device/network/frp_server/mqtt/scanner/server/database/initialized
+	// 允许更新的字段：device/network/frp_server/scanner/server/database/initialized
 	// 安全：不允许通过该接口直接写入 password_hash
 	s.config.Device = req.Device
 	s.config.Network = req.Network
 	s.config.FRPServer = req.FRPServer
-	s.config.MQTT = req.MQTT
 	s.config.Scanner = req.Scanner
 	s.config.Server = req.Server
 	s.config.Database = req.Database
@@ -1499,7 +1327,6 @@ func (s *Server) handleConfigInit(c *gin.Context) {
 		Device        *config.DeviceConfig    `json:"device"`
 		Network       *config.NetworkConfig   `json:"network"`
 		FRPServer     *config.FRPServerConfig `json:"frp_server"`
-		MQTT          *config.MQTTConfig      `json:"mqtt"`
 		Scanner       *config.ScannerConfig   `json:"scanner"`
 		AdminPassword string                  `json:"admin_password" binding:"required"`
 	}
@@ -1518,9 +1345,6 @@ func (s *Server) handleConfigInit(c *gin.Context) {
 	}
 	if req.FRPServer != nil {
 		s.config.FRPServer = *req.FRPServer
-	}
-	if req.MQTT != nil {
-		s.config.MQTT = *req.MQTT
 	}
 	if req.Scanner != nil {
 		s.config.Scanner = *req.Scanner

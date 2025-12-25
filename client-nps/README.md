@@ -8,7 +8,6 @@
 - 设备扫描和识别
 - 网络工具箱（Ping、Traceroute、网速测试等）
 - NPS客户端集成
-- MQTT客户端集成
 - HTTP API服务
 - WebSocket实时推送
 - Web控制面板支持
@@ -51,7 +50,6 @@ client-nps/
 │   ├── api/               # HTTP API服务
 │   ├── database/          # 数据库模块
 │   ├── logger/            # 日志模块
-│   ├── mqtt/              # MQTT客户端
 │   ├── network/           # 网络管理
 │   ├── nps/               # NPS客户端
 │   ├── scanner/           # 设备扫描
@@ -65,7 +63,6 @@ client-nps/
 主要依赖库：
 - Gin - Web框架
 - SQLite - 数据库
-- paho.mqtt.golang - MQTT客户端
 - gopsutil - 系统信息
 - gorilla/websocket - WebSocket支持
 

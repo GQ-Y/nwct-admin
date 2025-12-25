@@ -110,18 +110,6 @@ func createTables() error {
 		FOREIGN KEY (device_ip) REFERENCES devices(ip) ON DELETE CASCADE
 	);`
 
-	// MQTT日志表
-	mqttLogsTable := `
-	CREATE TABLE IF NOT EXISTS mqtt_logs (
-		id INTEGER PRIMARY KEY AUTOINCREMENT,
-		timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
-		direction TEXT NOT NULL,
-		topic TEXT NOT NULL,
-		qos INTEGER DEFAULT 0,
-		payload TEXT,
-		status TEXT DEFAULT 'success'
-	);`
-
 	// FRP隧道表
 	frpTunnelsTable := `
 	CREATE TABLE IF NOT EXISTS frp_tunnels (
@@ -140,7 +128,6 @@ func createTables() error {
 		devicesTable,
 		devicePortsTable,
 		deviceHistoryTable,
-		mqttLogsTable,
 		frpTunnelsTable,
 	}
 
@@ -159,6 +146,9 @@ func createTables() error {
 	}
 	// 轻量迁移：旧库补字段
 	_ = ensureColumn("frp_tunnels", "fallback_enabled", "INTEGER DEFAULT 1")
+
+	// 清理历史遗留：彻底移除 mqtt_logs 表
+	_, _ = db.Exec(`DROP TABLE IF EXISTS mqtt_logs`)
 
 	return nil
 }

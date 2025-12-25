@@ -329,10 +329,6 @@ export const InitWizard: React.FC = () => {
                 <div style={{ marginBottom: 24 }}><label style={{ display: 'block', marginBottom: 10, fontWeight: 500 }}>{t('wizard.server_addr')}</label><Input placeholder="nps.example.com" /></div>
                 <div><label style={{ display: 'block', marginBottom: 10, fontWeight: 500 }}>{t('wizard.vkey')}</label><Input placeholder="Secret Key" /></div>
              </Card>
-             <Card title={t('wizard.mqtt_config')} className="glass" style={{ margin: 0 }}>
-                <div style={{ marginBottom: 24 }}><label style={{ display: 'block', marginBottom: 10, fontWeight: 500 }}>{t('services.host')}</label><Input placeholder="mqtt.example.com" /></div>
-                <div><label style={{ display: 'block', marginBottom: 10, fontWeight: 500 }}>{t('wizard.client_id')}</label><Input placeholder="device-001" /></div>
-             </Card>
           </div>
         );
       case 3:

@@ -124,10 +124,6 @@ export const Dashboard: React.FC = () => {
               <Badge status={frp?.connected ? 'online' : 'offline'} text={frp?.connected ? t('common.connected') : t('common.disconnected')} />
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between', padding: '12px', background: '#f9f9f9', borderRadius: 4 }}>
-              <span>{t('dashboard.mqtt_broker')}</span>
-              <Badge status={rt.mqttLogNew ? 'online' : 'warn'} text={t('common.online')} />
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '12px', background: '#f9f9f9', borderRadius: 4 }}>
               <span>{t('dashboard.web_server')}</span>
               <Badge status="online" text={t('common.online')} />
             </div>

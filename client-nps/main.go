@@ -17,11 +17,9 @@ import (
 	"nwct/client-nps/internal/database"
 	"nwct/client-nps/internal/frp"
 	"nwct/client-nps/internal/logger"
-	"nwct/client-nps/internal/mqtt"
 	"nwct/client-nps/internal/network"
 	"nwct/client-nps/internal/probe"
 	"nwct/client-nps/internal/realtime"
-	"nwct/client-nps/internal/scanner"
 	"nwct/client-nps/internal/version"
 
 	"github.com/shirou/gopsutil/v3/cpu"
@@ -190,15 +188,8 @@ func main() {
 	// 初始化FRP客户端
 	frpClient := frp.NewClient(&cfg.FRPServer)
 
-	// 初始化MQTT客户端
-	mqttClient := mqtt.NewClient(&cfg.MQTT)
-	// 给 MQTT 命令处理注入依赖（scan/config_update 需要）
-	mqtt.SetGlobalConfig(cfg)
-	mqtt.SetGlobalNetManager(netManager)
-	mqtt.SetGlobalScanner(scanner.NewScanner(db))
-
 	// 初始化HTTP API服务器
-	apiServer := api.NewServer(cfg, db, netManager, frpClient, mqttClient)
+	apiServer := api.NewServer(cfg, db, netManager, frpClient)
 
 	// 创建HTTP服务器，设置内存优化参数
 	httpServer := &http.Server{
@@ -221,25 +212,6 @@ func main() {
 
 	// 如果已初始化，启动服务
 	if cfg.Initialized {
-		// 连接MQTT（可通过 mqtt.auto_connect 控制，保证 UI “断开”后不会被启动逻辑自动拉起）
-		if cfg.MQTT.AutoConnect {
-			if err := mqttClient.Connect(); err != nil {
-				logger.Error("MQTT连接失败: %v", err)
-			} else {
-				logger.Info("MQTT连接成功")
-
-				// 设置全局客户端用于命令处理
-				mqtt.SetGlobalClient(mqttClient)
-
-				// 订阅命令主题
-				deviceID := cfg.Device.ID
-				commandTopic := fmt.Sprintf("nwct/%s/command", deviceID)
-				mqttClient.Subscribe(commandTopic, mqtt.HandleCommandMessage)
-			}
-		} else {
-			logger.Info("MQTT自动连接已关闭（mqtt.auto_connect=false）")
-		}
-
 		// 连接FRP
 		if err := frpClient.Connect(); err != nil {
 			logger.Error("FRP连接失败: %v", err)
@@ -254,11 +226,6 @@ func main() {
 	<-quit
 
 	logger.Info("正在关闭服务...")
-
-	// 关闭MQTT连接
-	if mqttClient.IsConnected() {
-		mqttClient.Disconnect()
-	}
 
 	// 关闭FRP连接
 	if frpClient.IsConnected() {

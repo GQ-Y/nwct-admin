@@ -15,7 +15,6 @@ type Config struct {
 	Device      DeviceConfig    `json:"device"`
 	Network     NetworkConfig   `json:"network"`
 	FRPServer   FRPServerConfig `json:"frp_server"`
-	MQTT        MQTTConfig      `json:"mqtt"`
 	Scanner     ScannerConfig   `json:"scanner"`
 	Server      ServerConfig    `json:"server"`
 	Database    DatabaseConfig  `json:"database"`
@@ -73,18 +72,6 @@ type FRPServerConfig struct {
 	DomainSuffix string `json:"domain_suffix"` // frpc.zyckj.club
 }
 
-// MQTTConfig MQTT配置
-type MQTTConfig struct {
-	Server   string `json:"server"`
-	Port     int    `json:"port"`
-	Username string `json:"username"`
-	Password string `json:"password"`
-	ClientID string `json:"client_id"`
-	TLS      bool   `json:"tls"`
-	// AutoConnect 是否允许程序启动时自动连接 MQTT（用于“内置默认服务”体验）
-	AutoConnect bool `json:"auto_connect"`
-}
-
 // ScannerConfig 扫描器配置
 type ScannerConfig struct {
 	AutoScan     bool `json:"auto_scan"`
@@ -128,16 +115,6 @@ func DefaultConfig() *Config {
 			AdminUser:    "admin",
 			AdminPwd:     "admin_nAhTnN",
 			DomainSuffix: "frpc.zyckj.club",
-		},
-		MQTT: MQTTConfig{
-			// 默认内置 MQTT 服务（可在 UI/API 中覆盖）
-			Server:   "mqtt.yingzhu.net",
-			Port:     1883,
-			Username: "nps",
-			Password: "nps",
-			// 默认 client_id 与设备 id 保持一致，方便追踪/鉴权
-			ClientID:    "device_001",
-			AutoConnect: true,
 		},
 		Scanner: ScannerConfig{
 			AutoScan:     true,
@@ -264,45 +241,6 @@ func LoadConfig() (*Config, error) {
 	changed := false
 
 	// MQTT defaults
-	if strings.TrimSpace(cfg.MQTT.Server) == "" {
-		cfg.MQTT.Server = "mqtt.yingzhu.net"
-		changed = true
-	}
-	if cfg.MQTT.Port <= 0 {
-		cfg.MQTT.Port = 1883
-		changed = true
-	}
-	if strings.TrimSpace(cfg.MQTT.Username) == "" {
-		cfg.MQTT.Username = "nps"
-		changed = true
-	}
-	if strings.TrimSpace(cfg.MQTT.Password) == "" {
-		cfg.MQTT.Password = "nps"
-		changed = true
-	}
-	if strings.TrimSpace(cfg.MQTT.ClientID) == "" {
-		if strings.TrimSpace(cfg.Device.ID) != "" {
-			cfg.MQTT.ClientID = strings.TrimSpace(cfg.Device.ID)
-		} else {
-			cfg.MQTT.ClientID = "device_001"
-		}
-		changed = true
-	}
-	// MQTT auto_connect：旧配置里字段不存在时默认开启；如果用户显式保存为 false，则尊重用户值
-	{
-		mqttRaw, _ := raw["mqtt"].(map[string]any)
-		if mqttRaw == nil {
-			if !cfg.MQTT.AutoConnect {
-				cfg.MQTT.AutoConnect = true
-				changed = true
-			}
-		} else {
-			if _, ok := mqttRaw["auto_connect"]; !ok {
-				cfg.MQTT.AutoConnect = true
-				changed = true
-			}
-		}
-	}
 
 	// FRP defaults
 	if strings.TrimSpace(cfg.FRPServer.Server) == "" {

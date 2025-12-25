@@ -37,14 +37,3 @@ type DeviceHistory struct {
 	Timestamp time.Time `json:"timestamp"`
 }
 
-// MQTTLog MQTT日志模型
-type MQTTLog struct {
-	ID        int       `json:"id"`
-	Timestamp time.Time `json:"timestamp"`
-	Direction string    `json:"direction"` // publish, subscribe
-	Topic     string    `json:"topic"`
-	QoS       int       `json:"qos"`
-	Payload   string    `json:"payload"`
-	Status    string    `json:"status"`
-}
-

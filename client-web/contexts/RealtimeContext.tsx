@@ -6,7 +6,6 @@ type RealtimeState = {
   lastHello?: any;
   systemStatus?: any;
   frpStatus?: any;
-  mqttLogNew?: any;
   devicesByIp: Record<string, any>;
   scanStatus?: any;
 };
@@ -21,7 +20,6 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode; enabled: bo
   const [lastHello, setLastHello] = useState<any>(null);
   const [systemStatus, setSystemStatus] = useState<any>(null);
   const [frpStatus, setFrpStatus] = useState<any>(null);
-  const [mqttLogNew, setMqttLogNew] = useState<any>(null);
   const [devicesByIp, setDevicesByIp] = useState<Record<string, any>>({});
   const [scanStatus, setScanStatus] = useState<any>(null);
 
@@ -71,9 +69,6 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode; enabled: bo
             return;
           case "frp_status_changed":
             setFrpStatus(msg.data);
-            return;
-          case "mqtt_log_new":
-            setMqttLogNew(msg.data);
             return;
           case "scan_started":
             setScanStatus((prev: any) => ({ ...(prev || {}), status: "running", progress: 0, ...(msg.data || {}) }));
@@ -133,8 +128,8 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode; enabled: bo
   }, [enabled]);
 
   const value = useMemo<RealtimeState>(
-    () => ({ connected, lastHello, systemStatus, frpStatus, mqttLogNew, devicesByIp, scanStatus }),
-    [connected, lastHello, systemStatus, frpStatus, mqttLogNew, devicesByIp, scanStatus]
+    () => ({ connected, lastHello, systemStatus, frpStatus, devicesByIp, scanStatus }),
+    [connected, lastHello, systemStatus, frpStatus, devicesByIp, scanStatus]
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
