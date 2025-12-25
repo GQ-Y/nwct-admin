@@ -1,7 +1,6 @@
 package frp
 
 import (
-	"embed"
 	"fmt"
 	"io"
 	"nwct/client-nps/internal/logger"
@@ -11,8 +10,9 @@ import (
 	"runtime"
 )
 
-//go:embed assets/*
-var embeddedAssets embed.FS
+// embeddedAssets 由平台特定的embed文件提供（通过build tags）
+// 每个平台只嵌入对应平台的frpc二进制，减少二进制体积
+// 定义在 embed_*.go 文件中
 
 // getEmbeddedFRCPath 从嵌入的资源中获取 frpc 二进制路径
 func getEmbeddedFRCPath() (string, error) {

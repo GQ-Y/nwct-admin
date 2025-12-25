@@ -84,6 +84,11 @@ type deviceScanner struct {
 	db         *sql.DB
 }
 
+const (
+	// portScanWorkers 端口扫描并发数限制，避免大量goroutine导致内存峰值
+	portScanWorkers = 8
+)
+
 var (
 	globalScanner *deviceScanner
 	scannerOnce   sync.Once
@@ -201,6 +206,10 @@ func (ds *deviceScanner) performScan(subnet string) {
 	total := len(arpDevices)
 
 	// 2. 处理发现的设备
+	// 使用信号量控制端口扫描并发数，避免大量goroutine导致内存峰值
+	portScanSemaphore := make(chan struct{}, portScanWorkers)
+	var wg sync.WaitGroup
+
 	lastPush := time.Now()
 	for _, arpDevice := range arpDevices {
 		ds.mu.Lock()
@@ -382,10 +391,20 @@ func (ds *deviceScanner) performScan(subnet string) {
 			})
 		}
 
-		// 端口扫描（异步，避免阻塞）
+		// 端口扫描（异步，避免阻塞，但限制并发数）
 		// 无论 scanCommonPorts 是否发现端口，都进行深度扫描以确保不遗漏
-		go ds.scanPorts(device.IP)
+		wg.Add(1)
+		go func(ip string) {
+			defer wg.Done()
+			// 获取信号量
+			portScanSemaphore <- struct{}{}
+			defer func() { <-portScanSemaphore }() // 释放信号量
+			ds.scanPorts(ip)
+		}(device.IP)
 	}
+
+	// 等待所有端口扫描完成
+	wg.Wait()
 
 	logger.Info("扫描完成，发现 %d 个设备", len(arpDevices))
 }
