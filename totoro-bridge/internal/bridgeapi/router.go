@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io/fs"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -20,6 +21,28 @@ import (
 
 	"github.com/gin-gonic/gin"
 )
+
+func ticketTTL() time.Duration {
+	// 票据有效期：默认 30 天（用户期望“至少 30 天的换票核验期”）
+	// 可通过环境变量 TOTOTO_TICKET_TTL_DAYS 覆盖，例如 7/30/90
+	daysStr := strings.TrimSpace(getenvDefault("TOTOTO_TICKET_TTL_DAYS", "30"))
+	days, _ := strconv.Atoi(daysStr)
+	if days <= 0 {
+		days = 30
+	}
+	if days > 365 {
+		days = 365
+	}
+	return time.Duration(days) * 24 * time.Hour
+}
+
+func getenvDefault(k, def string) string {
+	v := strings.TrimSpace(os.Getenv(k))
+	if v == "" {
+		return def
+	}
+	return v
+}
 
 type Options struct {
 	AdminKey string
@@ -200,7 +223,7 @@ func (a *Router) handlePublicNodeConnect(c *gin.Context) {
 	}
 	// public 直连：不使用邀请码，生成一次性 invite_id 作为计费/限额维度
 	inviteID := "pub_" + randomCode(12)
-	tok, exp, err := ticket.IssueHMAC(n.NodeID, inviteID, "null", []byte(nodeKeyPlain), 30*time.Minute)
+	tok, exp, err := ticket.IssueHMAC(n.NodeID, inviteID, "null", []byte(nodeKeyPlain), ticketTTL())
 	if err != nil {
 		apiresp.Fail(c, http.StatusInternalServerError, 500, err.Error())
 		return
@@ -525,7 +548,11 @@ func (a *Router) handleInviteRedeem(c *gin.Context) {
 		apiresp.Fail(c, http.StatusInternalServerError, 500, err.Error())
 		return
 	}
-	tok, exp, err := ticket.IssueHMAC(node.NodeID, inviteID, scopeJSON, []byte(nodeKeyPlain), time.Duration(ttlSeconds)*time.Second)
+	ttl := time.Duration(ttlSeconds) * time.Second
+	if ttl < ticketTTL() {
+		ttl = ticketTTL()
+	}
+	tok, exp, err := ticket.IssueHMAC(node.NodeID, inviteID, scopeJSON, []byte(nodeKeyPlain), ttl)
 	if err != nil {
 		apiresp.Fail(c, http.StatusInternalServerError, 500, err.Error())
 		return

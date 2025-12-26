@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { api } from "../lib/api";
+import { api, sanitizeErrorMessage } from "../lib/api";
 import { useLanguage } from "../contexts/LanguageContext";
 import { Toast } from "../components/Toast";
 
@@ -40,7 +40,7 @@ export const PublicNodesPage: React.FC = () => {
       const data = await api.publicNodes();
       setNodes((data?.nodes || []) as any);
     } catch (e: any) {
-      setErr(e?.message || "加载失败");
+      setErr(sanitizeErrorMessage(e?.message || "加载失败"));
     } finally {
       setLoading(false);
     }
@@ -57,7 +57,7 @@ export const PublicNodesPage: React.FC = () => {
       load();
     } catch (e: any) {
       setToastType("error");
-      setToastMsg(e?.message || "连接失败");
+      setToastMsg(sanitizeErrorMessage(e?.message || "连接失败"));
       setToastOpen(true);
     }
   };

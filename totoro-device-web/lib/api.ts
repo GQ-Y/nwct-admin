@@ -20,6 +20,31 @@ function getApiBase(): string {
 
 export const API_BASE = getApiBase();
 
+export function sanitizeErrorMessage(input: string): string {
+  let s = String(input || "").trim();
+  if (!s) return "请求失败";
+
+  // 业务优先：不要暴露桥梁地址；把“自动换票失败”统一改为私有节点连接失败
+  if (s.includes("自动换票失败")) return "私有节点连接失败";
+
+  const isNetDown = /connection refused|i\/o timeout|no such host|context deadline exceeded|network is unreachable/i.test(s);
+  const isRedeem = /\/api\/v1\/invites\/redeem|invites\/redeem/i.test(s);
+  if (isRedeem && isNetDown) return "私有节点连接失败";
+
+  // 常见：桥梁离线导致拉官方节点/公开节点失败
+  if (/\/api\/v1\/official\/nodes|official\/nodes/i.test(s) && isNetDown) return "云服务离线";
+  if (/\/api\/v1\/public\/nodes|public\/nodes/i.test(s) && isNetDown) return "云服务离线";
+
+  // 去掉 URL / IP:PORT 等敏感信息
+  s = s.replace(/https?:\/\/[^\s"')]+/g, "");
+  s = s.replace(/\b\d{1,3}(?:\.\d{1,3}){3}:\d+\b/g, "");
+
+  // 清理多余空白/标点
+  s = s.replace(/\s{2,}/g, " ").trim();
+  s = s.replace(/^[,:;\-\s]+/, "").replace(/[,:;\-\s]+$/, "");
+  return s || "请求失败";
+}
+
 export function getToken(): string | null {
   return localStorage.getItem("token");
 }
@@ -54,12 +79,12 @@ async function request<T>(
     json = text ? JSON.parse(text) : null;
   } catch {
     // 非 JSON：直接抛
-    throw new Error(text || `HTTP ${res.status}`);
+    throw new Error(sanitizeErrorMessage(text || `HTTP ${res.status}`));
   }
 
   if (!res.ok || (json && typeof json.code === "number" && json.code !== 200)) {
     const msg = json?.message || `HTTP ${res.status}`;
-    throw new Error(msg);
+    throw new Error(sanitizeErrorMessage(msg));
   }
   return (json as ApiEnvelope<T>).data;
 }

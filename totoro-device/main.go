@@ -443,7 +443,11 @@ func main() {
 				DeviceID:         strings.TrimSpace(cfg.Device.ID),
 				DevicePrivKeyB64: strings.TrimSpace(dc.PrivKeyB64),
 			}
-			if strings.TrimSpace(code) != "" {
+			// 如果本地已有 ticket 且尚未临近过期，则不必每次启动都换票（避免频繁请求桥梁）
+			if strings.TrimSpace(cfg.FRPServer.Public.TotoroTicket) != "" &&
+				!frp.TicketExpiredByTokenOrRFC(cfg.FRPServer.Public.TicketExpiresAt, cfg.FRPServer.Public.TotoroTicket, 24*time.Hour) {
+				logger.Info("FRP(public) 复用现有 ticket（未临近过期），跳过换票")
+			} else if strings.TrimSpace(code) != "" {
 				res, err := bc.RedeemInvite(code)
 				if err != nil {
 					cfg.FRPServer.Public.LastResolveError = err.Error()

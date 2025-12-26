@@ -1,6 +1,7 @@
 package frp
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -111,4 +112,46 @@ func TicketExpired(expiresAtRFC string, skew time.Duration) bool {
 		return true
 	}
 	return time.Now().Add(skew).After(t)
+}
+
+// TicketExpiredByTokenOrRFC 优先使用 expiresAtRFC；若为空/解析失败，则从 JWT ticket 的 exp 字段推断过期时间（无需验签）。
+func TicketExpiredByTokenOrRFC(expiresAtRFC string, ticket string, skew time.Duration) bool {
+	expiresAtRFC = strings.TrimSpace(expiresAtRFC)
+	if expiresAtRFC != "" {
+		if t, err := time.Parse(time.RFC3339, expiresAtRFC); err == nil {
+			return time.Now().Add(skew).After(t)
+		}
+	}
+	exp, ok := ticketExpUnix(ticket)
+	if !ok {
+		return true
+	}
+	return time.Now().Add(skew).After(time.Unix(exp, 0))
+}
+
+func ticketExpUnix(ticket string) (int64, bool) {
+	// JWT: header.payload.signature
+	parts := strings.Split(strings.TrimSpace(ticket), ".")
+	if len(parts) < 2 {
+		return 0, false
+	}
+	payloadB64 := parts[1]
+	// base64url decode（补齐 padding）
+	if m := len(payloadB64) % 4; m != 0 {
+		payloadB64 += strings.Repeat("=", 4-m)
+	}
+	b, err := base64.URLEncoding.DecodeString(payloadB64)
+	if err != nil {
+		return 0, false
+	}
+	var p struct {
+		Exp int64 `json:"exp"`
+	}
+	if err := json.Unmarshal(b, &p); err != nil {
+		return 0, false
+	}
+	if p.Exp <= 0 {
+		return 0, false
+	}
+	return p.Exp, true
 }

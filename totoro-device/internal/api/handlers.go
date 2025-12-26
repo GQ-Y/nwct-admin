@@ -1844,7 +1844,8 @@ func (s *Server) handleFRPConnect(c *gin.Context) {
 				return
 			}
 			// ticket 缺失/过期 -> bridge 兑换
-			if strings.TrimSpace(s.config.FRPServer.Public.TotoroTicket) == "" || frp.TicketExpired(s.config.FRPServer.Public.TicketExpiresAt, 30*time.Second) {
+			if strings.TrimSpace(s.config.FRPServer.Public.TotoroTicket) == "" ||
+				frp.TicketExpiredByTokenOrRFC(s.config.FRPServer.Public.TicketExpiresAt, s.config.FRPServer.Public.TotoroTicket, 30*time.Second) {
 				bridgeBase := strings.TrimRight(strings.TrimSpace(os.Getenv("TOTOTO_BRIDGE_URL")), "/")
 				if bridgeBase == "" {
 					c.JSON(http.StatusBadRequest, models.ErrorResponse(400, "未配置 TOTOTO_BRIDGE_URL"))

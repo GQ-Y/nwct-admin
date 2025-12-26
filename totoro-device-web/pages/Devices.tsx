@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Card, Button, SearchInput, Select, Badge, Pagination, ProgressBar, Alert, Input } from '../components/UI';
+import { Card, Button, SearchInput, Select, Badge, Pagination, ProgressBar, Alert, Input, SuffixInput } from '../components/UI';
 import { Device } from '../types';
 import { RefreshCw, Smartphone, Monitor, Server, Camera, Radar } from 'lucide-react';
 import { useLanguage } from '../contexts/LanguageContext';
@@ -282,7 +282,21 @@ export const Devices: React.FC = () => {
            <Card title={t('devices.device_info')} extra={<Badge status={selectedDevice.status} text={t(`common.${selectedDevice.status}`)} />}>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
                  <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-                    <div style={{ padding: 16, background: '#f0f2f5', borderRadius: '50%' }}>{getIcon(selectedDevice.type)}</div>
+                    <div
+                      style={{
+                        padding: 14,
+                        background: '#f0f2f5',
+                        borderRadius: 16,
+                        border: '1px solid rgba(0,0,0,0.06)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        minWidth: 56,
+                        minHeight: 56,
+                      }}
+                    >
+                      {getIcon(selectedDevice.type)}
+                    </div>
                     <div>
                       <h3 style={{ margin: 0 }}>{selectedDevice.name}</h3>
                       <div style={{ color: '#666' }}>
@@ -427,9 +441,18 @@ export const Devices: React.FC = () => {
                 {(tunnelForm.type === 'http' || tunnelForm.type === 'https') ? (
                   <div>
                     <label style={{ display: 'block', marginBottom: 8, fontSize: 14, fontWeight: 500 }}>
-                      域名前缀 <span style={{ color: '#999' }}>(默认后缀 .{domainSuffix})</span>
+                      域名前缀
                     </label>
-                    <Input value={tunnelForm.domain} onChange={(e) => setTunnelForm({ ...tunnelForm, domain: (e.target as any).value })} placeholder="例如：e6666666" />
+                    <SuffixInput
+                      value={tunnelForm.domain}
+                      onChange={(v) => setTunnelForm({ ...tunnelForm, domain: v })}
+                      suffixText={
+                        domainSuffix.trim()
+                          ? `.${domainSuffix.replace(/^\./, '')}`
+                          : "（未配置根域名）"
+                      }
+                      placeholder="请输入域名前缀"
+                    />
                   </div>
                 ) : null}
 

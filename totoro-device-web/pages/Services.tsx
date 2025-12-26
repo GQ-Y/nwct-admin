@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Card, Button, Input, Badge, Select, SuffixInput } from '../components/UI';
 import { Pause, Play, Save, Activity, Users, ArrowUp, ArrowDown, RefreshCw, Plus, Edit, Trash2, X } from 'lucide-react';
 import { useLanguage } from '../contexts/LanguageContext';
-import { api } from '../lib/api';
+import { api, sanitizeErrorMessage } from '../lib/api';
 import { useRealtime } from '../contexts/RealtimeContext';
 import { Toast } from '../components/Toast';
 
@@ -59,7 +59,7 @@ export const FRPPage: React.FC = () => {
         const s = await api.cloudStatus();
         if (!stopped) setCloud(s);
       } catch (e: any) {
-        if (!stopped) setCloud({ ok: false, error: e?.message || String(e) });
+        if (!stopped) setCloud({ ok: false, error: sanitizeErrorMessage(e?.message || String(e)) });
       }
     };
     tick();
@@ -384,7 +384,7 @@ export const FRPPage: React.FC = () => {
             </div>
             {status?.last_error ? (
               <div style={{ marginTop: 12, color: "#b91c1c", fontSize: 12 }}>
-                last_error: {status.last_error}
+                {sanitizeErrorMessage(String(status.last_error || ""))}
               </div>
             ) : null}
             {/* 按需：进程 PID/日志路径属于调试信息，这里不在 UI 中展示 */}
@@ -432,7 +432,7 @@ export const FRPPage: React.FC = () => {
                        {cloud?.ok ? "在线" : "离线"}
                      </div>
                      <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>
-                       {cloud?.ok ? "正常" : (cloud?.error || "异常")}
+                       {cloud?.ok ? "正常" : "离线"}
                      </div>
                    </div>
                  </div>
@@ -463,20 +463,22 @@ export const FRPPage: React.FC = () => {
                    >
                      固件 <span style={{ color: "var(--text-primary)", fontWeight: 800, marginLeft: 6 }}>{cloud?.firmware_version || "-"}</span>
                    </div>
-                   <div
-                     style={{
-                       padding: "6px 10px",
-                       borderRadius: 999,
-                       background: cloud?.ok ? "rgba(10,89,247,0.10)" : "rgba(239,68,68,0.10)",
-                       color: cloud?.ok ? "var(--primary)" : "var(--error)",
-                       fontSize: 12,
-                       lineHeight: 1.2,
-                       whiteSpace: "nowrap",
-                       fontWeight: 800,
-                     }}
-                   >
-                     {typeof cloud?.official_nodes === "number" ? `${cloud.official_nodes}个云节点` : "-"}
-                   </div>
+                   {cloud?.ok && typeof cloud?.official_nodes === "number" ? (
+                     <div
+                       style={{
+                         padding: "6px 10px",
+                         borderRadius: 999,
+                         background: "rgba(10,89,247,0.10)",
+                         color: "var(--primary)",
+                         fontSize: 12,
+                         lineHeight: 1.2,
+                         whiteSpace: "nowrap",
+                         fontWeight: 800,
+                       }}
+                     >
+                       {cloud.official_nodes}个云节点
+                     </div>
+                   ) : null}
                  </div>
                </div>
              </Card>

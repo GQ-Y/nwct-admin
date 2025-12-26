@@ -15,6 +15,7 @@ import (
 
 	"totoro-node/internal/apiresp"
 	"totoro-node/internal/bridgeclient"
+	"totoro-node/internal/kicker"
 	"totoro-node/internal/nodeui"
 	"totoro-node/internal/store"
 )
@@ -237,7 +238,8 @@ func (a *API) revokeInvite(c *gin.Context) {
 		apiresp.Fail(c, http.StatusBadGateway, 502, err.Error())
 		return
 	}
-	apiresp.OK(c, gin.H{"revoked": true})
+	kicked := kicker.KickInvite(strings.TrimSpace(req.InviteID))
+	apiresp.OK(c, gin.H{"revoked": true, "kicked": kicked})
 }
 
 func generateInviteCode() string {

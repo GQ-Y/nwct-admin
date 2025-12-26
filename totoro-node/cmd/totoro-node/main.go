@@ -14,6 +14,7 @@ import (
 
 	"totoro-node/internal/bridgeclient"
 	"totoro-node/internal/frpswrap"
+	"totoro-node/internal/kicker"
 	"totoro-node/internal/limits"
 	"totoro-node/internal/nodeapi"
 	"totoro-node/internal/store"
@@ -84,6 +85,10 @@ func main() {
 		if claims.NodeID != nodeID {
 			return nil, fmt.Errorf("ticket_node_mismatch")
 		}
+		// 把 exp 写入 metas，供后续“到期主动断开”使用
+		if claims.ExpiresAt != nil && !claims.ExpiresAt.Time.IsZero() {
+			login.Metas["totoro_ticket_exp_unix"] = fmt.Sprintf("%d", claims.ExpiresAt.Time.Unix())
+		}
 		// scope
 		var sc scope
 		if len(claims.Scope) > 0 && string(claims.Scope) != "null" {
@@ -96,6 +101,11 @@ func main() {
 		login.Metas["totoro_invite_id"] = claims.InviteID
 		login.Metas["totoro_scope"] = string(claims.Scope)
 		return &frpsserver.TotoroLoginResult{InviteID: claims.InviteID}, nil
+	}
+
+	// 注册连接，用于“撤销邀请码 -> 主动踢下线”和“ticket 到期 -> 主动踢下线”
+	frpsserver.TotoroControlCreatedHook = func(ctl *frpsserver.Control) {
+		kicker.RegisterControl(ctl)
 	}
 
 	frpsserver.TotoroNewProxyHook = func(ctl *frpsserver.Control, pxyMsg *frpmsg.NewProxy) error {
@@ -153,6 +163,7 @@ func main() {
 			return
 		}
 		lim.CloseConn(inviteID)
+		kicker.UnregisterControl(ctl)
 	}
 
 	// 启动 frps（在同进程）
