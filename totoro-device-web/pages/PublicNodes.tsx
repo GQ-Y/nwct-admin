@@ -202,7 +202,13 @@ export const PublicNodesPage: React.FC = () => {
             }
           }}
         >
-          <div className="card glass modal-panel" onMouseDown={(e) => e.stopPropagation()} style={{ padding: 22 }}>
+          <div
+            className="card glass modal-panel"
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={(e) => e.stopPropagation()}
+            onTouchStart={(e) => e.stopPropagation()}
+            style={{ padding: 22 }}
+          >
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
               <div style={{ fontSize: 18, fontWeight: 800 }}>{t("public_nodes.modal_title")}</div>
               <button

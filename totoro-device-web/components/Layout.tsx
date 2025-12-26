@@ -272,6 +272,8 @@ export const MainLayout: React.FC<LayoutProps> = ({ children }) => {
           <div
             className="card glass modal-panel"
             onMouseDown={(e) => e.stopPropagation()}
+            onClick={(e) => e.stopPropagation()}
+            onTouchStart={(e) => e.stopPropagation()}
             style={{ padding: 24 }}
           >
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
