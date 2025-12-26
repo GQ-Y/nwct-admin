@@ -5,10 +5,12 @@ import { useLanguage } from '../contexts/LanguageContext';
 import { api, sanitizeErrorMessage } from '../lib/api';
 import { useRealtime } from '../contexts/RealtimeContext';
 import { Toast } from '../components/Toast';
+import { useIsMobile } from '../lib/useIsMobile';
 
 export const FRPPage: React.FC = () => {
   const { t } = useLanguage();
   const rt = useRealtime();
+  const isMobile = useIsMobile();
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState<any>(null);
   const [tunnels, setTunnels] = useState<any[]>([]);
@@ -373,7 +375,7 @@ export const FRPPage: React.FC = () => {
               <Input value={server} onChange={(e) => setServer((e.target as any).value)} placeholder="ip" />
               <Input value={token} onChange={(e) => setToken((e.target as any).value)} type="password" placeholder="token" />
             </div>
-            <div style={{ marginTop: 12, display: "flex", gap: 8 }}>
+            <div style={{ marginTop: 12, display: "flex", gap: 8, flexWrap: "wrap" }}>
               <Button variant="ghost" onClick={refreshWithBridgeSync} disabled={loading}>{t('frp.refresh')}</Button>
               <Button variant="outline" onClick={useBuiltin} disabled={loading}>
                 {t('frp.use_builtin')}
@@ -501,74 +503,151 @@ export const FRPPage: React.FC = () => {
           </Button>
         }
       >
-          <table className="table">
-          <thead>
-            <tr>
-              <th>名称</th>
-              <th>类型</th>
-              <th>本地地址</th>
-              <th>远程端口</th>
-              <th>域名</th>
-              <th>创建时间</th>
-              <th>操作</th>
-            </tr>
-          </thead>
-          <tbody>
-            {tunnels.map((tunnel: any, idx: number) => (
-              <tr key={tunnel.name || idx}>
-                <td>{tunnel.name || '-'}</td>
-                <td>{String(tunnel.type || 'tcp').toUpperCase()}</td>
-                <td>{tunnel.local_ip && tunnel.local_port ? `${tunnel.local_ip}:${tunnel.local_port}` : '-'}</td>
-                <td>{tunnel.remote_port != null && tunnel.remote_port > 0 ? tunnel.remote_port : '自动分配'}</td>
-                <td>
-                  {(tunnel.type === 'http' || tunnel.type === 'https') && tunnel.domain ? (
-                    <a
-                      href={`${tunnel.type === 'https' ? 'https' : 'http'}://${tunnel.domain}`}
-                      target="_blank"
-                      rel="noreferrer"
-                      style={{ color: 'var(--primary)', textDecoration: 'none' }}
-                      title="新标签打开"
-                    >
-                      {tunnel.domain}
-                    </a>
-                  ) : (
-                    '-'
-                  )}
-                </td>
-                <td>{tunnel.created_at || '-'}</td>
-                <td>
-                  <div style={{ display: 'flex', gap: 8 }}>
-                    <Button
-                      variant="ghost"
-                      onClick={() => openEditModal(tunnel)}
-                      disabled={loading}
-                      style={{ padding: '4px 8px', height: 'auto' }}
-                      title="编辑"
-                    >
-                      <Edit size={14} />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      onClick={() => handleDeleteTunnel(tunnel)}
-                      disabled={loading}
-                      style={{ padding: '4px 8px', height: 'auto', color: '#ff4d4f' }}
-                      title="删除"
-                    >
-                      <Trash2 size={14} />
-                    </Button>
+        {isMobile ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            {tunnels.map((tunnel: any, idx: number) => {
+              const name = tunnel?.name || '-';
+              const type = String(tunnel?.type || 'tcp').toUpperCase();
+              const local = tunnel?.local_ip && tunnel?.local_port ? `${tunnel.local_ip}:${tunnel.local_port}` : '-';
+              const remote = tunnel?.remote_port != null && tunnel.remote_port > 0 ? String(tunnel.remote_port) : '自动分配';
+              const domain = (tunnel?.type === 'http' || tunnel?.type === 'https') && tunnel?.domain ? String(tunnel.domain) : '-';
+              const created = tunnel?.created_at || '-';
+              const domainHref = (tunnel?.type === 'http' || tunnel?.type === 'https') && tunnel?.domain ? `${tunnel.type === 'https' ? 'https' : 'http'}://${tunnel.domain}` : '';
+
+              return (
+                <div
+                  key={tunnel?.name || idx}
+                  style={{
+                    border: '1px solid rgba(0,0,0,0.06)',
+                    borderRadius: 18,
+                    padding: 14,
+                    background: 'rgba(255,255,255,0.7)',
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontWeight: 800, fontSize: 14, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{name}</div>
+                      <div style={{ marginTop: 6, fontSize: 12, color: 'var(--text-secondary)', display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                        <span>类型：<span style={{ color: 'var(--text-primary)', fontWeight: 700 }}>{type}</span></span>
+                        <span>本地：<span style={{ color: 'var(--text-primary)', fontWeight: 700 }}>{local}</span></span>
+                        <span>远程：<span style={{ color: 'var(--text-primary)', fontWeight: 700 }}>{remote}</span></span>
+                      </div>
+                      <div style={{ marginTop: 6, fontSize: 12, color: 'var(--text-secondary)' }}>
+                        域名：
+                        {domainHref ? (
+                          <a href={domainHref} target="_blank" rel="noreferrer" style={{ color: 'var(--primary)', textDecoration: 'none', marginLeft: 6, fontWeight: 800 }}>
+                            {domain}
+                          </a>
+                        ) : (
+                          <span style={{ color: 'var(--text-primary)', fontWeight: 700, marginLeft: 6 }}>{domain}</span>
+                        )}
+                      </div>
+                      <div style={{ marginTop: 6, fontSize: 12, color: 'var(--text-secondary)' }}>
+                        创建：<span style={{ color: 'var(--text-primary)', fontWeight: 700, marginLeft: 6 }}>{created}</span>
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', gap: 8, flex: '0 0 auto' }}>
+                      <Button
+                        variant="ghost"
+                        onClick={() => openEditModal(tunnel)}
+                        disabled={loading}
+                        style={{ padding: '6px 10px', height: 'auto' }}
+                        title="编辑"
+                      >
+                        <Edit size={14} />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        onClick={() => handleDeleteTunnel(tunnel)}
+                        disabled={loading}
+                        style={{ padding: '6px 10px', height: 'auto', color: '#ff4d4f' }}
+                        title="删除"
+                      >
+                        <Trash2 size={14} />
+                      </Button>
+                    </div>
                   </div>
-                </td>
-              </tr>
-            ))}
+                </div>
+              );
+            })}
             {tunnels.length === 0 ? (
-              <tr>
-                <td colSpan={7} style={{ color: '#888', padding: 12 }}>
-                  {connected ? '暂无隧道，点击"创建隧道"按钮添加' : '未连接'}
-                </td>
-              </tr>
+              <div style={{ color: '#888', padding: 12, textAlign: 'center' }}>
+                {connected ? '暂无隧道，点击“创建隧道”按钮添加' : '未连接'}
+              </div>
             ) : null}
-          </tbody>
-        </table>
+          </div>
+        ) : (
+          <div className="table-wrap">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>名称</th>
+                  <th>类型</th>
+                  <th>本地地址</th>
+                  <th>远程端口</th>
+                  <th>域名</th>
+                  <th>创建时间</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                {tunnels.map((tunnel: any, idx: number) => (
+                  <tr key={tunnel.name || idx}>
+                    <td>{tunnel.name || '-'}</td>
+                    <td>{String(tunnel.type || 'tcp').toUpperCase()}</td>
+                    <td>{tunnel.local_ip && tunnel.local_port ? `${tunnel.local_ip}:${tunnel.local_port}` : '-'}</td>
+                    <td>{tunnel.remote_port != null && tunnel.remote_port > 0 ? tunnel.remote_port : '自动分配'}</td>
+                    <td>
+                      {(tunnel.type === 'http' || tunnel.type === 'https') && tunnel.domain ? (
+                        <a
+                          href={`${tunnel.type === 'https' ? 'https' : 'http'}://${tunnel.domain}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          style={{ color: 'var(--primary)', textDecoration: 'none' }}
+                          title="新标签打开"
+                        >
+                          {tunnel.domain}
+                        </a>
+                      ) : (
+                        '-'
+                      )}
+                    </td>
+                    <td>{tunnel.created_at || '-'}</td>
+                    <td>
+                      <div style={{ display: 'flex', gap: 8 }}>
+                        <Button
+                          variant="ghost"
+                          onClick={() => openEditModal(tunnel)}
+                          disabled={loading}
+                          style={{ padding: '4px 8px', height: 'auto' }}
+                          title="编辑"
+                        >
+                          <Edit size={14} />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          onClick={() => handleDeleteTunnel(tunnel)}
+                          disabled={loading}
+                          style={{ padding: '4px 8px', height: 'auto', color: '#ff4d4f' }}
+                          title="删除"
+                        >
+                          <Trash2 size={14} />
+                        </Button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+                {tunnels.length === 0 ? (
+                  <tr>
+                    <td colSpan={7} style={{ color: '#888', padding: 12 }}>
+                      {connected ? '暂无隧道，点击"创建隧道"按钮添加' : '未连接'}
+                    </td>
+                  </tr>
+                ) : null}
+              </tbody>
+            </table>
+          </div>
+        )}
       </Card>
 
       {/* 创建/编辑隧道对话框 */}

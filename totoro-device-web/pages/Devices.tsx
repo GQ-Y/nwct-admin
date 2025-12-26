@@ -1,14 +1,16 @@
-import React, { useState, useEffect } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import { Card, Button, SearchInput, Select, Badge, Pagination, ProgressBar, Alert, Input, SuffixInput } from '../components/UI';
 import { Device } from '../types';
 import { RefreshCw, Smartphone, Monitor, Server, Camera, Radar } from 'lucide-react';
 import { useLanguage } from '../contexts/LanguageContext';
 import { api } from '../lib/api';
 import { useRealtime } from '../contexts/RealtimeContext';
+import { useIsMobile } from '../lib/useIsMobile';
 
 export const Devices: React.FC = () => {
   const { t } = useLanguage();
   const rt = useRealtime();
+  const isMobile = useIsMobile();
   const [devices, setDevices] = useState<Device[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   // 默认只显示在线设备
@@ -163,6 +165,33 @@ export const Devices: React.FC = () => {
       default: return <Monitor size={18} />;
     }
   };
+
+  const openDetail = (d: Device) => {
+    setSelectedDevice(d);
+    setSelectedExtra(null);
+    setSelectedPorts([]);
+    setView('detail');
+    // 拉取详情（拿 model/extra/端口信息等）
+    api.deviceDetail(d.ip)
+      .then((detail) => {
+        setSelectedDevice((prev) => (prev ? { ...prev, model: detail?.model || prev.model || '' } : prev));
+        setSelectedPorts(Array.isArray(detail?.open_ports) ? detail.open_ports : []);
+        try {
+          setSelectedExtra(detail?.extra ? JSON.parse(detail.extra) : null);
+        } catch {
+          setSelectedExtra(detail?.extra || null);
+        }
+      })
+      .catch(() => {});
+  };
+
+  const portsList = useMemo(() => {
+    const list =
+      selectedPorts && selectedPorts.length > 0
+        ? selectedPorts
+        : (selectedDevice?.ports || []).map((p: number) => ({ port: p, protocol: 'tcp', service: '', status: 'open' }));
+    return Array.isArray(list) ? list : [];
+  }, [selectedPorts, selectedDevice?.ports]);
 
   const handleScan = () => {
     if (isScanning || scanStatus?.status === 'running') return;
@@ -335,38 +364,74 @@ export const Devices: React.FC = () => {
                   placeholder="端口范围/列表（可选）：例如 80,443,3000-3010"
                 />
               </div>
-              {(selectedPorts && selectedPorts.length > 0) || (selectedDevice.ports && selectedDevice.ports.length > 0) ? (
-                <table className="table">
-                  <thead><tr><th>{t('devices.port')}</th><th>{t('devices.protocol')}</th><th>服务</th><th>{t('devices.state')}</th><th>{t('common.action')}</th></tr></thead>
-                  <tbody>
-                    {(selectedPorts && selectedPorts.length > 0
-                      ? selectedPorts
-                      : (selectedDevice.ports || []).map((p: number) => ({ port: p, protocol: 'tcp', service: '', status: 'open' }))
-                    ).map((p: any) => {
+              {portsList.length > 0 ? (
+                isMobile ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                    {portsList.map((p: any, idx: number) => {
                       const port = Number(p?.port ?? 0);
                       const protocol = String(p?.protocol || 'tcp').toUpperCase();
                       const service = String(p?.service || '-');
                       const st = String(p?.status || 'open').toLowerCase();
                       return (
-                        <tr key={`${port}-${protocol}`}>
-                          <td>{port}</td>
-                          <td>{protocol}</td>
-                          <td>{service}</td>
-                          <td><Badge status={st === 'open' ? 'online' : 'offline'} text={st === 'open' ? t('devices.open') : t('common.offline')} /></td>
-                          <td>
-                            <Button
-                              variant="outline"
-                              style={{ fontSize: 13, padding: '4px 10px' }}
-                              onClick={() => openTunnelModalForPort(port)}
-                            >
+                        <div
+                          key={`${port}-${protocol}-${idx}`}
+                          style={{
+                            border: '1px solid rgba(0,0,0,0.06)',
+                            borderRadius: 16,
+                            padding: 14,
+                            background: 'rgba(255,255,255,0.7)',
+                          }}
+                        >
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+                            <div style={{ fontWeight: 800, fontSize: 14 }}>
+                              {port} <span style={{ color: 'var(--text-secondary)', fontWeight: 600, marginLeft: 8 }}>{protocol}</span>
+                            </div>
+                            <Badge status={st === 'open' ? 'online' : 'offline'} text={st === 'open' ? t('devices.open') : t('common.offline')} />
+                          </div>
+                          <div style={{ marginTop: 8, color: 'var(--text-secondary)', fontSize: 12 }}>
+                            服务：<span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{service}</span>
+                          </div>
+                          <div style={{ marginTop: 10 }}>
+                            <Button variant="outline" style={{ width: '100%' }} onClick={() => openTunnelModalForPort(port)}>
                               添加隧道
                             </Button>
-                          </td>
-                        </tr>
+                          </div>
+                        </div>
                       );
                     })}
-                  </tbody>
-                </table>
+                  </div>
+                ) : (
+                  <div className="table-wrap">
+                    <table className="table">
+                      <thead><tr><th>{t('devices.port')}</th><th>{t('devices.protocol')}</th><th>服务</th><th>{t('devices.state')}</th><th>{t('common.action')}</th></tr></thead>
+                      <tbody>
+                        {portsList.map((p: any, idx: number) => {
+                          const port = Number(p?.port ?? 0);
+                          const protocol = String(p?.protocol || 'tcp').toUpperCase();
+                          const service = String(p?.service || '-');
+                          const st = String(p?.status || 'open').toLowerCase();
+                          return (
+                            <tr key={`${port}-${protocol}-${idx}`}>
+                              <td>{port}</td>
+                              <td>{protocol}</td>
+                              <td>{service}</td>
+                              <td><Badge status={st === 'open' ? 'online' : 'offline'} text={st === 'open' ? t('devices.open') : t('common.offline')} /></td>
+                              <td>
+                                <Button
+                                  variant="outline"
+                                  style={{ fontSize: 13, padding: '4px 10px' }}
+                                  onClick={() => openTunnelModalForPort(port)}
+                                >
+                                  添加隧道
+                                </Button>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )
               ) : (
                 <div style={{ textAlign: 'center', color: '#999', padding: 20 }}>{t('devices.no_ports')}</div>
               )}
@@ -470,22 +535,22 @@ export const Devices: React.FC = () => {
 
   return (
     <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 24, alignItems: 'center' }}>
-         <div style={{ display: 'flex', gap: 16, flex: 1 }}>
+      <div className="page-toolbar">
+         <div className="page-toolbar-left">
             <SearchInput 
               placeholder={t('common.search')}
-              width={320} 
+              width={isMobile ? '100%' : 320} 
               value={searchTerm}
               onChange={e => setSearchTerm(e.target.value)}
             />
             <Select 
-              width={160} 
+              width={isMobile ? '100%' : 160} 
               options={filterOptions}
               value={filterType}
               onChange={setFilterType}
             />
          </div>
-         <Button onClick={handleScan} disabled={isScanning || scanStatus?.status === 'running'}>
+         <Button onClick={handleScan} disabled={isScanning || scanStatus?.status === 'running'} style={isMobile ? ({ width: '100%' } as any) : undefined}>
            <RefreshCw size={18} className={isScanning ? 'animate-spin' : ''} /> 
            {(isScanning || scanStatus?.status === 'running') ? t('devices.scanning') : t('devices.scan_network')}
          </Button>
@@ -518,57 +583,84 @@ export const Devices: React.FC = () => {
       ) : null}
 
       <Card>
-        <table className="table">
-          <thead>
-            <tr>
-              <th style={{ width: 50 }}></th>
-              <th>{t('devices.name')}</th>
-              <th>{t('devices.ip')}</th>
-              <th>{t('devices.mac')}</th>
-              <th>{t('devices.vendor')}</th>
-              <th>{t('devices.status')}</th>
-              <th>{t('common.action')}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {currentDevices.map(d => (
-              <tr key={d.ip}>
-                <td style={{ color: '#666' }}>{getIcon(d.type)}</td>
-                <td style={{ fontWeight: 500 }}>{d.name}</td>
-                <td>{d.ip}</td>
-                <td style={{ fontFamily: 'monospace', color: '#666' }}>{d.mac}</td>
-                <td>{d.vendor}</td>
-                <td><Badge status={d.status} text={t(`common.${d.status}`)} /></td>
-                <td>
-                  <Button
-                    variant="ghost"
-                    style={{ padding: '4px 8px', fontSize: 13 }}
-                    onClick={() => {
-                      setSelectedDevice(d);
-                      setSelectedExtra(null);
-                      setSelectedPorts([]);
-                      setView('detail');
-                      // 拉取详情（拿 model/extra/端口信息等）
-                      api.deviceDetail(d.ip)
-                        .then((detail) => {
-                          setSelectedDevice((prev) => (prev ? { ...prev, model: detail?.model || prev.model || '' } : prev));
-                          setSelectedPorts(Array.isArray(detail?.open_ports) ? detail.open_ports : []);
-                          try {
-                            setSelectedExtra(detail?.extra ? JSON.parse(detail.extra) : null);
-                          } catch {
-                            setSelectedExtra(detail?.extra || null);
-                          }
-                        })
-                        .catch(() => {});
-                    }}
-                  >
+        {isMobile ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            {currentDevices.map((d) => (
+              <div
+                key={d.ip}
+                style={{
+                  border: '1px solid rgba(0,0,0,0.06)',
+                  borderRadius: 18,
+                  padding: 14,
+                  background: 'rgba(255,255,255,0.7)',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <div style={{ width: 44, height: 44, borderRadius: 14, background: 'rgba(0,0,0,0.04)', display: 'flex', alignItems: 'center', justifyContent: 'center', flex: '0 0 auto' }}>
+                    {getIcon(d.type)}
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
+                      <div style={{ fontWeight: 800, fontSize: 14, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {d.name}
+                      </div>
+                      <Badge status={d.status} text={t(`common.${d.status}`)} />
+                    </div>
+                    <div style={{ marginTop: 4, fontSize: 12, color: 'var(--text-secondary)', display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                      <span>IP：<span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{d.ip}</span></span>
+                      <span>厂商：<span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{d.vendor}</span></span>
+                    </div>
+                    <div style={{ marginTop: 4, fontSize: 12, color: 'var(--text-secondary)' }}>
+                      MAC：<span style={{ color: 'var(--text-primary)', fontFamily: 'monospace', fontWeight: 700 }}>{d.mac}</span>
+                    </div>
+                  </div>
+                </div>
+                <div style={{ marginTop: 12 }}>
+                  <Button variant="outline" style={{ width: '100%' }} onClick={() => openDetail(d)}>
                     {t('common.detail')}
                   </Button>
-                </td>
-              </tr>
+                </div>
+              </div>
             ))}
-          </tbody>
-        </table>
+          </div>
+        ) : (
+          <div className="table-wrap">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th style={{ width: 50 }}></th>
+                  <th>{t('devices.name')}</th>
+                  <th>{t('devices.ip')}</th>
+                  <th>{t('devices.mac')}</th>
+                  <th>{t('devices.vendor')}</th>
+                  <th>{t('devices.status')}</th>
+                  <th>{t('common.action')}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {currentDevices.map(d => (
+                  <tr key={d.ip}>
+                    <td style={{ color: '#666' }}>{getIcon(d.type)}</td>
+                    <td style={{ fontWeight: 500 }}>{d.name}</td>
+                    <td>{d.ip}</td>
+                    <td style={{ fontFamily: 'monospace', color: '#666' }}>{d.mac}</td>
+                    <td>{d.vendor}</td>
+                    <td><Badge status={d.status} text={t(`common.${d.status}`)} /></td>
+                    <td>
+                      <Button
+                        variant="ghost"
+                        style={{ padding: '4px 8px', fontSize: 13 }}
+                        onClick={() => openDetail(d)}
+                      >
+                        {t('common.detail')}
+                      </Button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
         {totalPages > 1 && (
           <Pagination
             currentPage={currentPage}

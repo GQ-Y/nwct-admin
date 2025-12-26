@@ -363,7 +363,7 @@ export const InitWizard: React.FC = () => {
   };
 
   return (
-    <div style={{ minHeight: '100vh', background: 'var(--bg-body)', padding: '40px 20px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+    <div style={{ minHeight: '100vh', background: 'var(--bg-body)', padding: '24px 16px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
       <div style={{ width: '100%', maxWidth: '1000px' }}>
         <div className="wizard-steps">
           {steps.map((s, i) => (
@@ -381,7 +381,7 @@ export const InitWizard: React.FC = () => {
           ))}
         </div>
         
-        <Card style={{ minHeight: 600, display: 'flex', flexDirection: 'column' }}>
+        <Card style={{ minHeight: 0, display: 'flex', flexDirection: 'column' }}>
           <div style={{ flex: 1, padding: '20px' }}>
             {renderContent()}
           </div>

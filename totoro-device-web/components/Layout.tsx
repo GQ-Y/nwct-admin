@@ -1,9 +1,10 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, Server, Activity, Settings, Globe, Shield, Languages, LogOut, KeyRound, X, Radar } from 'lucide-react';
+import { LayoutDashboard, Server, Activity, Settings, Globe, Shield, Languages, LogOut, KeyRound, X, Radar, Menu } from 'lucide-react';
 import { useLanguage } from '../contexts/LanguageContext';
 import { useAuth } from '../contexts/AuthContext';
 import { api } from '../lib/api';
+import { useIsMobile } from '../lib/useIsMobile';
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -14,6 +15,8 @@ export const MainLayout: React.FC<LayoutProps> = ({ children }) => {
   const location = useLocation();
   const { t, language, setLanguage } = useLanguage();
   const { logout } = useAuth();
+  const isMobile = useIsMobile();
+  const [drawerOpen, setDrawerOpen] = useState(false);
   const [pwdOpen, setPwdOpen] = useState(false);
   const [oldPwd, setOldPwd] = useState('');
   const [newPwd, setNewPwd] = useState('');
@@ -42,6 +45,22 @@ export const MainLayout: React.FC<LayoutProps> = ({ children }) => {
   const toggleLanguage = () => {
     setLanguage(language === 'en' ? 'zh' : 'en');
   };
+
+  // 手机端：路由变更后自动关闭抽屉
+  useEffect(() => {
+    if (isMobile) setDrawerOpen(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.pathname, isMobile]);
+
+  // 手机端：抽屉打开时锁定背景滚动
+  useEffect(() => {
+    if (!isMobile) return;
+    const prev = document.body.style.overflow;
+    if (drawerOpen) document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, [drawerOpen, isMobile]);
 
   const canSubmitPwd = useMemo(() => {
     return Boolean(oldPwd.trim() && newPwd.trim() && confirmPwd.trim() && !pwdLoading);
@@ -92,7 +111,15 @@ export const MainLayout: React.FC<LayoutProps> = ({ children }) => {
 
   return (
     <div className="app-layout">
-      <aside className="sidebar">
+      {isMobile && drawerOpen ? (
+        <div
+          className="sidebar-overlay"
+          onClick={() => setDrawerOpen(false)}
+          onMouseDown={() => setDrawerOpen(false)}
+        />
+      ) : null}
+
+      <aside className={`sidebar ${isMobile ? 'sidebar-drawer' : ''} ${isMobile && drawerOpen ? 'is-open' : ''}`}>
         <div className="sidebar-logo">
           <div style={{ 
             width: 32, 
@@ -140,36 +167,108 @@ export const MainLayout: React.FC<LayoutProps> = ({ children }) => {
               >
                 <KeyRound size={18} />
               </button>
+              <button
+                className="btn btn-ghost"
+                style={{ width: 40, height: 40, padding: 0, borderRadius: '50%', color: 'var(--error)' }}
+                title={t('header.logout')}
+                onClick={handleLogout}
+              >
+                <LogOut size={18} />
+              </button>
            </div>
         </div>
       </aside>
       
       <main className="main-content">
         <header className="header">
-          <h1 style={{ margin: 0, fontSize: '24px', fontWeight: 700 }}>
-             {navItems.find(i => isActive(i.path))?.label || t('nav.dashboard')}
-          </h1>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '24px' }}>
-            <button onClick={toggleLanguage} className="btn btn-ghost" style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 16px' }}>
+          <div className="header-left">
+            {isMobile ? (
+              <button
+                className="btn btn-ghost mobile-only"
+                style={{ width: 40, height: 40, padding: 0, borderRadius: '50%' }}
+                onClick={() => setDrawerOpen((v) => !v)}
+                aria-label="打开菜单"
+                title="菜单"
+              >
+                <Menu size={20} />
+              </button>
+            ) : null}
+            <h1 style={{ margin: 0, fontSize: '24px', fontWeight: 700 }}>
+               {navItems.find(i => isActive(i.path))?.label || t('nav.dashboard')}
+            </h1>
+          </div>
+          <div className="header-right">
+            <button
+              onClick={toggleLanguage}
+              className="btn btn-ghost"
+              style={{
+                width: isMobile ? 40 : undefined,
+                height: isMobile ? 40 : undefined,
+                padding: isMobile ? 0 : '8px 16px',
+                borderRadius: isMobile ? '50%' : undefined,
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 6,
+              }}
+              title={language === 'en' ? '切换中文' : 'Switch to English'}
+              aria-label="切换语言"
+            >
               <Languages size={20} />
-              <span>{language === 'en' ? '中文' : 'English'}</span>
+              {!isMobile ? <span>{language === 'en' ? '中文' : 'English'}</span> : null}
             </button>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', background: 'rgba(65, 186, 65, 0.1)', padding: '6px 12px', borderRadius: '99px' }}>
-               <div style={{ width: 8, height: 8, background: '#41BA41', borderRadius: '50%' }}></div>
-               <span style={{ fontSize: 13, fontWeight: 600, color: '#41BA41' }}>{t('header.system_online')}</span>
-            </div>
-            <button onClick={handleLogout} className="btn btn-ghost" style={{ color: 'var(--error)', width: 40, height: 40, padding: 0, borderRadius: '50%' }} title={t('header.logout')}>
-              <LogOut size={20} />
-            </button>
+
+            {/* 移动端：在线状态用指示点；桌面端保留文字 pill */}
+            {isMobile ? (
+              <div
+                title={t('header.system_online')}
+                aria-label={t('header.system_online')}
+                style={{
+                  width: 10,
+                  height: 10,
+                  borderRadius: '50%',
+                  background: '#41BA41',
+                  boxShadow: '0 0 0 4px rgba(65, 186, 65, 0.14)',
+                }}
+              />
+            ) : (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', background: 'rgba(65, 186, 65, 0.1)', padding: '6px 12px', borderRadius: '99px' }}>
+                 <div style={{ width: 8, height: 8, background: '#41BA41', borderRadius: '50%' }}></div>
+                 <span style={{ fontSize: 13, fontWeight: 600, color: '#41BA41' }}>{t('header.system_online')}</span>
+              </div>
+            )}
+
+            {/* 退出在抽屉里提供；移动端 header 不再占位 */}
+            {!isMobile ? (
+              <button onClick={handleLogout} className="btn btn-ghost" style={{ color: 'var(--error)', width: 40, height: 40, padding: 0, borderRadius: '50%' }} title={t('header.logout')}>
+                <LogOut size={20} />
+              </button>
+            ) : null}
           </div>
         </header>
         <div className="page-content">
           {children}
         </div>
+
+        {/* 手机端底部导航：6 个核心入口（抽屉通过顶部汉堡打开） */}
+        <nav className="bottom-nav mobile-only" role="navigation" aria-label="底部导航">
+          <div className="bottom-nav-inner">
+            {navItems.map((item) => (
+              <NavLink
+                key={item.path}
+                to={item.path}
+                className={({ isActive }) => `bottom-nav-item ${isActive ? 'active' : ''}`}
+              >
+                <span className="bottom-nav-icon">{item.icon}</span>
+                <span className="bottom-nav-label">{item.label}</span>
+              </NavLink>
+            ))}
+          </div>
+        </nav>
       </main>
 
       {pwdOpen && (
-        <div className="modal-overlay" onMouseDown={() => setPwdOpen(false)}>
+        <div className="modal-overlay" onClick={() => setPwdOpen(false)} onMouseDown={() => setPwdOpen(false)}>
           <div
             className="card glass modal-panel"
             onMouseDown={(e) => e.stopPropagation()}

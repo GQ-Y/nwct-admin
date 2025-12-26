@@ -5,10 +5,12 @@ import { Activity, HardDrive, Cpu, Network } from 'lucide-react';
 import { useLanguage } from '../contexts/LanguageContext';
 import { api } from '../lib/api';
 import { useRealtime } from '../contexts/RealtimeContext';
+import { useIsMobile } from '../lib/useIsMobile';
 
 export const Dashboard: React.FC = () => {
   const { t } = useLanguage();
   const rt = useRealtime();
+  const isMobile = useIsMobile();
   const [fallbackInfo, setFallbackInfo] = useState<any>(null);
   const [fallbackFrp, setFallbackFrp] = useState<any>(null);
   const sys = rt.systemStatus || fallbackInfo;
@@ -131,6 +133,13 @@ export const Dashboard: React.FC = () => {
         </Card>
 
         <Card title={t('dashboard.recent_activity')}>
+           <div
+             style={{
+               maxHeight: isMobile ? 280 : undefined,
+               overflowY: isMobile ? 'auto' : undefined,
+               WebkitOverflowScrolling: 'touch' as any,
+             }}
+           >
            <ul style={{ padding: 0, margin: 0, listStyle: 'none' }}>
              {activities.map((a, idx) => {
                const ts = a?.timestamp ? new Date(a.timestamp) : null;
@@ -161,6 +170,7 @@ export const Dashboard: React.FC = () => {
                <li style={{ padding: '12px 0', color: '#8c8c8c', fontSize: 13 }}>暂无活动</li>
              ) : null}
            </ul>
+           </div>
         </Card>
       </div>
     </div>

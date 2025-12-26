@@ -60,16 +60,16 @@ export const Login: React.FC = () => {
         borderRadius: '50%'
       }} />
 
-       <div style={{ position: 'absolute', top: 32, right: 32, zIndex: 10 }}>
+       <div style={{ position: 'absolute', top: 16, right: 16, zIndex: 10 }}>
          <Button variant="ghost" onClick={() => setLanguage(language === 'en' ? 'zh' : 'en')}>
             <Languages size={20} style={{ marginRight: 8 }}/> {language === 'en' ? '中文' : 'English'}
          </Button>
        </div>
        
       <div className="glass" style={{ 
-        width: '440px', 
-        padding: '48px', 
-        borderRadius: '32px',
+        width: 'min(92vw, 440px)', 
+        padding: '32px', 
+        borderRadius: '24px',
         boxShadow: '0 8px 32px rgba(0, 0, 0, 0.08)',
         zIndex: 1
       }}>

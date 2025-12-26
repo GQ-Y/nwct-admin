@@ -3,12 +3,13 @@ import { Card, Button, Input } from '../components/UI';
 import { Activity, Globe, Zap, Radio, Terminal } from 'lucide-react';
 import { useLanguage } from '../contexts/LanguageContext';
 import { api } from '../lib/api';
+import { useIsMobile } from '../lib/useIsMobile';
 
-const ToolTab: React.FC<{ icon: any, label: string, active: boolean, onClick: () => void }> = ({ icon, label, active, onClick }) => (
+const ToolTab: React.FC<{ icon: any, label: string, active: boolean, onClick: () => void, compact?: boolean }> = ({ icon, label, active, onClick, compact }) => (
   <div 
     onClick={onClick}
     style={{ 
-      padding: '12px 24px', 
+      padding: compact ? '10px 14px' : '12px 24px', 
       cursor: 'pointer', 
       display: 'flex', 
       alignItems: 'center', 
@@ -18,11 +19,14 @@ const ToolTab: React.FC<{ icon: any, label: string, active: boolean, onClick: ()
       position: 'relative',
       transition: 'all 0.3s ease',
       borderRadius: '12px',
-      background: active ? 'rgba(10, 89, 247, 0.08)' : 'transparent'
+      background: active ? 'rgba(10, 89, 247, 0.08)' : 'transparent',
+      whiteSpace: 'nowrap',
+      userSelect: 'none',
+      WebkitTapHighlightColor: 'transparent' as any,
     }}
   >
     {icon} 
-    <span>{label}</span>
+    <span style={{ fontSize: compact ? 13 : 14 }}>{label}</span>
     {active && (
        <div style={{
           position: 'absolute',
@@ -40,6 +44,7 @@ const ToolTab: React.FC<{ icon: any, label: string, active: boolean, onClick: ()
 
 export const Tools: React.FC = () => {
   const { t } = useLanguage();
+  const isMobile = useIsMobile();
   const [activeTab, setActiveTab] = useState('ping');
   const [output, setOutput] = useState<string[]>([]);
   const [target, setTarget] = useState('');
@@ -178,22 +183,22 @@ export const Tools: React.FC = () => {
 
   return (
     <div>
-      <div style={{ 
-        display: 'flex', 
-        marginBottom: 32, 
-        background: 'rgba(255,255,255,0.6)', 
-        backdropFilter: 'blur(20px)',
-        padding: '6px',
-        borderRadius: '16px',
-        justifyContent: 'space-between',
-        gap: 8,
-        flexWrap: 'wrap'
-      }}>
-        <div style={{ display: 'flex', gap: 8 }}>
-            <ToolTab icon={<Activity size={18} />} label={t('tools.ping')} active={activeTab === 'ping'} onClick={() => setActiveTab('ping')} />
-            <ToolTab icon={<Globe size={18} />} label={t('tools.traceroute')} active={activeTab === 'trace'} onClick={() => setActiveTab('trace')} />
-            <ToolTab icon={<Zap size={18} />} label={t('tools.speedtest')} active={activeTab === 'speed'} onClick={() => setActiveTab('speed')} />
-            <ToolTab icon={<Radio size={18} />} label={t('tools.portscan')} active={activeTab === 'port'} onClick={() => setActiveTab('port')} />
+      <div
+        className="tools-tabs"
+        style={{ 
+          display: 'flex', 
+          marginBottom: 32, 
+          background: 'rgba(255,255,255,0.6)', 
+          backdropFilter: 'blur(20px)',
+          padding: '6px',
+          borderRadius: '16px',
+        }}
+      >
+        <div className="tools-tabs-inner">
+            <ToolTab compact={isMobile} icon={<Activity size={18} />} label={t('tools.ping')} active={activeTab === 'ping'} onClick={() => setActiveTab('ping')} />
+            <ToolTab compact={isMobile} icon={<Globe size={18} />} label={t('tools.traceroute')} active={activeTab === 'trace'} onClick={() => setActiveTab('trace')} />
+            <ToolTab compact={isMobile} icon={<Zap size={18} />} label={t('tools.speedtest')} active={activeTab === 'speed'} onClick={() => setActiveTab('speed')} />
+            <ToolTab compact={isMobile} icon={<Radio size={18} />} label={t('tools.portscan')} active={activeTab === 'port'} onClick={() => setActiveTab('port')} />
         </div>
       </div>
 
@@ -207,14 +212,14 @@ export const Tools: React.FC = () => {
             }
             glass
         >
-           <div style={{ display: 'flex', gap: 16, marginBottom: 24 }}>
+           <div style={{ display: 'flex', gap: 16, marginBottom: 24, flexDirection: isMobile ? 'column' : 'row' }}>
              <Input 
                 placeholder={activeTab === 'ping' ? t('tools.enter_ip') : t('tools.target')} 
                 value={target}
                 onChange={e => setTarget(e.target.value)}
                 style={{ flex: 1 }}
              />
-             <Button onClick={runTool} disabled={running} style={{ minWidth: 120 }}>
+             <Button onClick={runTool} disabled={running} style={isMobile ? ({ width: '100%' } as any) : { minWidth: 120 }}>
                {running ? t('common.loading') : t('common.start')}
              </Button>
            </div>

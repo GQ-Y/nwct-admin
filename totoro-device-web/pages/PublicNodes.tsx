@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { api, sanitizeErrorMessage } from "../lib/api";
 import { useLanguage } from "../contexts/LanguageContext";
 import { Toast } from "../components/Toast";
+import { useIsMobile } from "../lib/useIsMobile";
 
 type PublicNode = {
   node_id: string;
@@ -18,6 +19,7 @@ type PublicNode = {
 
 export const PublicNodesPage: React.FC = () => {
   const { t } = useLanguage();
+  const isMobile = useIsMobile();
   const [nodes, setNodes] = useState<PublicNode[]>([]);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -105,14 +107,14 @@ export const PublicNodesPage: React.FC = () => {
     <div className="page">
       <Toast open={toastOpen} type={toastType} message={toastMsg} onClose={() => setToastOpen(false)} />
       <div className="card glass" style={{ padding: 20, marginBottom: 16 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
           <div>
             <div style={{ fontSize: 18, fontWeight: 800 }}>{t("public_nodes.title")}</div>
             <div style={{ fontSize: 13, color: "var(--text-secondary)" }}>
               {t("public_nodes.total")} {nodes.length} {t("public_nodes.online")} {onlineCount}
             </div>
           </div>
-          <button className="btn btn-primary" onClick={load} disabled={loading}>
+          <button className="btn btn-primary" onClick={load} disabled={loading} style={isMobile ? ({ width: "100%" } as any) : undefined}>
             {loading ? t("common.loading") : t("public_nodes.refresh")}
           </button>
         </div>
@@ -125,6 +127,7 @@ export const PublicNodesPage: React.FC = () => {
               setConnectOpen(true);
             }}
             disabled={loading}
+            style={isMobile ? ({ width: "100%" } as any) : undefined}
           >
             {t("public_nodes.invite_connect")}
           </button>
@@ -188,6 +191,11 @@ export const PublicNodesPage: React.FC = () => {
       {connectOpen && (
         <div
           className="modal-overlay"
+          onClick={() => {
+            if (!connecting) {
+              setConnectOpen(false);
+            }
+          }}
           onMouseDown={() => {
             if (!connecting) {
               setConnectOpen(false);
