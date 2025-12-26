@@ -3,3 +3,13 @@
 totoro-device/nwct-client
 data/*
 **/node_modules/*
+bin/node.db
+bin/node.db-shm
+bin/node.db-wal
+bin/totoro-bridge
+bin/totoro-device
+bin/totoro-node
+totoro-bridge/bridge.db
+totoro-bridge/bridge.db-shm
+totoro-bridge/bridge.db-wal
+totoro-bridge/totoro-bridge
