@@ -1,13 +1,19 @@
 package bridgeapi
 
 import (
+	"bytes"
+	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/fs"
+	"mime"
 	"net/http"
 	"os"
+	"path"
 	"strconv"
 	"strings"
 	"time"
@@ -20,6 +26,8 @@ import (
 	"totoro-bridge/internal/ticket"
 
 	"github.com/gin-gonic/gin"
+	"github.com/shakinm/xlsReader/xls"
+	"github.com/xuri/excelize/v2"
 )
 
 func ticketTTL() time.Duration {
@@ -60,9 +68,43 @@ func NewRouter(st store.Store, opts Options) *gin.Engine {
 
 	api := &Router{store: st, opts: opts}
 
-	// 临时 Admin UI（内嵌静态页面）
+	// Admin UI（内嵌静态资源 + SPA fallback）
 	uiFS := bridgeui.DistFS()
 	r.GET("/", func(c *gin.Context) {
+		b, err := fs.ReadFile(uiFS, "index.html")
+		if err != nil {
+			apiresp.Fail(c, http.StatusNotFound, 404, "index.html not found")
+			return
+		}
+		c.Data(http.StatusOK, "text/html; charset=utf-8", b)
+	})
+	r.NoRoute(func(c *gin.Context) {
+		// 不要影响 API：NoRoute 只会在未匹配任何路由时触发
+		reqPath := strings.TrimPrefix(strings.TrimSpace(c.Request.URL.Path), "/")
+		reqPath = path.Clean(reqPath)
+		reqPath = strings.TrimPrefix(reqPath, "/")
+		if reqPath == "" || reqPath == "." {
+			// 兜底到 /
+			b, err := fs.ReadFile(uiFS, "index.html")
+			if err != nil {
+				apiresp.Fail(c, http.StatusNotFound, 404, "index.html not found")
+				return
+			}
+			c.Data(http.StatusOK, "text/html; charset=utf-8", b)
+			return
+		}
+
+		// 先尝试按静态资源返回（例如 /assets/*.js /styles.css）
+		if b, err := fs.ReadFile(uiFS, reqPath); err == nil {
+			ctype := mime.TypeByExtension(path.Ext(reqPath))
+			if strings.TrimSpace(ctype) == "" {
+				ctype = http.DetectContentType(b)
+			}
+			c.Data(http.StatusOK, ctype, b)
+			return
+		}
+
+		// 找不到静态资源：作为 SPA 路由，返回 index.html
 		b, err := fs.ReadFile(uiFS, "index.html")
 		if err != nil {
 			apiresp.Fail(c, http.StatusNotFound, 404, "index.html not found")
@@ -85,6 +127,8 @@ func NewRouter(st store.Store, opts Options) *gin.Engine {
 		v1.POST("/nodes/invites/revoke", api.handleNodeInviteRevoke)
 
 		// admin
+		v1.POST("/admin/login", api.handleAdminLogin)
+		v1.POST("/admin/password/change", api.authAdmin(), api.handleAdminChangePassword)
 		v1.POST("/admin/nodes/upsert", api.authAdmin(), api.handleAdminUpsertNode)
 		v1.POST("/admin/official_nodes/upsert", api.authAdmin(), api.handleAdminUpsertOfficialNode)
 		v1.POST("/admin/official_nodes/delete", api.authAdmin(), api.handleAdminDeleteOfficialNode)
@@ -98,9 +142,95 @@ func NewRouter(st store.Store, opts Options) *gin.Engine {
 	return r
 }
 
+type adminTokenPayload struct {
+	Exp int64  `json:"exp"`
+	N   string `json:"n"`
+}
+
+func (a *Router) issueAdminToken(ttl time.Duration) (string, time.Time, error) {
+	if strings.TrimSpace(a.opts.AdminKey) == "" {
+		return "", time.Time{}, fmt.Errorf("admin not configured")
+	}
+	if ttl <= 0 {
+		ttl = 24 * time.Hour
+	}
+	if ttl > 30*24*time.Hour {
+		ttl = 30 * 24 * time.Hour
+	}
+	exp := time.Now().Add(ttl).UTC()
+	nonce := make([]byte, 16)
+	_, _ = rand.Read(nonce)
+	p := adminTokenPayload{Exp: exp.Unix(), N: base64.RawURLEncoding.EncodeToString(nonce)}
+	b, _ := json.Marshal(p)
+	payloadB64 := base64.RawURLEncoding.EncodeToString(b)
+	mac := hmac.New(sha256.New, []byte(strings.TrimSpace(a.opts.AdminKey)))
+	_, _ = mac.Write([]byte(payloadB64))
+	sigB64 := base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
+	return payloadB64 + "." + sigB64, exp, nil
+}
+
+func (a *Router) verifyAdminToken(tok string) bool {
+	tok = strings.TrimSpace(tok)
+	if tok == "" {
+		return false
+	}
+	parts := strings.Split(tok, ".")
+	if len(parts) != 2 {
+		return false
+	}
+	payloadB64 := parts[0]
+	sigB64 := parts[1]
+	sig, err := base64.RawURLEncoding.DecodeString(sigB64)
+	if err != nil {
+		return false
+	}
+	if strings.TrimSpace(a.opts.AdminKey) == "" {
+		return false
+	}
+	mac := hmac.New(sha256.New, []byte(strings.TrimSpace(a.opts.AdminKey)))
+	_, _ = mac.Write([]byte(payloadB64))
+	expect := mac.Sum(nil)
+	if !hmac.Equal(sig, expect) {
+		return false
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(payloadB64)
+	if err != nil {
+		return false
+	}
+	var p adminTokenPayload
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return false
+	}
+	if p.Exp <= 0 {
+		return false
+	}
+	if time.Now().UTC().Unix() > p.Exp {
+		return false
+	}
+	return true
+}
+
+func (a *Router) getBearerToken(c *gin.Context) string {
+	// Authorization: Bearer <token>
+	h := strings.TrimSpace(c.GetHeader("Authorization"))
+	if h != "" {
+		parts := strings.SplitN(h, " ", 2)
+		if len(parts) == 2 && strings.EqualFold(strings.TrimSpace(parts[0]), "bearer") {
+			return strings.TrimSpace(parts[1])
+		}
+	}
+	// fallback: X-Admin-Token
+	return strings.TrimSpace(c.GetHeader("X-Admin-Token"))
+}
+
 func (a *Router) authDeviceOrAdmin() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// admin 直接放行
+		// admin 直接放行：token 或 admin key
+		if a.verifyAdminToken(a.getBearerToken(c)) {
+			c.Set("is_admin", true)
+			c.Next()
+			return
+		}
 		if strings.TrimSpace(a.opts.AdminKey) != "" && strings.TrimSpace(c.GetHeader("X-Admin-Key")) == strings.TrimSpace(a.opts.AdminKey) {
 			c.Set("is_admin", true)
 			c.Next()
@@ -130,6 +260,12 @@ func (a *Router) authAdmin() gin.HandlerFunc {
 			c.Abort()
 			return
 		}
+		// token 优先
+		if a.verifyAdminToken(a.getBearerToken(c)) {
+			c.Next()
+			return
+		}
+		// 兼容：直接使用 admin key（仅用于紧急/兼容）
 		if strings.TrimSpace(c.GetHeader("X-Admin-Key")) != strings.TrimSpace(a.opts.AdminKey) {
 			apiresp.Fail(c, http.StatusUnauthorized, 401, "unauthorized")
 			c.Abort()
@@ -137,6 +273,90 @@ func (a *Router) authAdmin() gin.HandlerFunc {
 		}
 		c.Next()
 	}
+}
+
+type adminLoginReq struct {
+	AdminKey string `json:"admin_key"`
+	Password string `json:"password"`
+}
+
+func (a *Router) handleAdminLogin(c *gin.Context) {
+	if strings.TrimSpace(a.opts.AdminKey) == "" {
+		apiresp.Fail(c, http.StatusForbidden, 403, "admin not configured")
+		return
+	}
+	var req adminLoginReq
+	_ = c.ShouldBindJSON(&req)
+	k := strings.TrimSpace(req.AdminKey)
+	if k == "" {
+		k = strings.TrimSpace(req.Password)
+	}
+	if k == "" {
+		k = strings.TrimSpace(c.GetHeader("X-Admin-Key"))
+	}
+	if k == "" {
+		apiresp.Fail(c, http.StatusBadRequest, 400, "password required")
+		return
+	}
+	if k != strings.TrimSpace(a.opts.AdminKey) {
+		apiresp.Fail(c, http.StatusUnauthorized, 401, "unauthorized")
+		return
+	}
+	tok, exp, err := a.issueAdminToken(7 * 24 * time.Hour)
+	if err != nil {
+		apiresp.Fail(c, http.StatusInternalServerError, 500, err.Error())
+		return
+	}
+	apiresp.OK(c, gin.H{
+		"token":      tok,
+		"expires_at": exp.UTC().Format(time.RFC3339),
+	})
+}
+
+type adminChangePasswordReq struct {
+	OldPassword string `json:"old_password"`
+	NewPassword string `json:"new_password"`
+}
+
+func (a *Router) handleAdminChangePassword(c *gin.Context) {
+	if strings.TrimSpace(a.opts.AdminKey) == "" {
+		apiresp.Fail(c, http.StatusForbidden, 403, "admin not configured")
+		return
+	}
+	var req adminChangePasswordReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		apiresp.Fail(c, http.StatusBadRequest, 400, err.Error())
+		return
+	}
+	oldPwd := strings.TrimSpace(req.OldPassword)
+	newPwd := strings.TrimSpace(req.NewPassword)
+	if oldPwd == "" || newPwd == "" {
+		apiresp.Fail(c, http.StatusBadRequest, 400, "old_password/new_password required")
+		return
+	}
+	if oldPwd != strings.TrimSpace(a.opts.AdminKey) {
+		apiresp.Fail(c, http.StatusUnauthorized, 401, "unauthorized")
+		return
+	}
+	if len(newPwd) < 8 {
+		apiresp.Fail(c, http.StatusBadRequest, 400, "password too short")
+		return
+	}
+	if len(newPwd) > 128 {
+		apiresp.Fail(c, http.StatusBadRequest, 400, "password too long")
+		return
+	}
+	// 直接更新内存中的“管理密码”（无需账号系统；重启后若使用环境变量启动，则会回到环境变量的值）
+	a.opts.AdminKey = newPwd
+	tok, exp, err := a.issueAdminToken(7 * 24 * time.Hour)
+	if err != nil {
+		apiresp.Fail(c, http.StatusInternalServerError, 500, err.Error())
+		return
+	}
+	apiresp.OK(c, gin.H{
+		"token":      tok,
+		"expires_at": exp.UTC().Format(time.RFC3339),
+	})
 }
 
 func (a *Router) handlePublicNodes(c *gin.Context) {
@@ -768,6 +988,36 @@ func (a *Router) handleAdminListWhitelist(c *gin.Context) {
 // 格式（每行）：device_id[,enabled][,note]
 // enabled 支持：1/0/true/false/yes/no/on/off
 func (a *Router) handleAdminImportWhitelist(c *gin.Context) {
+	ct := strings.ToLower(strings.TrimSpace(c.ContentType()))
+	// 1) 文件上传导入（Excel）
+	if strings.HasPrefix(ct, "multipart/form-data") {
+		fh, err := c.FormFile("file")
+		if err != nil {
+			apiresp.Fail(c, http.StatusBadRequest, 400, "file required")
+			return
+		}
+		name := strings.ToLower(strings.TrimSpace(fh.Filename))
+		file, err := fh.Open()
+		if err != nil {
+			apiresp.Fail(c, http.StatusBadRequest, 400, "open file failed")
+			return
+		}
+		defer file.Close()
+		b, err := io.ReadAll(file)
+		if err != nil {
+			apiresp.Fail(c, http.StatusBadRequest, 400, "read file failed")
+			return
+		}
+		okCount, skipCount, err := a.importWhitelistFromExcel(name, b)
+		if err != nil {
+			apiresp.Fail(c, http.StatusBadRequest, 400, err.Error())
+			return
+		}
+		apiresp.OK(c, gin.H{"imported": okCount, "skipped": skipCount})
+		return
+	}
+
+	// 2) 文本导入（CSV/纯文本）
 	var req struct {
 		CSV string `json:"csv" binding:"required"`
 	}
@@ -823,6 +1073,104 @@ func (a *Router) handleAdminImportWhitelist(c *gin.Context) {
 		okCount++
 	}
 	apiresp.OK(c, gin.H{"imported": okCount, "skipped": skipCount})
+}
+
+func (a *Router) importWhitelistFromExcel(filename string, content []byte) (int, int, error) {
+	filename = strings.ToLower(strings.TrimSpace(filename))
+	if len(content) == 0 {
+		return 0, 0, fmt.Errorf("file empty")
+	}
+
+	// xlsx
+	if strings.HasSuffix(filename, ".xlsx") || strings.HasSuffix(filename, ".xlsm") {
+		f, err := excelize.OpenReader(bytes.NewReader(content))
+		if err != nil {
+			return 0, 0, fmt.Errorf("invalid xlsx")
+		}
+		defer func() { _ = f.Close() }()
+		sheets := f.GetSheetList()
+		if len(sheets) == 0 {
+			return 0, 0, fmt.Errorf("empty sheet")
+		}
+		rows, err := f.GetRows(sheets[0])
+		if err != nil {
+			return 0, 0, fmt.Errorf("read sheet failed")
+		}
+		ok, skip := a.importWhitelistFromTable(rows)
+		return ok, skip, nil
+	}
+
+	// xls（老格式）：落地到临时文件再解析
+	if strings.HasSuffix(filename, ".xls") {
+		wb, err := xls.OpenReader(bytes.NewReader(content))
+		if err != nil {
+			return 0, 0, fmt.Errorf("invalid xls")
+		}
+		sheets := wb.GetSheets()
+		if len(sheets) == 0 {
+			return 0, 0, fmt.Errorf("empty sheet")
+		}
+		rows := sheets[0].GetRows()
+		table := make([][]string, 0, len(rows))
+		for _, r := range rows {
+			cols := make([]string, 0, 3)
+			for c := 0; c < 3; c++ {
+				if c < len(r.GetCols()) {
+					cols = append(cols, strings.TrimSpace(r.GetCols()[c].GetString()))
+				} else {
+					cols = append(cols, "")
+				}
+			}
+			table = append(table, cols)
+		}
+		ok, skip := a.importWhitelistFromTable(table)
+		return ok, skip, nil
+	}
+
+	return 0, 0, fmt.Errorf("unsupported file type")
+}
+
+func (a *Router) importWhitelistFromTable(rows [][]string) (int, int) {
+	okCount := 0
+	skipCount := 0
+	for i, parts := range rows {
+		if len(parts) == 0 {
+			continue
+		}
+		// 允许首行表头：device_id / 设备ID
+		if i == 0 {
+			h := strings.ToLower(strings.TrimSpace(parts[0]))
+			if strings.Contains(h, "device") || strings.Contains(h, "设备") {
+				continue
+			}
+		}
+		deviceID := ""
+		enabled := true
+		note := ""
+
+		if len(parts) >= 1 {
+			deviceID = strings.TrimSpace(parts[0])
+		}
+		if deviceID == "" {
+			skipCount++
+			continue
+		}
+		if len(parts) >= 2 {
+			if v := strings.TrimSpace(parts[1]); v != "" {
+				enabled = parseBoolLoose(v, true)
+			}
+		}
+		if len(parts) >= 3 {
+			note = strings.TrimSpace(parts[2])
+		}
+		if err := a.store.UpsertDeviceWhitelist(deviceID, "", enabled, note); err != nil {
+			// 不中断整批导入：按跳过计数
+			skipCount++
+			continue
+		}
+		okCount++
+	}
+	return okCount, skipCount
 }
 
 func splitCSVLoose(line string) []string {
