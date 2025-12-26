@@ -83,6 +83,8 @@ func (s *Server) initRouter() {
 
 		// 系统管理
 		api.GET("/system/info", s.authMiddleware(), s.handleSystemInfo)
+		// Totoro 云服务状态（桥梁连通性/官方节点数量/设备号/固件版本）
+		api.GET("/cloud/status", s.authMiddleware(), s.handleCloudStatus)
 		api.POST("/system/restart", s.authMiddleware(), s.handleSystemRestart)
 		api.GET("/system/logs", s.authMiddleware(), s.handleSystemLogs)
 		api.POST("/system/logs/clear", s.authMiddleware(), s.handleSystemLogsClear)
@@ -116,6 +118,7 @@ func (s *Server) initRouter() {
 		// FRP管理
 		api.GET("/frp/status", s.authMiddleware(), s.handleFRPStatus)
 		api.POST("/frp/connect", s.authMiddleware(), s.handleFRPConnect)
+		api.POST("/frp/sync", s.authMiddleware(), s.handleFRPSync)
 		api.POST("/frp/config", s.authMiddleware(), s.handleFRPConfigSave)
 		api.POST("/frp/builtin/use", s.authMiddleware(), s.handleFRPBuiltinUse)
 		api.POST("/frp/disconnect", s.authMiddleware(), s.handleFRPDisconnect)

@@ -34,6 +34,12 @@
     <div class="row">
       <label>Public</label>
       <input id="public" placeholder="true/false" />
+      <label>HTTP</label>
+      <input id="httpEnabled" placeholder="true/false" />
+      <label>HTTPS</label>
+      <input id="httpsEnabled" placeholder="true/false" />
+      <label>根域名</label>
+      <input id="domainSuffix" placeholder="例如 frpc.example.com" />
       <label>描述</label>
       <input id="desc" placeholder="节点描述（纯文本）" />
       <label>BridgeURL</label>
@@ -73,6 +79,9 @@
             document.getElementById('public').value = String(!!j.data.public);
             document.getElementById('bridgeUrl').value = j.data.bridge_url || '';
             document.getElementById('desc').value = j.data.description || '';
+            document.getElementById('domainSuffix').value = j.data.domain_suffix || '';
+            document.getElementById('httpEnabled').value = String(!!j.data.http_enabled);
+            document.getElementById('httpsEnabled').value = String(!!j.data.https_enabled);
           }
         } catch (e) { setOut(String(e)); }
       }
@@ -81,7 +90,10 @@
           const body = {
             public: document.getElementById('public').value.trim() === 'true',
             bridge_url: document.getElementById('bridgeUrl').value.trim(),
-            description: document.getElementById('desc').value.trim()
+            description: document.getElementById('desc').value.trim(),
+            domain_suffix: document.getElementById('domainSuffix').value.trim(),
+            http_enabled: document.getElementById('httpEnabled').value.trim() === 'true',
+            https_enabled: document.getElementById('httpsEnabled').value.trim() === 'true'
           };
           const res = await fetch('/api/v1/node/config', { method:'POST', headers: headers(), body: JSON.stringify(body) });
           const j = await res.json();

@@ -4,12 +4,38 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
 
 	"totoro-device/internal/cryptobox"
 )
+
+func readBridgeErr(resp *http.Response) string {
+	if resp == nil || resp.Body == nil {
+		return ""
+	}
+	b, _ := io.ReadAll(resp.Body)
+	if len(b) == 0 {
+		return ""
+	}
+	var wrap struct {
+		Code    int             `json:"code"`
+		Message string          `json:"message"`
+		Data    json.RawMessage `json:"data"`
+	}
+	if err := json.Unmarshal(b, &wrap); err == nil {
+		if strings.TrimSpace(wrap.Message) != "" {
+			return strings.TrimSpace(wrap.Message)
+		}
+	}
+	s := strings.TrimSpace(string(b))
+	if len(s) > 240 {
+		s = s[:240]
+	}
+	return s
+}
 
 type Client struct {
 	BaseURL          string
@@ -198,6 +224,8 @@ type RedeemResp struct {
 			Proto string `json:"proto"`
 		} `json:"endpoints"`
 		DomainSuffix string `json:"domain_suffix"`
+		HTTPEnabled  bool   `json:"http_enabled"`
+		HTTPSEnabled bool   `json:"https_enabled"`
 	} `json:"node"`
 	ConnectionTicket string `json:"connection_ticket"`
 	ExpiresAt        string `json:"expires_at"`
@@ -212,6 +240,8 @@ type PublicNodeConnectResp struct {
 			Proto string `json:"proto"`
 		} `json:"endpoints"`
 		DomainSuffix string `json:"domain_suffix"`
+		HTTPEnabled  bool   `json:"http_enabled"`
+		HTTPSEnabled bool   `json:"https_enabled"`
 	} `json:"node"`
 	ConnectionTicket string `json:"connection_ticket"`
 	ExpiresAt        string `json:"expires_at"`
@@ -231,6 +261,10 @@ func (c *Client) ConnectPublicNode(nodeID string) (*PublicNodeConnectResp, error
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode/100 != 2 {
+		msg := readBridgeErr(resp)
+		if msg != "" {
+			return nil, fmt.Errorf("bridge public connect status=%s msg=%s", resp.Status, msg)
+		}
 		return nil, fmt.Errorf("bridge public connect status=%s", resp.Status)
 	}
 	var wrap struct {
@@ -261,6 +295,8 @@ type PreviewResp struct {
 			Proto string `json:"proto"`
 		} `json:"endpoints"`
 		DomainSuffix string `json:"domain_suffix"`
+		HTTPEnabled  bool   `json:"http_enabled"`
+		HTTPSEnabled bool   `json:"https_enabled"`
 	} `json:"node"`
 	InviteID  string `json:"invite_id"`
 	ExpiresAt string `json:"expires_at"`
@@ -280,6 +316,10 @@ func (c *Client) PreviewInvite(code string) (*PreviewResp, error) {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode/100 != 2 {
+		msg := readBridgeErr(resp)
+		if msg != "" {
+			return nil, fmt.Errorf("bridge preview status=%s msg=%s", resp.Status, msg)
+		}
 		return nil, fmt.Errorf("bridge preview status=%s", resp.Status)
 	}
 	var wrap struct {
@@ -315,6 +355,10 @@ func (c *Client) RedeemInvite(code string) (*RedeemResp, error) {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode/100 != 2 {
+		msg := readBridgeErr(resp)
+		if msg != "" {
+			return nil, fmt.Errorf("bridge redeem status=%s msg=%s", resp.Status, msg)
+		}
 		return nil, fmt.Errorf("bridge redeem status=%s", resp.Status)
 	}
 	var wrap struct {

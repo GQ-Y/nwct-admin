@@ -208,7 +208,7 @@ func main() {
 		}
 	}()
 
-	// 节点上报（仅当 public=true 且 bridge_url 已配置）
+	// 节点上报（只要 bridge_url 已配置就上报；public=false 也要上报以便桥梁及时更新状态/能力字段，并避免 public 列表残留旧数据）
 	go func() {
 		ticker := time.NewTicker(10 * time.Second)
 		defer ticker.Stop()
@@ -223,9 +223,6 @@ func main() {
 		for range ticker.C {
 			cfg, _, err := st.GetNodeConfig()
 			if err != nil {
-				continue
-			}
-			if !cfg.Public {
 				continue
 			}
 			if strings.TrimSpace(cfg.BridgeURL) == "" {
@@ -251,6 +248,8 @@ func main() {
 					return out
 				}(),
 				DomainSuffix: cfg.DomainSuffix,
+				HTTPEnabled:  cfg.HTTPEnabled,
+				HTTPSEnabled: cfg.HTTPSEnabled,
 				Version: map[string]any{
 					"totoro_node": "0.0.1",
 				},

@@ -33,6 +33,8 @@ type NodeConfig struct {
 	Tags         []string `json:"tags"`
 	BridgeURL    string   `json:"bridge_url"`
 	DomainSuffix string   `json:"domain_suffix"`
+	HTTPEnabled  bool     `json:"http_enabled"`
+	HTTPSEnabled bool     `json:"https_enabled"`
 	Endpoints    []NodeEndpoint `json:"endpoints"`
 }
 
@@ -79,6 +81,8 @@ CREATE TABLE IF NOT EXISTS node_config (
   tags_json TEXT NOT NULL DEFAULT '[]',
   bridge_url TEXT NOT NULL DEFAULT '',
   domain_suffix TEXT NOT NULL DEFAULT '',
+  http_enabled INTEGER NOT NULL DEFAULT 0,
+  https_enabled INTEGER NOT NULL DEFAULT 0,
   endpoints_json TEXT NOT NULL DEFAULT '[]',
   updated_at INTEGER NOT NULL DEFAULT 0
 );
@@ -98,6 +102,8 @@ CREATE INDEX IF NOT EXISTS idx_invites_revoked ON invites(revoked);
 	_, err := s.db.Exec(schema)
 	// 兼容旧库：补列
 	_, _ = s.db.Exec(`ALTER TABLE node_config ADD COLUMN description TEXT NOT NULL DEFAULT ''`)
+	_, _ = s.db.Exec(`ALTER TABLE node_config ADD COLUMN http_enabled INTEGER NOT NULL DEFAULT 0`)
+	_, _ = s.db.Exec(`ALTER TABLE node_config ADD COLUMN https_enabled INTEGER NOT NULL DEFAULT 0`)
 	return err
 }
 
@@ -116,29 +122,33 @@ func (s *Store) InitNodeIfEmpty(cfg NodeConfig) error {
 
 	// 仅当为空时插入
 	_, err := s.db.Exec(`
-INSERT INTO node_config(id,node_id,node_key_hash,public,name,description,region,isp,tags_json,bridge_url,domain_suffix,endpoints_json,updated_at)
-VALUES(1,?,?,?,?,?,?,?,?,?,?,?,?)
+INSERT INTO node_config(id,node_id,node_key_hash,public,name,description,region,isp,tags_json,bridge_url,domain_suffix,http_enabled,https_enabled,endpoints_json,updated_at)
+VALUES(1,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 ON CONFLICT(id) DO NOTHING
-`, cfg.NodeID, hashKey(cfg.NodeKey), boolToInt(cfg.Public), cfg.Name, cfg.Description, cfg.Region, cfg.ISP, string(tags), cfg.BridgeURL, cfg.DomainSuffix, string(eps), now)
+`, cfg.NodeID, hashKey(cfg.NodeKey), boolToInt(cfg.Public), cfg.Name, cfg.Description, cfg.Region, cfg.ISP, string(tags), cfg.BridgeURL, cfg.DomainSuffix, boolToInt(cfg.HTTPEnabled), boolToInt(cfg.HTTPSEnabled), string(eps), now)
 	return err
 }
 
 func (s *Store) GetNodeConfig() (NodeConfig, string, error) {
 	row := s.db.QueryRow(`
-SELECT node_id,node_key_hash,public,name,description,region,isp,tags_json,bridge_url,domain_suffix,endpoints_json
+SELECT node_id,node_key_hash,public,name,description,region,isp,tags_json,bridge_url,domain_suffix,http_enabled,https_enabled,endpoints_json
 FROM node_config WHERE id=1
 `)
 	var (
 		cfg          NodeConfig
 		keyHash      string
 		publicInt    int
+		httpInt      int
+		httpsInt     int
 		tagsJSON     string
 		endpointsJSON string
 	)
-	if err := row.Scan(&cfg.NodeID, &keyHash, &publicInt, &cfg.Name, &cfg.Description, &cfg.Region, &cfg.ISP, &tagsJSON, &cfg.BridgeURL, &cfg.DomainSuffix, &endpointsJSON); err != nil {
+	if err := row.Scan(&cfg.NodeID, &keyHash, &publicInt, &cfg.Name, &cfg.Description, &cfg.Region, &cfg.ISP, &tagsJSON, &cfg.BridgeURL, &cfg.DomainSuffix, &httpInt, &httpsInt, &endpointsJSON); err != nil {
 		return NodeConfig{}, "", err
 	}
 	cfg.Public = publicInt == 1
+	cfg.HTTPEnabled = httpInt == 1
+	cfg.HTTPSEnabled = httpsInt == 1
 	_ = json.Unmarshal([]byte(tagsJSON), &cfg.Tags)
 	_ = json.Unmarshal([]byte(endpointsJSON), &cfg.Endpoints)
 	return cfg, keyHash, nil
@@ -176,6 +186,9 @@ func (s *Store) UpdateNodeConfig(adminNodeKey string, patch NodeConfig) error {
 	if patch.DomainSuffix != "" {
 		cfg.DomainSuffix = patch.DomainSuffix
 	}
+	// bool 需要显式 patch：这里要求调用方始终传（节点面板会传）
+	cfg.HTTPEnabled = patch.HTTPEnabled
+	cfg.HTTPSEnabled = patch.HTTPSEnabled
 	if patch.Endpoints != nil {
 		cfg.Endpoints = patch.Endpoints
 	}
@@ -187,9 +200,9 @@ func (s *Store) UpdateNodeConfig(adminNodeKey string, patch NodeConfig) error {
 	eps, _ := json.Marshal(cfg.Endpoints)
 	_, err = s.db.Exec(`
 UPDATE node_config
-SET public=?,name=?,description=?,region=?,isp=?,tags_json=?,bridge_url=?,domain_suffix=?,endpoints_json=?,updated_at=?
+SET public=?,name=?,description=?,region=?,isp=?,tags_json=?,bridge_url=?,domain_suffix=?,http_enabled=?,https_enabled=?,endpoints_json=?,updated_at=?
 WHERE id=1
-`, boolToInt(cfg.Public), cfg.Name, cfg.Description, cfg.Region, cfg.ISP, string(tags), cfg.BridgeURL, cfg.DomainSuffix, string(eps), now)
+`, boolToInt(cfg.Public), cfg.Name, cfg.Description, cfg.Region, cfg.ISP, string(tags), cfg.BridgeURL, cfg.DomainSuffix, boolToInt(cfg.HTTPEnabled), boolToInt(cfg.HTTPSEnabled), string(eps), now)
 	return err
 }
 

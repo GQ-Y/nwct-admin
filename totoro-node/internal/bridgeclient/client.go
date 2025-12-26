@@ -28,6 +28,8 @@ type Heartbeat struct {
 	Endpoints    []any         `json:"endpoints"`
 	NodeAPI      string        `json:"node_api,omitempty"`
 	DomainSuffix string        `json:"domain_suffix"`
+	HTTPEnabled  bool          `json:"http_enabled"`
+	HTTPSEnabled bool          `json:"https_enabled"`
 	TCPPortPool  map[string]int `json:"tcp_port_pool,omitempty"`
 	UDPPortPool  map[string]int `json:"udp_port_pool,omitempty"`
 	Version      any           `json:"version,omitempty"`

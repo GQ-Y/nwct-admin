@@ -26,11 +26,9 @@ export const PublicNodesPage: React.FC = () => {
   const [toastType, setToastType] = useState<"success" | "error" | "info">("info");
   const [toastMsg, setToastMsg] = useState("");
 
-  // 自定义弹窗：公开节点一键连接（输入邀请码 -> 解析预览 -> 确认连接）
+  // 自定义弹窗：邀请码连接（确认=解析+连接）
   const [connectOpen, setConnectOpen] = useState(false);
   const [connectNode, setConnectNode] = useState<PublicNode | null>(null);
-  const [resolving, setResolving] = useState(false);
-  const [resolved, setResolved] = useState<any | null>(null);
   const [connecting, setConnecting] = useState(false);
 
   const onlineCount = useMemo(() => nodes.filter((n) => n.status === "online").length, [nodes]);
@@ -64,46 +62,36 @@ export const PublicNodesPage: React.FC = () => {
     }
   };
 
-  const resolveInvite = async () => {
-    const code = inviteCode.trim();
-    if (!code) {
-      setErr("请填写邀请码");
-      return;
-    }
-    setResolving(true);
-    setErr(null);
-    try {
-      const data = await api.inviteResolve({ code });
-      setResolved(data);
-    } catch (e: any) {
-      setResolved(null);
-      setErr(e?.message || "解析失败");
-    } finally {
-      setResolving(false);
-    }
+  const mapInviteError = (raw: string): string => {
+    const s = String(raw || "");
+    // 后端常见：msg=invalid_code / invalid / expired / revoked / exhausted / not_public / node_offline ...
+    if (/invalid_code/i.test(s) || /invalid/i.test(s)) return "邀请码错误";
+    if (/expired/i.test(s)) return "邀请码已过期";
+    if (/revoked/i.test(s)) return "邀请码已失效";
+    if (/exhausted/i.test(s)) return "邀请码次数已用尽";
+    return "邀请码不可用，请检查后重试";
   };
 
   const confirmConnect = async () => {
     const code = inviteCode.trim();
     if (!code) {
-      setErr("请填写邀请码");
+      setErr("请输入正确有效的邀请码");
       return;
     }
     setConnecting(true);
     setErr(null);
     try {
+      // 由后端完成“解析邀请码 -> 换票据 -> 连接并启动”
       await api.inviteConnect({ code });
       setConnectOpen(false);
       setConnectNode(null);
-      setResolved(null);
       setToastType("success");
       setToastMsg("连接成功，已自动启动 FRPC。");
       setToastOpen(true);
       load();
     } catch (e: any) {
-      setToastType("error");
-      setToastMsg(e?.message || "连接失败");
-      setToastOpen(true);
+      // 弹窗内提示，避免直接把后端原始错误暴露给用户
+      setErr(mapInviteError(e?.message || ""));
     } finally {
       setConnecting(false);
     }
@@ -133,7 +121,6 @@ export const PublicNodesPage: React.FC = () => {
             className="btn btn-outline"
             onClick={() => {
               setConnectNode(null);
-              setResolved(null);
               setErr(null);
               setConnectOpen(true);
             }}
@@ -202,9 +189,8 @@ export const PublicNodesPage: React.FC = () => {
         <div
           className="modal-overlay"
           onMouseDown={() => {
-            if (!connecting && !resolving) {
+            if (!connecting) {
               setConnectOpen(false);
-              setResolved(null);
             }
           }}
         >
@@ -215,7 +201,7 @@ export const PublicNodesPage: React.FC = () => {
                 className="btn btn-ghost"
                 style={{ width: 40, height: 40, padding: 0, borderRadius: "50%" }}
                 onClick={() => setConnectOpen(false)}
-                disabled={connecting || resolving}
+                disabled={connecting}
                 title="关闭"
               >
                 ×
@@ -233,30 +219,13 @@ export const PublicNodesPage: React.FC = () => {
               </div>
 
               <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", marginTop: 6 }}>
-                <button className="btn btn-outline" onClick={() => setConnectOpen(false)} disabled={connecting || resolving}>
+                <button className="btn btn-outline" onClick={() => setConnectOpen(false)} disabled={connecting}>
                   {t("common.cancel")}
                 </button>
-                <button className="btn btn-outline" onClick={resolveInvite} disabled={connecting || resolving || !inviteCode.trim()}>
-                  {resolving ? t("public_nodes.resolving") : t("public_nodes.resolve")}
-                </button>
-                <button className="btn btn-primary" onClick={confirmConnect} disabled={connecting || resolving || !resolved}>
+                <button className="btn btn-primary" onClick={confirmConnect} disabled={connecting || !inviteCode.trim()}>
                   {connecting ? t("public_nodes.connecting") : t("public_nodes.confirm")}
                 </button>
               </div>
-
-              {resolved && (
-                <div style={{ marginTop: 10 }}>
-                  <div style={{ fontSize: 13, fontWeight: 800, marginBottom: 8 }}>{t("public_nodes.preview_title")}</div>
-                  <div className="card" style={{ padding: 12, background: "rgba(0,0,0,0.02)" }}>
-                    <div style={{ fontSize: 13, color: "var(--text-primary)", marginBottom: 6 }}>
-                      <strong>expires_at：</strong> {resolved.expires_at}
-                    </div>
-                    <div style={{ fontSize: 13, color: "var(--text-primary)", marginBottom: 6 }}>
-                      <strong>node_id：</strong> {resolved?.node?.node_id || "-"}
-                    </div>
-                  </div>
-                </div>
-              )}
 
               {err && (
                 <div style={{ marginTop: 10, color: "var(--error)", fontWeight: 700, fontSize: 13 }}>{err}</div>

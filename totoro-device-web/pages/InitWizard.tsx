@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Check, Wifi, Globe, Lock, Server, ArrowLeft, ArrowRight } from 'lucide-react';
+import { Check, Wifi, Globe, Lock, ArrowLeft, ArrowRight } from 'lucide-react';
 import { Button, Input, Card, Alert, Select } from '../components/UI';
 import { useLanguage } from '../contexts/LanguageContext';
 import { api, getToken } from '../lib/api';
@@ -40,7 +40,6 @@ export const InitWizard: React.FC = () => {
   const steps = [
     { title: t('wizard.step_welcome'), icon: <Globe size={20} /> },
     { title: t('wizard.step_network'), icon: <Wifi size={20} /> },
-    { title: t('wizard.step_services'), icon: <Server size={20} /> },
     { title: t('wizard.step_security'), icon: <Lock size={20} /> },
     { title: t('wizard.step_finish'), icon: <Check size={20} /> },
   ];
@@ -324,15 +323,6 @@ export const InitWizard: React.FC = () => {
         );
       case 2:
         return (
-          <div className="grid-2">
-             <Card title={t('wizard.nps_config')} className="glass" style={{ margin: 0 }}>
-                <div style={{ marginBottom: 24 }}><label style={{ display: 'block', marginBottom: 10, fontWeight: 500 }}>{t('wizard.server_addr')}</label><Input placeholder="nps.example.com" /></div>
-                <div><label style={{ display: 'block', marginBottom: 10, fontWeight: 500 }}>{t('wizard.vkey')}</label><Input placeholder="Secret Key" /></div>
-             </Card>
-          </div>
-        );
-      case 3:
-        return (
           <div style={{ maxWidth: 480, margin: '0 auto' }}>
             <h3 style={{ marginBottom: 32, textAlign: 'center', fontSize: '24px' }}>{t('wizard.admin_security')}</h3>
             {error && <Alert type="error">{error}</Alert>}
@@ -354,7 +344,7 @@ export const InitWizard: React.FC = () => {
             </div>
           </div>
         );
-      case 4:
+      case 3:
          return (
            <div style={{ textAlign: 'center', padding: '60px 0' }}>
              <div style={{ width: 88, height: 88, background: 'rgba(65, 186, 65, 0.1)', borderRadius: '50%', color: 'var(--success)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 32px' }}>
@@ -396,7 +386,7 @@ export const InitWizard: React.FC = () => {
             {renderContent()}
           </div>
 
-          {currentStep > 0 && currentStep < 4 && (
+          {currentStep > 0 && currentStep < steps.length - 1 && (
             <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 40, paddingTop: 32, borderTop: '1px solid #F0F0F0' }}>
               <Button variant="ghost" onClick={prev}><ArrowLeft size={20} /> {t('wizard.prev')}</Button>
               <Button onClick={next}>{t('wizard.next')} <ArrowRight size={20} /></Button>

@@ -84,6 +84,7 @@ export const api = {
   configGet: () => request<any>("/api/v1/config"),
 
   systemInfo: () => request<any>("/api/v1/system/info"),
+  cloudStatus: () => request<any>("/api/v1/cloud/status"),
   systemLogs: (lines: number = 200) =>
     request<any>(`/api/v1/system/logs?lines=${encodeURIComponent(String(lines))}`),
   systemLogsClear: () => request<any>("/api/v1/system/logs/clear", { method: "POST", body: "{}" }),
@@ -125,6 +126,7 @@ export const api = {
     domain_suffix?: string;
   }) => request<any>("/api/v1/frp/config", { method: "POST", body: JSON.stringify(req || {}) }),
   frpUseBuiltin: () => request<any>("/api/v1/frp/builtin/use", { method: "POST", body: "{}" }),
+  frpSync: () => request<any>("/api/v1/frp/sync", { method: "POST", body: "{}" }),
   frpConnect: (req?: {
     server?: string;
     token?: string;

@@ -234,6 +234,16 @@ CREATE TABLE IF NOT EXISTS invites (
   updated_at INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_invites_node ON invites(node_id, updated_at);
+
+-- 每个邀请码与设备的绑定：同一设备可重复续票，不重复消耗 uses
+CREATE TABLE IF NOT EXISTS invite_device_grants (
+  invite_id TEXT NOT NULL,
+  device_id TEXT NOT NULL,
+  created_at INTEGER NOT NULL DEFAULT 0,
+  updated_at INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY(invite_id, device_id)
+);
+CREATE INDEX IF NOT EXISTS idx_invite_device_grants_device ON invite_device_grants(device_id, updated_at);
 `
 	if _, err := s.db.Exec(schema); err != nil {
 		return err
@@ -560,10 +570,13 @@ WHERE node_id=? AND invite_id=?
 }
 
 func (s *SQLiteStore) RedeemInvite(deviceID string, code string) (PublicNode, string, string, int, error) {
-	_ = strings.TrimSpace(deviceID) // currently not used for policy; reserved for future
+	deviceID = strings.TrimSpace(deviceID)
 	code = strings.TrimSpace(code)
 	if code == "" {
 		return PublicNode{}, "", "", 0, fmt.Errorf("code required")
+	}
+	if deviceID == "" {
+		return PublicNode{}, "", "", 0, fmt.Errorf("device_id required")
 	}
 	now := time.Now().Unix()
 	// transactional: check + increment used
@@ -594,11 +607,29 @@ WHERE code_hash=?
 		return PublicNode{}, "", "", 0, fmt.Errorf("expired")
 	}
 	if maxUses > 0 && used >= maxUses {
-		return PublicNode{}, "", "", 0, fmt.Errorf("exhausted")
+		// 已耗尽：如果该 device 已绑定过这个 invite，仍允许续票
+		var dummy int
+		if err := tx.QueryRow(`SELECT 1 FROM invite_device_grants WHERE invite_id=? AND device_id=?`, inviteID, deviceID).Scan(&dummy); err == nil {
+			// ok: already granted
+		} else {
+			return PublicNode{}, "", "", 0, fmt.Errorf("exhausted")
+		}
 	}
-	_, err = tx.Exec(`UPDATE invites SET used=used+1, updated_at=? WHERE invite_id=?`, now, inviteID)
-	if err != nil {
-		return PublicNode{}, "", "", 0, err
+	// grant 绑定：首次兑换才会 used+1；后续同 device 续票不再消耗
+	already := 0
+	_ = tx.QueryRow(`SELECT 1 FROM invite_device_grants WHERE invite_id=? AND device_id=?`, inviteID, deviceID).Scan(&already)
+	if already != 1 {
+		// 先插入 grant，再 used+1
+		if _, err := tx.Exec(`INSERT INTO invite_device_grants(invite_id,device_id,created_at,updated_at) VALUES(?,?,?,?)`, inviteID, deviceID, now, now); err != nil {
+			return PublicNode{}, "", "", 0, err
+		}
+		if _, err := tx.Exec(`UPDATE invites SET used=used+1, updated_at=? WHERE invite_id=?`, now, inviteID); err != nil {
+			return PublicNode{}, "", "", 0, err
+		}
+	} else {
+		// 仅刷新 grant 的更新时间，方便审计
+		_, _ = tx.Exec(`UPDATE invite_device_grants SET updated_at=? WHERE invite_id=? AND device_id=?`, now, inviteID, deviceID)
+		_, _ = tx.Exec(`UPDATE invites SET updated_at=? WHERE invite_id=?`, now, inviteID)
 	}
 	if err := tx.Commit(); err != nil {
 		return PublicNode{}, "", "", 0, err
@@ -624,10 +655,13 @@ WHERE code_hash=?
 }
 
 func (s *SQLiteStore) PreviewInvite(deviceID string, code string) (PublicNode, string, int64, error) {
-	_ = strings.TrimSpace(deviceID) // reserved
+	deviceID = strings.TrimSpace(deviceID)
 	code = strings.TrimSpace(code)
 	if code == "" {
 		return PublicNode{}, "", 0, fmt.Errorf("code required")
+	}
+	if deviceID == "" {
+		return PublicNode{}, "", 0, fmt.Errorf("device_id required")
 	}
 	now := time.Now().Unix()
 	row := s.db.QueryRow(`
@@ -651,7 +685,11 @@ WHERE code_hash=?
 		return PublicNode{}, "", 0, fmt.Errorf("expired")
 	}
 	if maxUses > 0 && used >= maxUses {
-		return PublicNode{}, "", 0, fmt.Errorf("exhausted")
+		// 已耗尽：如果该 device 已绑定过这个 invite，仍允许预览（用于断网恢复续票/重连）
+		var dummy int
+		if err := s.db.QueryRow(`SELECT 1 FROM invite_device_grants WHERE invite_id=? AND device_id=?`, inviteID, deviceID).Scan(&dummy); err != nil {
+			return PublicNode{}, "", 0, fmt.Errorf("exhausted")
+		}
 	}
 	n, err := s.getNodeByID(nodeID)
 	if err != nil {

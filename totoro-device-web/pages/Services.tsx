@@ -14,6 +14,7 @@ export const FRPPage: React.FC = () => {
   const [tunnels, setTunnels] = useState<any[]>([]);
   const [server, setServer] = useState('');
   const [token, setToken] = useState('');
+  const [frpMode, setFrpMode] = useState<string>("");
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [domainSuffix, setDomainSuffix] = useState('frpc.zyckj.club');
   const [httpEnabled, setHttpEnabled] = useState(false);
@@ -21,6 +22,8 @@ export const FRPPage: React.FC = () => {
   const [toastOpen, setToastOpen] = useState(false);
   const [toastType, setToastType] = useState<"success" | "error" | "info">("info");
   const [toastMsg, setToastMsg] = useState("");
+
+  const [cloud, setCloud] = useState<any>(null);
   
   // 隧道管理相关状态
   const [showTunnelModal, setShowTunnelModal] = useState(false);
@@ -50,6 +53,24 @@ export const FRPPage: React.FC = () => {
   }, []);
 
   useEffect(() => {
+    let stopped = false;
+    const tick = async () => {
+      try {
+        const s = await api.cloudStatus();
+        if (!stopped) setCloud(s);
+      } catch (e: any) {
+        if (!stopped) setCloud({ ok: false, error: e?.message || String(e) });
+      }
+    };
+    tick();
+    const t = window.setInterval(tick, 5000);
+    return () => {
+      stopped = true;
+      window.clearInterval(t);
+    };
+  }, []);
+
+  useEffect(() => {
     if (rt.frpStatus) setStatus(rt.frpStatus);
   }, [rt.frpStatus]);
 
@@ -67,6 +88,7 @@ export const FRPPage: React.FC = () => {
     try {
       // 读取后端配置：获取默认域名后缀
       const cfg = await api.configGet();
+      setFrpMode(String(cfg?.frp_server?.mode || ""));
       const ds = (cfg?.frp_server?.domain_suffix || '').trim();
       if (ds) setDomainSuffix(ds.replace(/^\./, ''));
       setHttpEnabled(!!cfg?.frp_server?.http_enabled);
@@ -79,6 +101,26 @@ export const FRPPage: React.FC = () => {
       setTunnels(tt?.tunnels || []);
     } catch {
       // ignore
+    }
+  };
+
+  const refreshWithBridgeSync = async () => {
+    setLoading(true);
+    try {
+      // 仅在“已连接且非手动模式”时才从桥梁同步节点能力配置
+      if (connected && frpMode && frpMode !== "manual") {
+        await api.frpSync();
+      }
+      await refresh();
+      setToastType("success");
+      setToastMsg("已刷新。");
+      setToastOpen(true);
+    } catch (e: any) {
+      setToastType("error");
+      setToastMsg(e?.message || String(e));
+      setToastOpen(true);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -295,8 +337,11 @@ export const FRPPage: React.FC = () => {
   return (
     <div>
       <Toast open={toastOpen} type={toastType} message={toastMsg} onClose={() => setToastOpen(false)} />
+      <style>{`
+        @keyframes totoroPing { 0%{ transform: scale(0.85); opacity: 0.75; } 70%{ transform: scale(1.8); opacity: 0; } 100%{ transform: scale(1.8); opacity: 0; } }
+      `}</style>
       <div className="grid-2" style={{ marginBottom: 24 }}>
-        <Card title="FRP 连接">
+        <Card title="隧道穿透">
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24 }}>
              <div style={{ display: 'flex', gap: 16 }}>
                <div style={{ 
@@ -329,7 +374,7 @@ export const FRPPage: React.FC = () => {
               <Input value={token} onChange={(e) => setToken((e.target as any).value)} type="password" placeholder="token" />
             </div>
             <div style={{ marginTop: 12, display: "flex", gap: 8 }}>
-              <Button variant="ghost" onClick={refresh} disabled={loading}>{t('frp.refresh')}</Button>
+              <Button variant="ghost" onClick={refreshWithBridgeSync} disabled={loading}>{t('frp.refresh')}</Button>
               <Button variant="outline" onClick={useBuiltin} disabled={loading}>
                 {t('frp.use_builtin')}
               </Button>
@@ -357,6 +402,83 @@ export const FRPPage: React.FC = () => {
                         <Activity size={24} color="var(--primary)" />
                     </div>
                 </div>
+             </Card>
+
+             <Card title="Totoro 云服务状态">
+               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+                 <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                   <div style={{ position: "relative", width: 14, height: 14 }}>
+                     <div
+                       style={{
+                         position: "absolute",
+                         inset: 0,
+                         borderRadius: 999,
+                         background: cloud?.ok ? "#41BA41" : "#EF4444",
+                         boxShadow: cloud?.ok ? "0 0 0 4px rgba(65,186,65,0.14)" : "0 0 0 4px rgba(239,68,68,0.14)",
+                       }}
+                     />
+                     <div
+                       style={{
+                         position: "absolute",
+                         inset: 0,
+                         borderRadius: 999,
+                         background: cloud?.ok ? "rgba(65,186,65,0.40)" : "rgba(239,68,68,0.40)",
+                         animation: "totoroPing 1.6s ease-out infinite",
+                       }}
+                     />
+                   </div>
+                   <div>
+                     <div style={{ fontWeight: 700, fontSize: 14 }}>
+                       {cloud?.ok ? "在线" : "离线"}
+                     </div>
+                     <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>
+                       {cloud?.ok ? "正常" : (cloud?.error || "异常")}
+                     </div>
+                   </div>
+                 </div>
+                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                   <div
+                     style={{
+                       padding: "6px 10px",
+                       borderRadius: 999,
+                       background: "rgba(0,0,0,0.04)",
+                       color: "var(--text-secondary)",
+                       fontSize: 12,
+                       lineHeight: 1.2,
+                       whiteSpace: "nowrap",
+                     }}
+                   >
+                     设备号 <span style={{ color: "var(--text-primary)", fontWeight: 800, marginLeft: 6 }}>{cloud?.device_id || "-"}</span>
+                   </div>
+                   <div
+                     style={{
+                       padding: "6px 10px",
+                       borderRadius: 999,
+                       background: "rgba(0,0,0,0.04)",
+                       color: "var(--text-secondary)",
+                       fontSize: 12,
+                       lineHeight: 1.2,
+                       whiteSpace: "nowrap",
+                     }}
+                   >
+                     固件 <span style={{ color: "var(--text-primary)", fontWeight: 800, marginLeft: 6 }}>{cloud?.firmware_version || "-"}</span>
+                   </div>
+                   <div
+                     style={{
+                       padding: "6px 10px",
+                       borderRadius: 999,
+                       background: cloud?.ok ? "rgba(10,89,247,0.10)" : "rgba(239,68,68,0.10)",
+                       color: cloud?.ok ? "var(--primary)" : "var(--error)",
+                       fontSize: 12,
+                       lineHeight: 1.2,
+                       whiteSpace: "nowrap",
+                       fontWeight: 800,
+                     }}
+                   >
+                     {typeof cloud?.official_nodes === "number" ? `${cloud.official_nodes}个云节点` : "-"}
+                   </div>
+                 </div>
+               </div>
              </Card>
 
              <div className="grid-2" style={{ gap: 24 }}>
