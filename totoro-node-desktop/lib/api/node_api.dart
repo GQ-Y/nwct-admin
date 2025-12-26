@@ -86,6 +86,45 @@ class CreateInviteResult {
   }
 }
 
+class InviteItem {
+  InviteItem({
+    required this.inviteId,
+    required this.code,
+    required this.revoked,
+    required this.createdAt,
+    required this.expiresAt,
+    required this.maxUses,
+    required this.used,
+    required this.scopeJson,
+  });
+
+  final String inviteId;
+  final String code;
+  final bool revoked;
+  final String createdAt;
+  final String expiresAt;
+  final int maxUses;
+  final int used;
+  final String scopeJson;
+
+  factory InviteItem.fromJson(Map<String, dynamic> j) {
+    return InviteItem(
+      inviteId: (j['invite_id'] ?? '').toString(),
+      code: (j['code'] ?? '').toString(),
+      revoked: j['revoked'] == true,
+      createdAt: (j['created_at'] ?? '').toString(),
+      expiresAt: (j['expires_at'] ?? '').toString(),
+      maxUses: (j['max_uses'] is int)
+          ? (j['max_uses'] as int)
+          : int.tryParse('${j['max_uses']}') ?? 0,
+      used: (j['used'] is int)
+          ? (j['used'] as int)
+          : int.tryParse('${j['used']}') ?? 0,
+      scopeJson: (j['scope_json'] ?? '').toString(),
+    );
+  }
+}
+
 class NodeApiClient {
   NodeApiClient({
     required this.baseUrl,
@@ -216,6 +255,41 @@ class NodeApiClient {
       );
     }
     throw ApiException(message: '生成邀请码响应格式错误', httpStatus: res.statusCode);
+  }
+
+  Future<List<InviteItem>> listInvites({
+    int limit = 200,
+    bool includeRevoked = true,
+  }) async {
+    final res = await http.get(
+      _uri('/api/v1/node/invites').replace(
+        queryParameters: <String, String>{
+          'limit': '$limit',
+          'include_revoked': includeRevoked ? '1' : '0',
+        },
+      ),
+      headers: _headers(),
+    );
+    final data = _unwrapData<dynamic>(res);
+    if (data is Map) {
+      final m = data.map((k, v) => MapEntry(k.toString(), v));
+      final items = m['invites'];
+      if (items is List) {
+        return items
+            .whereType<Map>()
+            .map(
+              (e) => InviteItem.fromJson(
+                e.map((k, v) => MapEntry(k.toString(), v)),
+              ),
+            )
+            .toList(growable: false);
+      }
+      if (items is List<Map<String, dynamic>>) {
+        return items.map(InviteItem.fromJson).toList(growable: false);
+      }
+      return const <InviteItem>[];
+    }
+    throw ApiException(message: '邀请码列表响应格式错误', httpStatus: res.statusCode);
   }
 
   Future<Map<String, dynamic>> revokeInvite({required String inviteId}) async {

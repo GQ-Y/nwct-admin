@@ -27,6 +27,7 @@ class AppController extends ChangeNotifier {
 
   NodeConfig? config;
   CreateInviteResult? lastInvite;
+  List<InviteItem> invites = const [];
 
   int inviteTtlSeconds = 86400;
   int inviteMaxUses = 50;
@@ -206,6 +207,8 @@ class AppController extends ChangeNotifier {
         scopeJson: '{}',
       );
       lastInvite = res;
+      // 刷新列表（列表由节点侧本地记录生成）
+      invites = await _api().listInvites(limit: 200, includeRevoked: true);
       _setOutput({
         'code': 0,
         'data': {
@@ -227,7 +230,21 @@ class AppController extends ChangeNotifier {
     notifyListeners();
     try {
       final out = await _api().revokeInvite(inviteId: inviteId);
+      invites = await _api().listInvites(limit: 200, includeRevoked: true);
       _setOutput({'code': 0, 'data': out});
+    } catch (e) {
+      _setOutput(_errToOut(e));
+    } finally {
+      loading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> refreshInvites() async {
+    loading = true;
+    notifyListeners();
+    try {
+      invites = await _api().listInvites(limit: 200, includeRevoked: true);
     } catch (e) {
       _setOutput(_errToOut(e));
     } finally {

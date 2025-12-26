@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path"
+	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -92,6 +93,7 @@ func NewRouter(st *store.Store, opts Options) *gin.Engine {
 	{
 		v1.GET("/node/config", api.authAdmin(), api.getNodeConfig)
 		v1.POST("/node/config", api.authAdmin(), api.updateNodeConfig)
+		v1.GET("/node/invites", api.authAdmin(), api.listInvites)
 		v1.POST("/node/invites", api.authAdmin(), api.createInvite)
 		v1.POST("/node/invites/revoke", api.authAdmin(), api.revokeInvite)
 
@@ -154,6 +156,20 @@ func (a *API) updateNodeConfig(c *gin.Context) {
 	apiresp.OK(c, gin.H{"updated": true})
 }
 
+func (a *API) listInvites(c *gin.Context) {
+	limit, _ := strconv.Atoi(strings.TrimSpace(c.Query("limit")))
+	includeRevoked := true
+	if strings.TrimSpace(c.Query("include_revoked")) == "0" {
+		includeRevoked = false
+	}
+	items, err := a.st.ListInvites(limit, includeRevoked)
+	if err != nil {
+		apiresp.Fail(c, http.StatusInternalServerError, 500, err.Error())
+		return
+	}
+	apiresp.OK(c, gin.H{"invites": items})
+}
+
 type createInviteReq struct {
 	TTLSeconds int    `json:"ttl_seconds"`
 	MaxUses    int    `json:"max_uses"`
@@ -166,7 +182,7 @@ func (a *API) createInvite(c *gin.Context) {
 		apiresp.Fail(c, http.StatusBadRequest, 400, err.Error())
 		return
 	}
-	cfg, _, err := a.st.GetNodeConfig()
+	cfg, keyHash, err := a.st.GetNodeConfig()
 	if err != nil {
 		apiresp.Fail(c, http.StatusInternalServerError, 500, err.Error())
 		return
@@ -184,6 +200,11 @@ func (a *API) createInvite(c *gin.Context) {
 		apiresp.Fail(c, http.StatusUnauthorized, 401, "missing X-Node-Key")
 		return
 	}
+	// 校验 node_key（与更新配置一致）
+	if storeHash(adminNodeKey) != keyHash {
+		apiresp.Fail(c, http.StatusForbidden, 403, "node_key invalid")
+		return
+	}
 	bc := &bridgeclient.Client{BaseURL: bridge, NodeID: cfg.NodeID, NodeKey: adminNodeKey}
 	out, err := bc.CreateInvite(bridgeclient.CreateInviteReq{
 		ScopeJSON:  strings.TrimSpace(req.ScopeJSON),
@@ -194,6 +215,14 @@ func (a *API) createInvite(c *gin.Context) {
 		apiresp.Fail(c, http.StatusBadGateway, 502, err.Error())
 		return
 	}
+	// 落库用于列表管理；失败不阻断 create（邀请码已经在 bridge 创建成功）
+	_ = a.st.UpsertInviteFromBridge(
+		strings.TrimSpace(out.InviteID),
+		strings.TrimSpace(out.Code),
+		strings.TrimSpace(out.ExpiresAt),
+		req.MaxUses,
+		strings.TrimSpace(req.ScopeJSON),
+	)
 	apiresp.OK(c, gin.H{
 		"invite_id":  strings.TrimSpace(out.InviteID),
 		"code":       strings.TrimSpace(out.Code),
@@ -215,7 +244,7 @@ func (a *API) revokeInvite(c *gin.Context) {
 		apiresp.Fail(c, http.StatusBadRequest, 400, "invite_id required")
 		return
 	}
-	cfg, _, err := a.st.GetNodeConfig()
+	cfg, keyHash, err := a.st.GetNodeConfig()
 	if err != nil {
 		apiresp.Fail(c, http.StatusInternalServerError, 500, err.Error())
 		return
@@ -233,11 +262,18 @@ func (a *API) revokeInvite(c *gin.Context) {
 		apiresp.Fail(c, http.StatusUnauthorized, 401, "missing X-Node-Key")
 		return
 	}
+	// 校验 node_key（与更新配置一致）
+	if storeHash(adminNodeKey) != keyHash {
+		apiresp.Fail(c, http.StatusForbidden, 403, "node_key invalid")
+		return
+	}
 	bc := &bridgeclient.Client{BaseURL: bridge, NodeID: cfg.NodeID, NodeKey: adminNodeKey}
 	if err := bc.RevokeInvite(strings.TrimSpace(req.InviteID)); err != nil {
 		apiresp.Fail(c, http.StatusBadGateway, 502, err.Error())
 		return
 	}
+	// 本地标记 revoked，便于列表展示
+	_ = a.st.RevokeInvite(strings.TrimSpace(req.InviteID))
 	kicked := kicker.KickInvite(strings.TrimSpace(req.InviteID))
 	apiresp.OK(c, gin.H{"revoked": true, "kicked": kicked})
 }

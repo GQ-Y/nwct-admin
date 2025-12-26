@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -89,6 +90,7 @@ CREATE TABLE IF NOT EXISTS node_config (
 
 CREATE TABLE IF NOT EXISTS invites (
   invite_id TEXT PRIMARY KEY,
+  code TEXT NOT NULL DEFAULT '',
   code_hash TEXT NOT NULL,
   revoked INTEGER NOT NULL DEFAULT 0,
   created_at INTEGER NOT NULL,
@@ -104,6 +106,7 @@ CREATE INDEX IF NOT EXISTS idx_invites_revoked ON invites(revoked);
 	_, _ = s.db.Exec(`ALTER TABLE node_config ADD COLUMN description TEXT NOT NULL DEFAULT ''`)
 	_, _ = s.db.Exec(`ALTER TABLE node_config ADD COLUMN http_enabled INTEGER NOT NULL DEFAULT 0`)
 	_, _ = s.db.Exec(`ALTER TABLE node_config ADD COLUMN https_enabled INTEGER NOT NULL DEFAULT 0`)
+	_, _ = s.db.Exec(`ALTER TABLE invites ADD COLUMN code TEXT NOT NULL DEFAULT ''`)
 	return err
 }
 
@@ -217,9 +220,9 @@ func (s *Store) CreateInvite(codeHash string, ttlSeconds int, maxUses int, scope
 		scopeJSON = "{}"
 	}
 	_, err := s.db.Exec(`
-INSERT INTO invites(invite_id,code_hash,revoked,created_at,expires_at,max_uses,used,scope_json)
-VALUES(?,?,?,?,?,?,?,?)
-`, invID, codeHash, 0, now, expiresAt, maxUses, 0, scopeJSON)
+INSERT INTO invites(invite_id,code,code_hash,revoked,created_at,expires_at,max_uses,used,scope_json)
+VALUES(?,?,?,?,?,?,?,?,?)
+`, invID, "", codeHash, 0, now, expiresAt, maxUses, 0, scopeJSON)
 	if err != nil {
 		return Invite{}, err
 	}
@@ -232,6 +235,109 @@ VALUES(?,?,?,?,?,?,?,?)
 		Used:      0,
 		ScopeJSON: scopeJSON,
 	}, nil
+}
+
+// UpsertInviteFromBridge 将 bridge 返回的邀请码信息落库，便于节点侧列表管理（撤销/查看）。
+func (s *Store) UpsertInviteFromBridge(inviteID string, code string, expiresAtRFC3339 string, maxUses int, scopeJSON string) error {
+	inviteID = strings.TrimSpace(inviteID)
+	if inviteID == "" {
+		return fmt.Errorf("invite_id required")
+	}
+	code = strings.TrimSpace(code)
+	if scopeJSON == "" {
+		scopeJSON = "{}"
+	}
+
+	now := time.Now().Unix()
+	expiresAt := int64(0)
+	if strings.TrimSpace(expiresAtRFC3339) != "" {
+		// 尝试 RFC3339；失败则尝试 unix 秒字符串
+		if t, err := time.Parse(time.RFC3339, strings.TrimSpace(expiresAtRFC3339)); err == nil {
+			expiresAt = t.UTC().Unix()
+		} else if n, nerr := strconv.ParseInt(strings.TrimSpace(expiresAtRFC3339), 10, 64); nerr == nil {
+			expiresAt = n
+		}
+	}
+
+	_, err := s.db.Exec(`
+INSERT INTO invites(invite_id,code,code_hash,revoked,created_at,expires_at,max_uses,used,scope_json)
+VALUES(?,?,?,?,?,?,?,?,?)
+ON CONFLICT(invite_id) DO UPDATE SET
+  code=excluded.code,
+  code_hash=excluded.code_hash,
+  expires_at=excluded.expires_at,
+  max_uses=excluded.max_uses,
+  scope_json=excluded.scope_json,
+  revoked=0
+`, inviteID, code, hashKey(code), 0, now, expiresAt, maxUses, 0, scopeJSON)
+	return err
+}
+
+func (s *Store) ListInvites(limit int, includeRevoked bool) ([]Invite, error) {
+	if limit <= 0 {
+		limit = 200
+	}
+	if limit > 2000 {
+		limit = 2000
+	}
+
+	var (
+		rows *sql.Rows
+		err  error
+	)
+	if includeRevoked {
+		rows, err = s.db.Query(`
+SELECT invite_id, code, revoked, created_at, expires_at, max_uses, used, scope_json
+FROM invites
+ORDER BY created_at DESC
+LIMIT ?
+`, limit)
+	} else {
+		rows, err = s.db.Query(`
+SELECT invite_id, code, revoked, created_at, expires_at, max_uses, used, scope_json
+FROM invites
+WHERE revoked=0
+ORDER BY created_at DESC
+LIMIT ?
+`, limit)
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []Invite
+	for rows.Next() {
+		var (
+			inv       Invite
+			revoked   int
+			createdAt int64
+			expiresAt int64
+		)
+		if err := rows.Scan(
+			&inv.InviteID,
+			&inv.Code,
+			&revoked,
+			&createdAt,
+			&expiresAt,
+			&inv.MaxUses,
+			&inv.Used,
+			&inv.ScopeJSON,
+		); err != nil {
+			return nil, err
+		}
+		inv.Revoked = revoked == 1
+		if createdAt > 0 {
+			inv.CreatedAt = time.Unix(createdAt, 0).UTC().Format(time.RFC3339)
+		}
+		if expiresAt > 0 {
+			inv.ExpiresAt = time.Unix(expiresAt, 0).UTC().Format(time.RFC3339)
+		} else {
+			inv.ExpiresAt = ""
+		}
+		out = append(out, inv)
+	}
+	return out, rows.Err()
 }
 
 type InviteResolveResult struct {

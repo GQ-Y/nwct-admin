@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../api/node_api.dart';
 import '../state/app_controller.dart';
 import '../theme/harmony_theme.dart';
 import '../widgets/harmony_widgets.dart';
@@ -21,20 +22,25 @@ class _InvitesPageState extends State<InvitesPage> {
   late final TextEditingController maxUses = TextEditingController(
     text: widget.controller.inviteMaxUses.toString(),
   );
-  final TextEditingController revokeId = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      await widget.controller.refreshInvites();
+    });
+  }
 
   @override
   void dispose() {
     ttl.dispose();
     maxUses.dispose();
-    revokeId.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     final c = widget.controller;
-    final last = c.lastInvite;
     return ListView(
       children: [
         HarmonyCard(
@@ -100,123 +106,146 @@ class _InvitesPageState extends State<InvitesPage> {
         ),
         const SizedBox(height: 16),
         HarmonyCard(
-          title: const Text('最近一次生成结果'),
-          child: last == null
-              ? const Text(
-                  '暂无',
-                  style: TextStyle(color: HarmonyColors.textSecondary),
-                )
-              : Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    _line(
-                      'invite_id',
-                      last.inviteId,
-                      onCopy: () async {
-                        await Clipboard.setData(
-                          ClipboardData(text: last.inviteId),
-                        );
-                        if (!context.mounted) return;
-                        showToast(context, '已复制 invite_id');
-                      },
-                    ),
-                    const SizedBox(height: 10),
-                    _line(
-                      'code',
-                      last.code,
-                      onCopy: () async {
-                        await Clipboard.setData(ClipboardData(text: last.code));
-                        if (!context.mounted) return;
-                        showToast(context, '已复制 code');
-                      },
-                    ),
-                    const SizedBox(height: 10),
-                    _line('expires_at', last.expiresAt),
-                    const SizedBox(height: 14),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: HarmonyButton(
-                            variant: HarmonyButtonVariant.outline,
-                            onPressed: c.loading
-                                ? null
-                                : () async {
-                                    await c.revokeInvite(last.inviteId);
-                                    if (!context.mounted) return;
-                                    showToast(context, '已撤销');
-                                  },
-                            child: const Text('撤销此邀请码'),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-        ),
-        const SizedBox(height: 16),
-        HarmonyCard(
-          title: const Text('撤销邀请码（删除）'),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              HarmonyField(
-                controller: revokeId,
-                label: 'invite_id',
-                hintText: '例如 inv_...',
-              ),
-              const SizedBox(height: 14),
-              HarmonyButton(
-                variant: HarmonyButtonVariant.outline,
-                onPressed: c.loading
-                    ? null
-                    : () async {
-                        await c.revokeInvite(revokeId.text);
-                        if (!context.mounted) return;
-                        showToast(context, '已撤销');
-                      },
-                child: const Text('撤销'),
-              ),
-              const SizedBox(height: 8),
-              const Text(
-                '说明：节点侧只提供“撤销 invite_id”接口；暂无列表接口。',
-                style: TextStyle(
-                  color: HarmonyColors.textSecondary,
-                  fontSize: 12,
-                ),
-              ),
-            ],
+          glass: true,
+          title: const Text('邀请码列表'),
+          extra: HarmonyButton(
+            variant: HarmonyButtonVariant.ghost,
+            onPressed: c.loading ? null : c.refreshInvites,
+            child: const Text('刷新'),
+          ),
+          child: _InviteList(
+            loading: c.loading,
+            items: c.invites,
+            onRevoke: (id) async {
+              await c.revokeInvite(id);
+              if (!context.mounted) return;
+              showToast(context, '已撤销');
+            },
+            onCopy: (label, text) async {
+              await Clipboard.setData(ClipboardData(text: text));
+              if (!context.mounted) return;
+              showToast(context, '已复制 $label');
+            },
           ),
         ),
       ],
     );
   }
+}
 
-  Widget _line(String k, String v, {Future<void> Function()? onCopy}) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        SizedBox(
-          width: 110,
-          child: Text(
-            k,
-            style: const TextStyle(
-              color: HarmonyColors.textSecondary,
-              fontSize: 12,
+class _InviteList extends StatelessWidget {
+  const _InviteList({
+    required this.loading,
+    required this.items,
+    required this.onRevoke,
+    required this.onCopy,
+  });
+
+  final bool loading;
+  final List<InviteItem> items;
+  final Future<void> Function(String inviteId) onRevoke;
+  final Future<void> Function(String label, String text) onCopy;
+
+  @override
+  Widget build(BuildContext context) {
+    if (items.isEmpty) {
+      return Text(
+        loading ? '加载中…' : '暂无（仅显示本节点通过 Node API 创建并记录的邀请记录）',
+        style: const TextStyle(color: HarmonyColors.textSecondary),
+      );
+    }
+    return ListView.separated(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      itemCount: items.length,
+      separatorBuilder: (_, __) => const Divider(height: 22),
+      itemBuilder: (context, i) {
+        final it = items[i];
+        final statusText = it.revoked ? '已撤销' : '可用';
+        final statusColor = it.revoked
+            ? HarmonyColors.textSecondary
+            : HarmonyColors.primary;
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    it.inviteId,
+                    style: const TextStyle(fontWeight: FontWeight.w800),
+                  ),
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 6,
+                  ),
+                  decoration: BoxDecoration(
+                    color: statusColor.withOpacity(0.12),
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                  child: Text(
+                    statusText,
+                    style: TextStyle(
+                      color: statusColor,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ],
             ),
-          ),
-        ),
-        Expanded(
-          child: Text(v, style: const TextStyle(fontWeight: FontWeight.w700)),
-        ),
-        if (onCopy != null) ...[
-          const SizedBox(width: 12),
-          HarmonyButton(
-            variant: HarmonyButtonVariant.ghost,
-            onPressed: () => onCopy(),
-            child: const Text('复制'),
-          ),
-        ],
-      ],
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 10,
+              runSpacing: 8,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                _kv('expires', it.expiresAt.isEmpty ? '-' : it.expiresAt),
+                _kv('max_uses', it.maxUses <= 0 ? '-' : '${it.maxUses}'),
+                if (it.code.trim().isNotEmpty) _kv('code', it.code.trim()),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                HarmonyButton(
+                  variant: HarmonyButtonVariant.ghost,
+                  onPressed: () => onCopy('invite_id', it.inviteId),
+                  child: const Text('复制ID'),
+                ),
+                const SizedBox(width: 8),
+                if (it.code.trim().isNotEmpty)
+                  HarmonyButton(
+                    variant: HarmonyButtonVariant.ghost,
+                    onPressed: () => onCopy('code', it.code.trim()),
+                    child: const Text('复制Code'),
+                  ),
+                const Spacer(),
+                HarmonyButton(
+                  variant: HarmonyButtonVariant.outline,
+                  onPressed: (loading || it.revoked)
+                      ? null
+                      : () => onRevoke(it.inviteId),
+                  child: const Text('撤销'),
+                ),
+              ],
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  static Widget _kv(String k, String v) {
+    return Text(
+      '$k: $v',
+      style: const TextStyle(
+        color: HarmonyColors.textSecondary,
+        fontSize: 12,
+        fontWeight: FontWeight.w600,
+      ),
     );
   }
 }
