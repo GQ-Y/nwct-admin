@@ -9,12 +9,12 @@ class AppController extends ChangeNotifier {
   static const _kBaseUrl = 'node_base_url';
   static const _kAdminKey = 'node_admin_key';
   static const _kNodeKey = 'node_node_key';
-  static const _kInviteTtl = 'invite_ttl_seconds';
+  static const _kInviteTtl = 'invite_ttl_seconds'; // legacy
+  static const _kInviteTtlDays = 'invite_ttl_days';
   static const _kInviteMaxUses = 'invite_max_uses';
   static const _kDraftPublic = 'draft_public';
   static const _kDraftHttp = 'draft_http_enabled';
   static const _kDraftHttps = 'draft_https_enabled';
-  static const _kDraftBridgeUrl = 'draft_bridge_url';
   static const _kDraftDomainSuffix = 'draft_domain_suffix';
   static const _kDraftDescription = 'draft_description';
 
@@ -29,13 +29,12 @@ class AppController extends ChangeNotifier {
   CreateInviteResult? lastInvite;
   List<InviteItem> invites = const [];
 
-  int inviteTtlSeconds = 86400;
+  int inviteTtlDays = 1;
   int inviteMaxUses = 50;
 
   bool draftPublic = false;
   bool draftHttpEnabled = false;
   bool draftHttpsEnabled = false;
-  String draftBridgeUrl = '';
   String draftDomainSuffix = '';
   String draftDescription = '';
 
@@ -44,13 +43,23 @@ class AppController extends ChangeNotifier {
     baseUrl = (p.getString(_kBaseUrl) ?? baseUrl).trim();
     adminKey = (p.getString(_kAdminKey) ?? '').trim();
     nodeKey = (p.getString(_kNodeKey) ?? '').trim();
-    inviteTtlSeconds = p.getInt(_kInviteTtl) ?? inviteTtlSeconds;
+    // prefer days; fallback from legacy seconds
+    inviteTtlDays = p.getInt(_kInviteTtlDays) ?? inviteTtlDays;
+    final legacySeconds = p.getInt(_kInviteTtl);
+    if (legacySeconds != null && (p.getInt(_kInviteTtlDays) == null)) {
+      // 86400 -> 1 day, 0 -> 0 (never expires)
+      if (legacySeconds <= 0) {
+        inviteTtlDays = 0;
+      } else {
+        inviteTtlDays = (legacySeconds / 86400).round();
+        if (inviteTtlDays <= 0) inviteTtlDays = 1;
+      }
+    }
     inviteMaxUses = p.getInt(_kInviteMaxUses) ?? inviteMaxUses;
 
     draftPublic = p.getBool(_kDraftPublic) ?? draftPublic;
     draftHttpEnabled = p.getBool(_kDraftHttp) ?? draftHttpEnabled;
     draftHttpsEnabled = p.getBool(_kDraftHttps) ?? draftHttpsEnabled;
-    draftBridgeUrl = (p.getString(_kDraftBridgeUrl) ?? draftBridgeUrl).trim();
     draftDomainSuffix = (p.getString(_kDraftDomainSuffix) ?? draftDomainSuffix)
         .trim();
     draftDescription = (p.getString(_kDraftDescription) ?? draftDescription)
@@ -64,7 +73,7 @@ class AppController extends ChangeNotifier {
     await p.setString(_kBaseUrl, baseUrl.trim());
     await p.setString(_kAdminKey, adminKey.trim());
     await p.setString(_kNodeKey, nodeKey.trim());
-    await p.setInt(_kInviteTtl, inviteTtlSeconds);
+    await p.setInt(_kInviteTtlDays, inviteTtlDays);
     await p.setInt(_kInviteMaxUses, inviteMaxUses);
   }
 
@@ -73,7 +82,6 @@ class AppController extends ChangeNotifier {
     await p.setBool(_kDraftPublic, draftPublic);
     await p.setBool(_kDraftHttp, draftHttpEnabled);
     await p.setBool(_kDraftHttps, draftHttpsEnabled);
-    await p.setString(_kDraftBridgeUrl, draftBridgeUrl.trim());
     await p.setString(_kDraftDomainSuffix, draftDomainSuffix.trim());
     await p.setString(_kDraftDescription, draftDescription);
   }
@@ -82,7 +90,6 @@ class AppController extends ChangeNotifier {
     required bool public,
     required bool httpEnabled,
     required bool httpsEnabled,
-    required String bridgeUrl,
     required String domainSuffix,
     required String description,
     bool persistNow = false,
@@ -91,7 +98,6 @@ class AppController extends ChangeNotifier {
     draftPublic = public;
     draftHttpEnabled = httpEnabled;
     draftHttpsEnabled = httpsEnabled;
-    draftBridgeUrl = bridgeUrl.trim();
     draftDomainSuffix = domainSuffix.trim();
     draftDescription = description;
     if (persistNow) await persistDraft();
@@ -135,7 +141,6 @@ class AppController extends ChangeNotifier {
       draftPublic = cfg.public;
       draftHttpEnabled = cfg.httpEnabled;
       draftHttpsEnabled = cfg.httpsEnabled;
-      draftBridgeUrl = cfg.bridgeUrl;
       draftDomainSuffix = cfg.domainSuffix;
       draftDescription = cfg.description;
       await persistDraft();
@@ -147,7 +152,6 @@ class AppController extends ChangeNotifier {
           'domain_suffix': cfg.domainSuffix,
           'http_enabled': cfg.httpEnabled,
           'https_enabled': cfg.httpsEnabled,
-          'bridge_url': cfg.bridgeUrl,
         },
       });
     } catch (e) {
@@ -164,7 +168,6 @@ class AppController extends ChangeNotifier {
     required bool httpsEnabled,
     required String description,
     required String domainSuffix,
-    required String bridgeUrl,
   }) async {
     loading = true;
     notifyListeners();
@@ -173,7 +176,6 @@ class AppController extends ChangeNotifier {
         public: public,
         httpEnabled: httpEnabled,
         httpsEnabled: httpsEnabled,
-        bridgeUrl: bridgeUrl,
         domainSuffix: domainSuffix,
         description: description,
         persistNow: true,
@@ -184,7 +186,6 @@ class AppController extends ChangeNotifier {
         httpsEnabled: httpsEnabled,
         description: description,
         domainSuffix: domainSuffix,
-        bridgeUrl: bridgeUrl,
       );
       await refreshConfig();
       _setOutput({'code': 0, 'data': out});
@@ -202,13 +203,13 @@ class AppController extends ChangeNotifier {
     try {
       await persist();
       final res = await _api().createInvite(
-        ttlSeconds: inviteTtlSeconds,
+        ttlDays: inviteTtlDays,
         maxUses: inviteMaxUses,
         scopeJson: '{}',
       );
       lastInvite = res;
       // 刷新列表（列表由节点侧本地记录生成）
-      invites = await _api().listInvites(limit: 200, includeRevoked: true);
+      invites = await _api().listInvites(limit: 200, includeRevoked: false);
       _setOutput({
         'code': 0,
         'data': {
@@ -230,7 +231,7 @@ class AppController extends ChangeNotifier {
     notifyListeners();
     try {
       final out = await _api().revokeInvite(inviteId: inviteId);
-      invites = await _api().listInvites(limit: 200, includeRevoked: true);
+      invites = await _api().listInvites(limit: 200, includeRevoked: false);
       _setOutput({'code': 0, 'data': out});
     } catch (e) {
       _setOutput(_errToOut(e));
@@ -244,7 +245,7 @@ class AppController extends ChangeNotifier {
     loading = true;
     notifyListeners();
     try {
-      invites = await _api().listInvites(limit: 200, includeRevoked: true);
+      invites = await _api().listInvites(limit: 200, includeRevoked: false);
     } catch (e) {
       _setOutput(_errToOut(e));
     } finally {

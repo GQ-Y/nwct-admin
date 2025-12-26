@@ -2,6 +2,7 @@ import 'dart:io' show Platform;
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:bitsdojo_window/bitsdojo_window.dart';
 
 import 'pages/connection_settings_page.dart';
 import 'pages/invites_page.dart';
@@ -34,10 +35,19 @@ class _TotoroNodeDesktopAppState extends State<TotoroNodeDesktopApp> {
 
   @override
   Widget build(BuildContext context) {
+    final home = HomeShell(controller: controller);
+    if (Platform.isWindows) {
+      // Draw a custom frame on Windows to match "one unified surface" UX.
+      return MaterialApp(
+        debugShowCheckedModeBanner: false,
+        theme: HarmonyTheme.build(),
+        home: WindowBorder(color: Colors.transparent, width: 0, child: home),
+      );
+    }
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       theme: HarmonyTheme.build(),
-      home: HomeShell(controller: controller),
+      home: home,
     );
   }
 }
@@ -84,43 +94,135 @@ class _HomeShellState extends State<HomeShell> {
           ),
         };
 
+        final titleBar = Platform.isWindows ? const _WindowsTitleBar() : null;
+
         return IgnorePointer(
           ignoring: !_inputReady,
           child: Scaffold(
-            body: SafeArea(
-              child: Padding(
-                padding: EdgeInsets.fromLTRB(16, 16 + extraTopInset, 16, 16),
-                child: Column(
-                  children: [
-                    Expanded(
-                      child: Row(
+            body: Column(
+              children: [
+                if (titleBar != null) titleBar,
+                Expanded(
+                  child: SafeArea(
+                    child: Padding(
+                      padding: EdgeInsets.fromLTRB(
+                        16,
+                        16 + extraTopInset,
+                        16,
+                        16,
+                      ),
+                      child: Column(
                         children: [
-                          SizedBox(
-                            width: 270,
-                            child: LayoutBuilder(
-                              builder: (context, constraints) {
-                                return _Sidebar(
-                                  height: constraints.maxHeight,
-                                  nav: _nav,
-                                  onNav: (k) => setState(() => _nav = k),
-                                  onOpenSettings: () =>
-                                      setState(() => _nav = _NavKey.settings),
-                                );
-                              },
+                          Expanded(
+                            child: Row(
+                              children: [
+                                SizedBox(
+                                  width: 270,
+                                  child: LayoutBuilder(
+                                    builder: (context, constraints) {
+                                      return _Sidebar(
+                                        height: constraints.maxHeight,
+                                        nav: _nav,
+                                        onNav: (k) => setState(() => _nav = k),
+                                        onOpenSettings: () => setState(
+                                          () => _nav = _NavKey.settings,
+                                        ),
+                                      );
+                                    },
+                                  ),
+                                ),
+                                const SizedBox(width: 16),
+                                Expanded(child: page),
+                              ],
                             ),
                           ),
-                          const SizedBox(width: 16),
-                          Expanded(child: page),
                         ],
                       ),
                     ),
-                  ],
+                  ),
                 ),
-              ),
+              ],
             ),
           ),
         );
       },
+    );
+  }
+}
+
+class _WindowsTitleBar extends StatelessWidget {
+  const _WindowsTitleBar();
+
+  @override
+  Widget build(BuildContext context) {
+    final c = Theme.of(context).colorScheme;
+    final bg = HarmonyColors.bgSurface.withOpacity(0.72);
+    return WindowTitleBarBox(
+      child: Container(
+        height: 44,
+        color: bg,
+        child: Row(
+          children: [
+            Expanded(
+              child: MoveWindow(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 14),
+                  child: Row(
+                    children: [
+                      const Text(
+                        'Totoro',
+                        style: TextStyle(fontWeight: FontWeight.w900),
+                      ),
+                      const SizedBox(width: 10),
+                      Text(
+                        'Node',
+                        style: TextStyle(
+                          color: HarmonyColors.textSecondary,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            _WindowButtons(
+              colors: WindowButtonColors(
+                iconNormal: HarmonyColors.textSecondary,
+                mouseOver: c.primary.withOpacity(0.08),
+                mouseDown: c.primary.withOpacity(0.14),
+                iconMouseOver: HarmonyColors.textPrimary,
+                iconMouseDown: HarmonyColors.textPrimary,
+              ),
+              closeColors: WindowButtonColors(
+                iconNormal: HarmonyColors.textSecondary,
+                mouseOver: Colors.red.withOpacity(0.18),
+                mouseDown: Colors.red.withOpacity(0.26),
+                iconMouseOver: HarmonyColors.textPrimary,
+                iconMouseDown: HarmonyColors.textPrimary,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _WindowButtons extends StatelessWidget {
+  const _WindowButtons({required this.colors, required this.closeColors});
+
+  final WindowButtonColors colors;
+  final WindowButtonColors closeColors;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        MinimizeWindowButton(colors: colors),
+        MaximizeWindowButton(colors: colors),
+        CloseWindowButton(colors: closeColors),
+      ],
     );
   }
 }
@@ -169,7 +271,7 @@ class _Sidebar extends StatelessWidget {
                 ),
                 _NavItem(
                   active: nav == _NavKey.invites,
-                  text: '邀请码',
+                  text: '分享节点',
                   onTap: () => onNav(_NavKey.invites),
                 ),
                 const Spacer(),

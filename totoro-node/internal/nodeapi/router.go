@@ -158,10 +158,8 @@ func (a *API) updateNodeConfig(c *gin.Context) {
 
 func (a *API) listInvites(c *gin.Context) {
 	limit, _ := strconv.Atoi(strings.TrimSpace(c.Query("limit")))
-	includeRevoked := true
-	if strings.TrimSpace(c.Query("include_revoked")) == "0" {
-		includeRevoked = false
-	}
+	// 默认不返回已删除（撤销）的邀请码；需要时可显式 include_revoked=1
+	includeRevoked := strings.TrimSpace(c.Query("include_revoked")) == "1"
 	items, err := a.st.ListInvites(limit, includeRevoked)
 	if err != nil {
 		apiresp.Fail(c, http.StatusInternalServerError, 500, err.Error())
@@ -171,7 +169,7 @@ func (a *API) listInvites(c *gin.Context) {
 }
 
 type createInviteReq struct {
-	TTLSeconds int    `json:"ttl_seconds"`
+	TTLDays    int    `json:"ttl_days"`
 	MaxUses    int    `json:"max_uses"`
 	ScopeJSON  string `json:"scope_json"`
 }
@@ -181,6 +179,16 @@ func (a *API) createInvite(c *gin.Context) {
 	if err := c.ShouldBindJSON(&req); err != nil {
 		apiresp.Fail(c, http.StatusBadRequest, 400, err.Error())
 		return
+	}
+
+	// 统一：只接受 ttl_days（客户端统一按天传递）。
+	if req.TTLDays < 0 {
+		apiresp.Fail(c, http.StatusBadRequest, 400, "ttl_days invalid")
+		return
+	}
+	ttlSeconds := 0
+	if req.TTLDays > 0 {
+		ttlSeconds = req.TTLDays * 86400
 	}
 	cfg, keyHash, err := a.st.GetNodeConfig()
 	if err != nil {
@@ -208,7 +216,7 @@ func (a *API) createInvite(c *gin.Context) {
 	bc := &bridgeclient.Client{BaseURL: bridge, NodeID: cfg.NodeID, NodeKey: adminNodeKey}
 	out, err := bc.CreateInvite(bridgeclient.CreateInviteReq{
 		ScopeJSON:  strings.TrimSpace(req.ScopeJSON),
-		TTLSeconds: req.TTLSeconds,
+		TTLSeconds: ttlSeconds,
 		MaxUses:    req.MaxUses,
 	})
 	if err != nil {
@@ -275,7 +283,8 @@ func (a *API) revokeInvite(c *gin.Context) {
 	// 本地标记 revoked，便于列表展示
 	_ = a.st.RevokeInvite(strings.TrimSpace(req.InviteID))
 	kicked := kicker.KickInvite(strings.TrimSpace(req.InviteID))
-	apiresp.OK(c, gin.H{"revoked": true, "kicked": kicked})
+	// 语义：撤销 == 删除（不再可用，也不再出现在默认列表里）
+	apiresp.OK(c, gin.H{"deleted": true, "kicked": kicked})
 }
 
 func generateInviteCode() string {

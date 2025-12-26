@@ -2,6 +2,8 @@
 #include <flutter/flutter_view_controller.h>
 #include <windows.h>
 
+#include <bitsdojo_window_windows/bitsdojo_window_plugin.h>
+
 #include "flutter_window.h"
 #include "utils.h"
 
@@ -24,10 +26,14 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
 
   project.set_dart_entrypoint_arguments(std::move(command_line_arguments));
 
+  // Use a custom window frame so the app can draw its own title bar/buttons.
+  // This removes the default Windows title bar and caption buttons.
+  bitsdojo_window_configure(BDW_CUSTOM_FRAME | BDW_HIDE_ON_STARTUP);
+
   FlutterWindow window(project);
   Win32Window::Point origin(10, 10);
   Win32Window::Size size(1280, 720);
-  if (!window.Create(L"totoro_node_desktop", origin, size)) {
+  if (!window.Create(L"Totoro", origin, size)) {
     return EXIT_FAILURE;
   }
   window.SetQuitOnClose(true);

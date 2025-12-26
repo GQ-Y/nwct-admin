@@ -289,6 +289,7 @@ func (s *Store) ListInvites(limit int, includeRevoked bool) ([]Invite, error) {
 		rows, err = s.db.Query(`
 SELECT invite_id, code, revoked, created_at, expires_at, max_uses, used, scope_json
 FROM invites
+WHERE code <> ''
 ORDER BY created_at DESC
 LIMIT ?
 `, limit)
@@ -296,7 +297,7 @@ LIMIT ?
 		rows, err = s.db.Query(`
 SELECT invite_id, code, revoked, created_at, expires_at, max_uses, used, scope_json
 FROM invites
-WHERE revoked=0
+WHERE revoked=0 AND code <> ''
 ORDER BY created_at DESC
 LIMIT ?
 `, limit)

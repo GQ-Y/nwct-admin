@@ -26,7 +26,6 @@ class NodeConfig {
     required this.domainSuffix,
     required this.httpEnabled,
     required this.httpsEnabled,
-    required this.bridgeUrl,
   });
 
   final bool public;
@@ -34,7 +33,6 @@ class NodeConfig {
   final String domainSuffix;
   final bool httpEnabled;
   final bool httpsEnabled;
-  final String bridgeUrl;
 
   factory NodeConfig.fromJson(Map<String, dynamic> j) {
     return NodeConfig(
@@ -43,26 +41,7 @@ class NodeConfig {
       domainSuffix: (j['domain_suffix'] ?? '').toString(),
       httpEnabled: j['http_enabled'] == true,
       httpsEnabled: j['https_enabled'] == true,
-      bridgeUrl: (j['bridge_url'] ?? '').toString(),
     );
-  }
-
-  Map<String, dynamic> toPatchJson({
-    required bool public,
-    required bool httpEnabled,
-    required bool httpsEnabled,
-    required String description,
-    required String domainSuffix,
-    required String bridgeUrl,
-  }) {
-    return <String, dynamic>{
-      'public': public,
-      'description': description,
-      'domain_suffix': domainSuffix,
-      'http_enabled': httpEnabled,
-      'https_enabled': httpsEnabled,
-      'bridge_url': bridgeUrl,
-    };
   }
 }
 
@@ -206,7 +185,6 @@ class NodeApiClient {
     required bool httpsEnabled,
     required String description,
     required String domainSuffix,
-    required String bridgeUrl,
   }) async {
     final res = await http.post(
       _uri('/api/v1/node/config'),
@@ -217,7 +195,6 @@ class NodeApiClient {
         'domain_suffix': domainSuffix,
         'http_enabled': httpEnabled,
         'https_enabled': httpsEnabled,
-        'bridge_url': bridgeUrl,
       }),
     );
     final data = _unwrapData<dynamic>(res);
@@ -234,7 +211,7 @@ class NodeApiClient {
   }
 
   Future<CreateInviteResult> createInvite({
-    required int ttlSeconds,
+    required int ttlDays,
     required int maxUses,
     required String scopeJson,
   }) async {
@@ -243,7 +220,7 @@ class NodeApiClient {
       _uri('/api/v1/node/invites'),
       headers: _headers(includeNodeKey: true),
       body: jsonEncode({
-        'ttl_seconds': ttlSeconds,
+        'ttl_days': ttlDays,
         'max_uses': maxUses,
         'scope_json': scopeJson,
       }),

@@ -48,8 +48,8 @@
     </div>
 
     <div class="row">
-      <label>邀请码TTL(s)</label>
-      <input id="ttl" placeholder="86400" />
+      <label>邀请码有效期（天）</label>
+      <input id="ttl" placeholder="1" />
       <label>次数</label>
       <input id="maxUses" placeholder="50" />
       <button onclick="createInvite()">生成邀请码</button>
@@ -103,7 +103,7 @@
       async function createInvite() {
         try {
           const body = {
-            ttl_seconds: Number(document.getElementById('ttl').value || 0),
+            ttl_days: Number(document.getElementById('ttl').value || 0),
             max_uses: Number(document.getElementById('maxUses').value || 0),
             scope_json: '{}'
           };

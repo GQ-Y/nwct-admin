@@ -18,7 +18,6 @@ class _NodeConfigPageState extends State<NodeConfigPage> {
   bool httpEnabled = false;
   bool httpsEnabled = false;
 
-  final TextEditingController bridgeUrl = TextEditingController();
   final TextEditingController domainSuffix = TextEditingController();
   final TextEditingController description = TextEditingController();
 
@@ -40,13 +39,11 @@ class _NodeConfigPageState extends State<NodeConfigPage> {
       public: public,
       httpEnabled: httpEnabled,
       httpsEnabled: httpsEnabled,
-      bridgeUrl: bridgeUrl.text,
       domainSuffix: domainSuffix.text,
       description: description.text,
       persistNow: true,
       notify: false,
     );
-    bridgeUrl.dispose();
     domainSuffix.dispose();
     description.dispose();
     super.dispose();
@@ -59,7 +56,6 @@ class _NodeConfigPageState extends State<NodeConfigPage> {
       public = cfg.public;
       httpEnabled = cfg.httpEnabled;
       httpsEnabled = cfg.httpsEnabled;
-      bridgeUrl.text = cfg.bridgeUrl;
       domainSuffix.text = cfg.domainSuffix;
       description.text = cfg.description;
     });
@@ -71,7 +67,6 @@ class _NodeConfigPageState extends State<NodeConfigPage> {
       public = d.draftPublic;
       httpEnabled = d.draftHttpEnabled;
       httpsEnabled = d.draftHttpsEnabled;
-      bridgeUrl.text = d.draftBridgeUrl;
       domainSuffix.text = d.draftDomainSuffix;
       description.text = d.draftDescription;
     });
@@ -104,7 +99,7 @@ class _NodeConfigPageState extends State<NodeConfigPage> {
                   style: TextStyle(fontWeight: FontWeight.w700),
                 ),
                 subtitle: const Text(
-                  '开启后该节点可在桥梁平台公开列表展示',
+                  '开启后该节点将允许所有人访问',
                   style: TextStyle(
                     color: HarmonyColors.textSecondary,
                     fontSize: 12,
@@ -165,12 +160,6 @@ class _NodeConfigPageState extends State<NodeConfigPage> {
               ),
               const SizedBox(height: 12),
               HarmonyField(
-                controller: bridgeUrl,
-                label: 'Bridge URL（bridge_url）',
-                hintText: '例如 http://127.0.0.1:18090',
-              ),
-              const SizedBox(height: 12),
-              HarmonyField(
                 controller: description,
                 label: '描述（description）',
                 hintText: '纯文本描述',
@@ -190,7 +179,6 @@ class _NodeConfigPageState extends State<NodeConfigPage> {
                                 httpsEnabled: httpsEnabled,
                                 description: description.text.trim(),
                                 domainSuffix: domainSuffix.text.trim(),
-                                bridgeUrl: bridgeUrl.text.trim(),
                               );
                               if (!context.mounted) return;
                               showToast(context, '已保存');
@@ -205,14 +193,6 @@ class _NodeConfigPageState extends State<NodeConfigPage> {
                     child: const Text('刷新'),
                   ),
                 ],
-              ),
-              const SizedBox(height: 8),
-              const Text(
-                '提示：保存配置需要填写 X-Node-Key。',
-                style: TextStyle(
-                  color: HarmonyColors.textSecondary,
-                  fontSize: 12,
-                ),
               ),
             ],
           ),

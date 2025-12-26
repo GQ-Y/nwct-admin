@@ -17,7 +17,7 @@ class InvitesPage extends StatefulWidget {
 
 class _InvitesPageState extends State<InvitesPage> {
   late final TextEditingController ttl = TextEditingController(
-    text: widget.controller.inviteTtlSeconds.toString(),
+    text: widget.controller.inviteTtlDays.toString(),
   );
   late final TextEditingController maxUses = TextEditingController(
     text: widget.controller.inviteMaxUses.toString(),
@@ -61,16 +61,16 @@ class _InvitesPageState extends State<InvitesPage> {
                   Expanded(
                     child: HarmonyField(
                       controller: ttl,
-                      label: 'TTL(s)',
+                      label: '有效期（天）',
                       keyboardType: TextInputType.number,
-                      hintText: '例如 86400',
+                      hintText: '例如 1（填 0 表示不过期）',
                     ),
                   ),
                   const SizedBox(width: 12),
                   Expanded(
                     child: HarmonyField(
                       controller: maxUses,
-                      label: '次数',
+                      label: '可用次数',
                       keyboardType: TextInputType.number,
                       hintText: '例如 50',
                     ),
@@ -84,7 +84,7 @@ class _InvitesPageState extends State<InvitesPage> {
                     : () async {
                         final t = int.tryParse(ttl.text.trim()) ?? 0;
                         final m = int.tryParse(maxUses.text.trim()) ?? 0;
-                        c.inviteTtlSeconds = t;
+                        c.inviteTtlDays = t;
                         c.inviteMaxUses = m;
                         await c.persist();
                         await c.createInvite();
@@ -92,14 +92,6 @@ class _InvitesPageState extends State<InvitesPage> {
                         showToast(context, '已生成');
                       },
                 child: const Text('生成邀请码'),
-              ),
-              const SizedBox(height: 10),
-              const Text(
-                '提示：生成邀请码需要填写 X-Node-Key。',
-                style: TextStyle(
-                  color: HarmonyColors.textSecondary,
-                  fontSize: 12,
-                ),
               ),
             ],
           ),
@@ -119,7 +111,7 @@ class _InvitesPageState extends State<InvitesPage> {
             onRevoke: (id) async {
               await c.revokeInvite(id);
               if (!context.mounted) return;
-              showToast(context, '已撤销');
+              showToast(context, '已删除');
             },
             onCopy: (label, text) async {
               await Clipboard.setData(ClipboardData(text: text));
@@ -150,7 +142,7 @@ class _InviteList extends StatelessWidget {
   Widget build(BuildContext context) {
     if (items.isEmpty) {
       return Text(
-        loading ? '加载中…' : '暂无（仅显示本节点通过 Node API 创建并记录的邀请记录）',
+        loading ? '加载中…' : '暂无（仅显示本节点通过 Node API 创建并记录的邀请码）',
         style: const TextStyle(color: HarmonyColors.textSecondary),
       );
     }
@@ -165,6 +157,10 @@ class _InviteList extends StatelessWidget {
         final statusColor = it.revoked
             ? HarmonyColors.textSecondary
             : HarmonyColors.primary;
+        final code = it.code.trim();
+        final title = code.isNotEmpty ? code : '（无邀请码）';
+        final expires = _fmtExpires(it.expiresAt);
+        final usesText = it.maxUses <= 0 ? '不限' : '${it.used}/${it.maxUses}';
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
@@ -172,7 +168,7 @@ class _InviteList extends StatelessWidget {
               children: [
                 Expanded(
                   child: Text(
-                    it.inviteId,
+                    title,
                     style: const TextStyle(fontWeight: FontWeight.w800),
                   ),
                 ),
@@ -201,26 +197,27 @@ class _InviteList extends StatelessWidget {
               spacing: 10,
               runSpacing: 8,
               crossAxisAlignment: WrapCrossAlignment.center,
-              children: [
-                _kv('expires', it.expiresAt.isEmpty ? '-' : it.expiresAt),
-                _kv('max_uses', it.maxUses <= 0 ? '-' : '${it.maxUses}'),
-                if (it.code.trim().isNotEmpty) _kv('code', it.code.trim()),
-              ],
+              children: [_kv('到期时间', expires), _kv('使用次数', usesText)],
             ),
             const SizedBox(height: 12),
             Row(
               children: [
                 HarmonyButton(
                   variant: HarmonyButtonVariant.ghost,
-                  onPressed: () => onCopy('invite_id', it.inviteId),
-                  child: const Text('复制ID'),
+                  onPressed: code.isEmpty
+                      ? null
+                      : () => onCopy(
+                          '分享文案',
+                          '我自己的高速Totoro节点，分享给你啦～好朋友就是要一起快乐～，邀请码：$code；',
+                        ),
+                  child: const Text('分享邀请码'),
                 ),
                 const SizedBox(width: 8),
-                if (it.code.trim().isNotEmpty)
+                if (code.isNotEmpty)
                   HarmonyButton(
                     variant: HarmonyButtonVariant.ghost,
-                    onPressed: () => onCopy('code', it.code.trim()),
-                    child: const Text('复制Code'),
+                    onPressed: () => onCopy('邀请码', code),
+                    child: const Text('复制邀请码'),
                   ),
                 const Spacer(),
                 HarmonyButton(
@@ -228,7 +225,7 @@ class _InviteList extends StatelessWidget {
                   onPressed: (loading || it.revoked)
                       ? null
                       : () => onRevoke(it.inviteId),
-                  child: const Text('撤销'),
+                  child: const Text('删除'),
                 ),
               ],
             ),
@@ -247,5 +244,17 @@ class _InviteList extends StatelessWidget {
         fontWeight: FontWeight.w600,
       ),
     );
+  }
+
+  static String _fmtExpires(String raw) {
+    final s = raw.trim();
+    if (s.isEmpty) return '不过期';
+    try {
+      final dt = DateTime.parse(s).toLocal();
+      String two(int v) => v.toString().padLeft(2, '0');
+      return '${dt.year}-${two(dt.month)}-${two(dt.day)} ${two(dt.hour)}:${two(dt.minute)}';
+    } catch (_) {
+      return s;
+    }
   }
 }
