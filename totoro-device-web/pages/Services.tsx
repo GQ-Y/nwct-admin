@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Card, Button, Input, Badge, Select } from '../components/UI';
+import { Card, Button, Input, Badge, Select, SuffixInput } from '../components/UI';
 import { Pause, Play, Save, Activity, Users, ArrowUp, ArrowDown, RefreshCw, Plus, Edit, Trash2, X } from 'lucide-react';
 import { useLanguage } from '../contexts/LanguageContext';
 import { api } from '../lib/api';
@@ -16,6 +16,8 @@ export const FRPPage: React.FC = () => {
   const [token, setToken] = useState('');
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [domainSuffix, setDomainSuffix] = useState('frpc.zyckj.club');
+  const [httpEnabled, setHttpEnabled] = useState(false);
+  const [httpsEnabled, setHttpsEnabled] = useState(false);
   const [toastOpen, setToastOpen] = useState(false);
   const [toastType, setToastType] = useState<"success" | "error" | "info">("info");
   const [toastMsg, setToastMsg] = useState("");
@@ -67,6 +69,8 @@ export const FRPPage: React.FC = () => {
       const cfg = await api.configGet();
       const ds = (cfg?.frp_server?.domain_suffix || '').trim();
       if (ds) setDomainSuffix(ds.replace(/^\./, ''));
+      setHttpEnabled(!!cfg?.frp_server?.http_enabled);
+      setHttpsEnabled(!!cfg?.frp_server?.https_enabled);
 
       const s = await api.frpStatus();
       setStatus(s);
@@ -77,6 +81,18 @@ export const FRPPage: React.FC = () => {
       // ignore
     }
   };
+
+  const tunnelTypeOptions = useMemo(() => {
+    const base = [
+      { label: 'TCP', value: 'tcp' },
+      { label: 'UDP', value: 'udp' },
+      { label: 'STCP', value: 'stcp' },
+    ];
+    const hasDomain = !!domainSuffix.trim();
+    if (httpEnabled && hasDomain) base.splice(2, 0, { label: 'HTTP', value: 'http' });
+    if (httpsEnabled && hasDomain) base.splice(3, 0, { label: 'HTTPS', value: 'https' });
+    return base;
+  }, [httpEnabled, httpsEnabled, domainSuffix]);
 
   const useBuiltin = async () => {
     setLoading(true);
@@ -125,19 +141,20 @@ export const FRPPage: React.FC = () => {
       if (connected) {
         await api.frpDisconnect();
       } else {
-        // 连接：默认使用“已保存配置”（mode 决定来源）
-        // manual 模式下，如果用户输入了 server/token，则先保存再连接
-        if (mode === 'manual' && server.trim()) {
-          await api.frpConfigSave({ server: server.trim(), token: token.trim(), domain_suffix: domainSuffix.trim() });
-        }
+        // 连接：使用后端当前选择的模式（builtin/manual/public）的已保存配置
         await api.frpConnect({});
       }
       const s = await api.frpStatus();
       setStatus(s);
       const tt = await api.frpTunnels();
       setTunnels(tt?.tunnels || []);
+      setToastType("success");
+      setToastMsg(connected ? "已断开。" : "已连接。");
+      setToastOpen(true);
     } catch (e: any) {
-      alert(e?.message || String(e));
+      setToastType("error");
+      setToastMsg(e?.message || String(e));
+      setToastOpen(true);
     } finally {
       setLoading(false);
     }
@@ -308,7 +325,7 @@ export const FRPPage: React.FC = () => {
           <div style={{ background: '#f5f5f5', padding: 20, borderRadius: 12 }}>
             <div style={{ fontSize: 13, color: '#666', marginBottom: 12, fontWeight: 500 }}>{t('services.config')}</div>
             <div className="grid-2">
-              <Input value={server} onChange={(e) => setServer((e.target as any).value)} placeholder="" />
+              <Input value={server} onChange={(e) => setServer((e.target as any).value)} placeholder="ip" />
               <Input value={token} onChange={(e) => setToken((e.target as any).value)} type="password" placeholder="token" />
             </div>
             <div style={{ marginTop: 12, display: "flex", gap: 8 }}>
@@ -492,13 +509,7 @@ export const FRPPage: React.FC = () => {
                 <Select
                   value={tunnelForm.type}
                   onChange={(value) => setTunnelForm({ ...tunnelForm, type: value })}
-                  options={[
-                    { label: 'TCP', value: 'tcp' },
-                    { label: 'UDP', value: 'udp' },
-                    { label: 'HTTP', value: 'http' },
-                    { label: 'HTTPS', value: 'https' },
-                    { label: 'STCP', value: 'stcp' },
-                  ]}
+                  options={tunnelTypeOptions as any}
                 />
               </div>
 
@@ -544,12 +555,17 @@ export const FRPPage: React.FC = () => {
               {(tunnelForm.type === 'http' || tunnelForm.type === 'https') && (
                 <div>
                   <label style={{ display: 'block', marginBottom: 8, fontSize: 14, fontWeight: 500 }}>
-                    域名前缀 <span style={{ color: '#999' }}>(可选，仅 HTTP/HTTPS 使用)</span>
+                    域名前缀
                   </label>
-                  <Input
+                  <SuffixInput
                     value={tunnelForm.domain}
-                    onChange={(e) => setTunnelForm({ ...tunnelForm, domain: (e.target as any).value })}
-                    placeholder={`例如：e6666666（默认后缀 .${domainSuffix}）或完整域名`}
+                    onChange={(v) => setTunnelForm({ ...tunnelForm, domain: v })}
+                    suffixText={
+                      domainSuffix.trim()
+                        ? `.${domainSuffix.replace(/^\./, '')}`
+                        : "（未配置根域名）"
+                    }
+                    placeholder="请输入域名前缀"
                   />
                 </div>
               )}

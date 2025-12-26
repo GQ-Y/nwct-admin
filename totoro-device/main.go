@@ -141,6 +141,8 @@ func bridgeRegisterIfConfigured(cfg *config.Config, netManager network.Manager) 
 					AdminUser:    strings.TrimSpace(off.AdminUser),
 					AdminPwd:     strings.TrimSpace(off.AdminPwd),
 					DomainSuffix: strings.TrimPrefix(strings.TrimSpace(off.DomainSuffix), "."),
+					HTTPEnabled:  off.HTTPEnabled,
+					HTTPSEnabled: off.HTTPSEnabled,
 				}
 				cfg.FRPServer.SyncActiveFromMode()
 				_ = cfg.Save()

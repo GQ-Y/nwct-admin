@@ -72,6 +72,8 @@ type PublicNode struct {
 	Endpoints     []NodeEndpoint    `json:"endpoints"`
 	NodeAPI       string            `json:"node_api,omitempty"`
 	DomainSuffix  string            `json:"domain_suffix"`
+	HTTPEnabled   bool              `json:"http_enabled"`
+	HTTPSEnabled  bool              `json:"https_enabled"`
 	TCPPortPool   *PortPool         `json:"tcp_port_pool,omitempty"`
 	UDPPortPool   *PortPool         `json:"udp_port_pool,omitempty"`
 	UpdatedAt     string            `json:"updated_at"`
@@ -102,6 +104,8 @@ type NodeHeartbeat struct {
 	Endpoints    []NodeEndpoint
 	NodeAPI      string
 	DomainSuffix string
+	HTTPEnabled  bool
+	HTTPSEnabled bool
 	TCPPortPool  *PortPool
 	UDPPortPool  *PortPool
 	MetricsJSON  json.RawMessage
@@ -120,6 +124,8 @@ type OfficialNode struct {
 	AdminPwd     string `json:"admin_pwd"`   // 可选
 	NodeAPI      string `json:"node_api"`    // 可选，节点管理 API 地址（公开节点可用）
 	DomainSuffix string `json:"domain_suffix"`
+	HTTPEnabled  bool   `json:"http_enabled"`
+	HTTPSEnabled bool   `json:"https_enabled"`
 	UpdatedAt    string `json:"updated_at"`
 }
 
@@ -170,6 +176,8 @@ CREATE TABLE IF NOT EXISTS nodes (
   endpoints_json TEXT NOT NULL DEFAULT '[]',
   node_api TEXT NOT NULL DEFAULT '',
   domain_suffix TEXT NOT NULL DEFAULT '',
+  http_enabled INTEGER NOT NULL DEFAULT 0,
+  https_enabled INTEGER NOT NULL DEFAULT 0,
   tcp_pool_json TEXT NOT NULL DEFAULT 'null',
   udp_pool_json TEXT NOT NULL DEFAULT 'null',
   version_json TEXT NOT NULL DEFAULT 'null',
@@ -207,6 +215,8 @@ CREATE TABLE IF NOT EXISTS official_nodes (
   admin_pwd TEXT NOT NULL DEFAULT '',
   node_api TEXT NOT NULL DEFAULT '',
   domain_suffix TEXT NOT NULL DEFAULT '',
+  http_enabled INTEGER NOT NULL DEFAULT 0,
+  https_enabled INTEGER NOT NULL DEFAULT 0,
   updated_at INTEGER NOT NULL DEFAULT 0
 );
 
@@ -234,11 +244,15 @@ CREATE INDEX IF NOT EXISTS idx_invites_node ON invites(node_id, updated_at);
 	// nodes 表是早期版本，字段演进较多；这里做一次“宽松补列”
 	_ = s.tryAddColumn("nodes", "description", "TEXT NOT NULL DEFAULT ''")
 	_ = s.tryAddColumn("nodes", "node_api", "TEXT NOT NULL DEFAULT ''")
+	_ = s.tryAddColumn("nodes", "http_enabled", "INTEGER NOT NULL DEFAULT 0")
+	_ = s.tryAddColumn("nodes", "https_enabled", "INTEGER NOT NULL DEFAULT 0")
 	_ = s.tryAddColumn("nodes", "tcp_pool_json", "TEXT NOT NULL DEFAULT 'null'")
 	_ = s.tryAddColumn("nodes", "udp_pool_json", "TEXT NOT NULL DEFAULT 'null'")
 	_ = s.tryAddColumn("nodes", "version_json", "TEXT NOT NULL DEFAULT 'null'")
 	_ = s.tryAddColumn("nodes", "metrics_json", "TEXT NOT NULL DEFAULT 'null'")
 	_ = s.tryAddColumn("nodes", "extra_json", "TEXT NOT NULL DEFAULT 'null'")
+	_ = s.tryAddColumn("official_nodes", "http_enabled", "INTEGER NOT NULL DEFAULT 0")
+	_ = s.tryAddColumn("official_nodes", "https_enabled", "INTEGER NOT NULL DEFAULT 0")
 	return nil
 }
 
@@ -317,8 +331,8 @@ func (s *SQLiteStore) UpsertNodeHeartbeat(hb NodeHeartbeat) error {
 
 	now := time.Now().Unix()
 	_, err := s.db.Exec(`
-INSERT INTO nodes(node_id,name,description,public,region,isp,tags_json,endpoints_json,node_api,domain_suffix,tcp_pool_json,udp_pool_json,version_json,metrics_json,extra_json,last_seen_at)
-VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+INSERT INTO nodes(node_id,name,description,public,region,isp,tags_json,endpoints_json,node_api,domain_suffix,http_enabled,https_enabled,tcp_pool_json,udp_pool_json,version_json,metrics_json,extra_json,last_seen_at)
+VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 ON CONFLICT(node_id) DO UPDATE SET
   name=excluded.name,
   description=excluded.description,
@@ -329,19 +343,21 @@ ON CONFLICT(node_id) DO UPDATE SET
   endpoints_json=excluded.endpoints_json,
   node_api=excluded.node_api,
   domain_suffix=excluded.domain_suffix,
+  http_enabled=excluded.http_enabled,
+  https_enabled=excluded.https_enabled,
   tcp_pool_json=excluded.tcp_pool_json,
   udp_pool_json=excluded.udp_pool_json,
   version_json=excluded.version_json,
   metrics_json=excluded.metrics_json,
   extra_json=excluded.extra_json,
   last_seen_at=excluded.last_seen_at
-`, hb.NodeID, hb.Name, hb.Description, boolToInt(hb.Public), hb.Region, hb.ISP, string(tags), string(eps), hb.NodeAPI, hb.DomainSuffix, string(tcp), string(udp), string(hb.VersionJSON), string(hb.MetricsJSON), string(hb.ExtraJSON), now)
+`, hb.NodeID, hb.Name, hb.Description, boolToInt(hb.Public), hb.Region, hb.ISP, string(tags), string(eps), hb.NodeAPI, hb.DomainSuffix, boolToInt(hb.HTTPEnabled), boolToInt(hb.HTTPSEnabled), string(tcp), string(udp), string(hb.VersionJSON), string(hb.MetricsJSON), string(hb.ExtraJSON), now)
 	return err
 }
 
 func (s *SQLiteStore) ListPublicNodes() ([]PublicNode, error) {
 	rows, err := s.db.Query(`
-SELECT node_id,name,description,public,region,isp,tags_json,endpoints_json,node_api,domain_suffix,tcp_pool_json,udp_pool_json,last_seen_at
+SELECT node_id,name,description,public,region,isp,tags_json,endpoints_json,node_api,domain_suffix,http_enabled,https_enabled,tcp_pool_json,udp_pool_json,last_seen_at
 FROM nodes
 WHERE public=1
 ORDER BY last_seen_at DESC
@@ -357,10 +373,10 @@ LIMIT 200
 	for rows.Next() {
 		var (
 			nodeID, name, desc, region, isp, tagsJSON, epsJSON, nodeAPI, domainSuffix, tcpJSON, udpJSON string
-			publicInt                                                     int
+			publicInt, httpInt, httpsInt                                   int
 			lastSeen                                                      int64
 		)
-		if err := rows.Scan(&nodeID, &name, &desc, &publicInt, &region, &isp, &tagsJSON, &epsJSON, &nodeAPI, &domainSuffix, &tcpJSON, &udpJSON, &lastSeen); err != nil {
+		if err := rows.Scan(&nodeID, &name, &desc, &publicInt, &region, &isp, &tagsJSON, &epsJSON, &nodeAPI, &domainSuffix, &httpInt, &httpsInt, &tcpJSON, &udpJSON, &lastSeen); err != nil {
 			return nil, err
 		}
 		var tags []string
@@ -392,6 +408,8 @@ LIMIT 200
 			Endpoints:     eps,
 			NodeAPI:       nodeAPI,
 			DomainSuffix:  domainSuffix,
+			HTTPEnabled:   httpInt == 1,
+			HTTPSEnabled:  httpsInt == 1,
 			TCPPortPool:   tcp,
 			UDPPortPool:   udp,
 			UpdatedAt:     time.Unix(lastSeen, 0).UTC().Format(time.RFC3339),
@@ -645,15 +663,15 @@ WHERE code_hash=?
 func (s *SQLiteStore) getNodeByID(nodeID string) (PublicNode, error) {
 	nodeID = strings.TrimSpace(nodeID)
 	row := s.db.QueryRow(`
-SELECT node_id,name,public,region,isp,tags_json,endpoints_json,node_api,domain_suffix,tcp_pool_json,udp_pool_json,last_seen_at
+SELECT node_id,name,public,region,isp,tags_json,endpoints_json,node_api,domain_suffix,http_enabled,https_enabled,tcp_pool_json,udp_pool_json,last_seen_at
 FROM nodes WHERE node_id=?
 `, nodeID)
 	var (
 		id, name, region, isp, tagsJSON, epsJSON, nodeAPI, domainSuffix, tcpJSON, udpJSON string
-		publicInt                                                     int
+		publicInt, httpInt, httpsInt                                  int
 		lastSeen                                                      int64
 	)
-	if err := row.Scan(&id, &name, &publicInt, &region, &isp, &tagsJSON, &epsJSON, &nodeAPI, &domainSuffix, &tcpJSON, &udpJSON, &lastSeen); err != nil {
+	if err := row.Scan(&id, &name, &publicInt, &region, &isp, &tagsJSON, &epsJSON, &nodeAPI, &domainSuffix, &httpInt, &httpsInt, &tcpJSON, &udpJSON, &lastSeen); err != nil {
 		if err == sql.ErrNoRows {
 			return PublicNode{}, fmt.Errorf("node_offline_or_unknown")
 		}
@@ -686,6 +704,8 @@ FROM nodes WHERE node_id=?
 		Endpoints:     eps,
 		NodeAPI:       nodeAPI,
 		DomainSuffix:  domainSuffix,
+		HTTPEnabled:   httpInt == 1,
+		HTTPSEnabled:  httpsInt == 1,
 		TCPPortPool:   tcp,
 		UDPPortPool:   udp,
 		UpdatedAt:     time.Unix(lastSeen, 0).UTC().Format(time.RFC3339),
@@ -839,8 +859,8 @@ func (s *SQLiteStore) UpsertOfficialNode(n OfficialNode) error {
 	}
 	now := time.Now().Unix()
 	_, err := s.db.Exec(`
-INSERT INTO official_nodes(node_id,name,server,token,admin_addr,admin_user,admin_pwd,node_api,domain_suffix,updated_at)
-VALUES(?,?,?,?,?,?,?,?,?,?)
+INSERT INTO official_nodes(node_id,name,server,token,admin_addr,admin_user,admin_pwd,node_api,domain_suffix,http_enabled,https_enabled,updated_at)
+VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
 ON CONFLICT(node_id) DO UPDATE SET
   name=excluded.name,
   server=excluded.server,
@@ -850,8 +870,10 @@ ON CONFLICT(node_id) DO UPDATE SET
   admin_pwd=excluded.admin_pwd,
   node_api=excluded.node_api,
   domain_suffix=excluded.domain_suffix,
+  http_enabled=excluded.http_enabled,
+  https_enabled=excluded.https_enabled,
   updated_at=excluded.updated_at
-`, n.NodeID, n.Name, n.Server, n.Token, n.AdminAddr, n.AdminUser, n.AdminPwd, n.NodeAPI, n.DomainSuffix, now)
+`, n.NodeID, n.Name, n.Server, n.Token, n.AdminAddr, n.AdminUser, n.AdminPwd, n.NodeAPI, n.DomainSuffix, boolToInt(n.HTTPEnabled), boolToInt(n.HTTPSEnabled), now)
 	return err
 }
 
@@ -864,7 +886,7 @@ func (s *SQLiteStore) DeleteOfficialNode(nodeID string) error {
 }
 
 func (s *SQLiteStore) ListOfficialNodes() ([]OfficialNode, error) {
-	rows, err := s.db.Query(`SELECT node_id,name,server,token,admin_addr,admin_user,admin_pwd,node_api,domain_suffix,updated_at FROM official_nodes ORDER BY updated_at DESC LIMIT 200`)
+	rows, err := s.db.Query(`SELECT node_id,name,server,token,admin_addr,admin_user,admin_pwd,node_api,domain_suffix,http_enabled,https_enabled,updated_at FROM official_nodes ORDER BY updated_at DESC LIMIT 200`)
 	if err != nil {
 		return nil, err
 	}
@@ -873,9 +895,12 @@ func (s *SQLiteStore) ListOfficialNodes() ([]OfficialNode, error) {
 	for rows.Next() {
 		var n OfficialNode
 		var ts int64
-		if err := rows.Scan(&n.NodeID, &n.Name, &n.Server, &n.Token, &n.AdminAddr, &n.AdminUser, &n.AdminPwd, &n.NodeAPI, &n.DomainSuffix, &ts); err != nil {
+		var httpInt, httpsInt int
+		if err := rows.Scan(&n.NodeID, &n.Name, &n.Server, &n.Token, &n.AdminAddr, &n.AdminUser, &n.AdminPwd, &n.NodeAPI, &n.DomainSuffix, &httpInt, &httpsInt, &ts); err != nil {
 			return nil, err
 		}
+		n.HTTPEnabled = httpInt == 1
+		n.HTTPSEnabled = httpsInt == 1
 		n.UpdatedAt = time.Unix(ts, 0).UTC().Format(time.RFC3339)
 		out = append(out, n)
 	}

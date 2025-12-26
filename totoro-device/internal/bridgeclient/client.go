@@ -12,10 +12,10 @@ import (
 )
 
 type Client struct {
-	BaseURL      string
-	DeviceToken  string
-	HTTP         *http.Client
-	DeviceID     string
+	BaseURL          string
+	DeviceToken      string
+	HTTP             *http.Client
+	DeviceID         string
 	DevicePrivKeyB64 string
 }
 
@@ -26,8 +26,8 @@ type RegisterReq struct {
 }
 
 type RegisterResp struct {
-	DeviceToken   string `json:"device_token"`
-	ExpiresAt     string `json:"expires_at"`
+	DeviceToken   string         `json:"device_token"`
+	ExpiresAt     string         `json:"expires_at"`
 	OfficialNodes []OfficialNode `json:"official_nodes"`
 	PublicNodes   []PublicNode   `json:"public_nodes"`
 }
@@ -42,22 +42,24 @@ type OfficialNode struct {
 	AdminPwd     string `json:"admin_pwd"`
 	NodeAPI      string `json:"node_api"`
 	DomainSuffix string `json:"domain_suffix"`
+	HTTPEnabled  bool   `json:"http_enabled"`
+	HTTPSEnabled bool   `json:"https_enabled"`
 	UpdatedAt    string `json:"updated_at"`
 }
 
 type PublicNode struct {
-	NodeID       string `json:"node_id"`
-	Name         string `json:"name"`
-	Public       bool   `json:"public"`
-	Status       string `json:"status"`
-	Region       string `json:"region"`
-	ISP          string `json:"isp"`
-	Tags         []string `json:"tags"`
-	Endpoints    []any  `json:"endpoints"`
-	NodeAPI      string `json:"node_api"`
-	DomainSuffix string `json:"domain_suffix"`
-	UpdatedAt    string `json:"updated_at"`
-	HeartbeatAgeS int64 `json:"heartbeat_age_s"`
+	NodeID        string   `json:"node_id"`
+	Name          string   `json:"name"`
+	Public        bool     `json:"public"`
+	Status        string   `json:"status"`
+	Region        string   `json:"region"`
+	ISP           string   `json:"isp"`
+	Tags          []string `json:"tags"`
+	Endpoints     []any    `json:"endpoints"`
+	NodeAPI       string   `json:"node_api"`
+	DomainSuffix  string   `json:"domain_suffix"`
+	UpdatedAt     string   `json:"updated_at"`
+	HeartbeatAgeS int64    `json:"heartbeat_age_s"`
 }
 
 func ParseExpiresAt(expiresAt string) int64 {
@@ -189,8 +191,8 @@ func (c *Client) GetOfficialNodes() ([]OfficialNode, error) {
 
 type RedeemResp struct {
 	Node struct {
-		NodeID       string `json:"node_id"`
-		Endpoints    []struct {
+		NodeID    string `json:"node_id"`
+		Endpoints []struct {
 			Addr  string `json:"addr"`
 			Port  int    `json:"port"`
 			Proto string `json:"proto"`
@@ -203,8 +205,8 @@ type RedeemResp struct {
 
 type PublicNodeConnectResp struct {
 	Node struct {
-		NodeID       string `json:"node_id"`
-		Endpoints    []struct {
+		NodeID    string `json:"node_id"`
+		Endpoints []struct {
 			Addr  string `json:"addr"`
 			Port  int    `json:"port"`
 			Proto string `json:"proto"`
@@ -252,8 +254,8 @@ func (c *Client) ConnectPublicNode(nodeID string) (*PublicNodeConnectResp, error
 
 type PreviewResp struct {
 	Node struct {
-		NodeID       string `json:"node_id"`
-		Endpoints    []struct {
+		NodeID    string `json:"node_id"`
+		Endpoints []struct {
 			Addr  string `json:"addr"`
 			Port  int    `json:"port"`
 			Proto string `json:"proto"`
@@ -352,5 +354,3 @@ func (c *Client) decodeEncryptedOrPlainBytes(data json.RawMessage, deviceID stri
 	// plain (admin or legacy)
 	return data, nil
 }
-
-

@@ -64,6 +64,53 @@ export const Input: React.FC<React.InputHTMLAttributes<HTMLInputElement>> = (pro
   );
 };
 
+export const SuffixInput: React.FC<{
+  value: string;
+  onChange: (v: string) => void;
+  suffixText: string;
+  placeholder?: string;
+}> = ({ value, onChange, suffixText, placeholder }) => {
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        width: "100%",
+        gap: 10,
+      }}
+    >
+      <input
+        className="input"
+        value={value}
+        onChange={(e) => onChange((e.target as any).value)}
+        placeholder={placeholder}
+        style={{ flex: 1, minWidth: 0 }}
+      />
+      <div
+        className="input"
+        style={{
+          width: "auto",
+          flex: "0 0 auto",
+          padding: "0 16px",
+          height: "48px",
+          display: "flex",
+          alignItems: "center",
+          color: "var(--text-secondary)",
+          cursor: "default",
+          userSelect: "none",
+          pointerEvents: "none",
+          borderColor: "transparent",
+          boxShadow: "none",
+          whiteSpace: "nowrap",
+        }}
+        title={suffixText}
+      >
+        {suffixText}
+      </div>
+    </div>
+  );
+};
+
 export const SearchInput: React.FC<React.InputHTMLAttributes<HTMLInputElement>> = (props) => (
   <div style={{ position: 'relative', width: props.width || '100%' }}>
     <Search size={18} style={{ position: 'absolute', left: 16, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-secondary)' }} />

@@ -131,9 +131,27 @@ func (c *frpClient) displayServerForUI() (serverOut string, display string, sour
 func (c *frpClient) Connect() error {
 	c.mu.Lock()
 
+	// 如果已连接但配置发生变化（切换节点/票据/域名等），必须重启 frpc 才能把隧道注册到新节点
+	sig := c.configSigLocked()
 	if c.connected {
-		c.mu.Unlock()
-		return nil
+		if strings.TrimSpace(c.activeSig) == strings.TrimSpace(sig) {
+			c.mu.Unlock()
+			return nil
+		}
+		logger.Info("检测到 FRP 配置已变更，准备切换节点/凭证并重启 frpc")
+		// 清空当前进程引用，避免 monitorProcess 干扰；并终止旧进程
+		oldCmd := c.cmd
+		c.cmd = nil
+		c.connected = false
+		c.connectedAt = time.Time{}
+		c.lastError = ""
+		// 新配置未验证前不允许自动重启
+		c.activeSig = sig
+		c.stableSig = ""
+		if oldCmd != nil && oldCmd.Process != nil {
+			_ = oldCmd.Process.Kill()
+		}
+		// 继续走“新连接”流程
 	}
 
 	if c.config.Server == "" {
@@ -197,7 +215,7 @@ func (c *frpClient) Connect() error {
 	c.connectedAt = time.Now()
 	c.lastError = ""
 	c.restartCount = 0
-	sig := c.configSigLocked()
+	sig = c.configSigLocked()
 	c.activeSig = sig
 
 	serverOut, display, source := c.displayServerForUI()
@@ -249,7 +267,8 @@ func (c *frpClient) generateRandomDomain() string {
 	base := strings.TrimSpace(c.config.DomainSuffix)
 	base = strings.TrimPrefix(base, ".")
 	if base == "" {
-		base = "frpc.zyckj.club"
+		// 不再使用硬编码默认后缀：必须由桥梁节点配置下发
+		return ""
 	}
 	const letters = "abcdefghijklmnopqrstuvwxyz0123456789"
 	b := make([]byte, 8)

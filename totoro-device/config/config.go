@@ -91,6 +91,8 @@ type FRPProfile struct {
 	AdminPwd     string `json:"admin_pwd"`
 	TotoroTicket string `json:"-"` // 不落盘：属于短期票据
 	DomainSuffix string `json:"domain_suffix"`
+	HTTPEnabled  bool   `json:"http_enabled"`
+	HTTPSEnabled bool   `json:"https_enabled"`
 }
 
 // FRPPublicProfile 公开节点模式的持久化信息
@@ -123,6 +125,9 @@ type FRPServerConfig struct {
 	TotoroTicket string `json:"-"` // 不落盘：属于短期票据
 	// DomainSuffix HTTP/HTTPS 隧道的默认域名后缀（前端只填写前缀即可）
 	DomainSuffix string `json:"domain_suffix"` // frpc.zyckj.club
+	// HTTPEnabled/HTTPSEnabled：由桥梁节点配置下发，决定是否允许创建 http/https 隧道
+	HTTPEnabled  bool `json:"http_enabled"`
+	HTTPSEnabled bool `json:"https_enabled"`
 }
 
 func (c *FRPServerConfig) ensureDefaults() {
@@ -144,6 +149,8 @@ func (c *FRPServerConfig) ensureDefaults() {
 				AdminPwd:     c.AdminPwd,
 				TotoroTicket: c.TotoroTicket,
 				DomainSuffix: c.DomainSuffix,
+				HTTPEnabled:  c.HTTPEnabled,
+				HTTPSEnabled: c.HTTPSEnabled,
 			}
 		}
 	case FRPModePublic:
@@ -156,6 +163,8 @@ func (c *FRPServerConfig) ensureDefaults() {
 				AdminPwd:     c.AdminPwd,
 				TotoroTicket: c.TotoroTicket,
 				DomainSuffix: c.DomainSuffix,
+				HTTPEnabled:  c.HTTPEnabled,
+				HTTPSEnabled: c.HTTPSEnabled,
 			}
 		}
 	default:
@@ -169,6 +178,8 @@ func (c *FRPServerConfig) ensureDefaults() {
 				AdminPwd:     c.AdminPwd,
 				TotoroTicket: c.TotoroTicket,
 				DomainSuffix: c.DomainSuffix,
+				HTTPEnabled:  c.HTTPEnabled,
+				HTTPSEnabled: c.HTTPSEnabled,
 			}
 		}
 	}
@@ -193,6 +204,8 @@ func (c *FRPServerConfig) SyncActiveFromMode() {
 	c.AdminPwd = strings.TrimSpace(p.AdminPwd)
 	c.TotoroTicket = strings.TrimSpace(p.TotoroTicket)
 	c.DomainSuffix = strings.TrimPrefix(strings.TrimSpace(p.DomainSuffix), ".")
+	c.HTTPEnabled = p.HTTPEnabled
+	c.HTTPSEnabled = p.HTTPSEnabled
 }
 
 // ScannerConfig 扫描器配置

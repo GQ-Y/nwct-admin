@@ -311,7 +311,7 @@
 
       function openOfficialModal(row){
         const isEdit = !!row;
-        const r = row || { node_id:'', name:'', server:'', token:'', admin_addr:'', admin_user:'', admin_pwd:'', node_api:'', domain_suffix:'' };
+        const r = row || { node_id:'', name:'', server:'', token:'', admin_addr:'', admin_user:'', admin_pwd:'', node_api:'', domain_suffix:'', http_enabled:false, https_enabled:false };
         modal(`
           <div class="modalHeader">
             <div class="modalTitle">${isEdit ? '编辑官方内置节点' : '新增官方内置节点'}</div>
@@ -343,9 +343,19 @@
               <input id="m_node_api" placeholder="例如 http://x.x.x.x:18080" value="${escapeHtml(r.node_api||'')}" />
             </div>
             <div>
-              <div class="hint" style="margin:6px 0 6px">domain_suffix（可选）</div>
+              <div class="hint" style="margin:6px 0 6px">domain_suffix（必填：HTTP/HTTPS 隧道根域）</div>
               <input id="m_domain" placeholder="例如 frpc.example.com" value="${escapeHtml(r.domain_suffix||'')}" />
             </div>
+          </div>
+          <div class="row" style="margin-top:10px; gap:14px">
+            <label class="hint" style="display:flex; align-items:center; gap:8px">
+              <input type="checkbox" id="m_http_enabled" ${r.http_enabled ? 'checked' : ''} />
+              HTTP 支持
+            </label>
+            <label class="hint" style="display:flex; align-items:center; gap:8px">
+              <input type="checkbox" id="m_https_enabled" ${r.https_enabled ? 'checked' : ''} />
+              HTTPS 支持
+            </label>
           </div>
           <div class="row" style="justify-content:flex-end; margin-top:14px">
             <button class="btn" id="cancelBtn">取消</button>
@@ -361,9 +371,12 @@
           const token = $('m_token').value.trim();
           const node_api = $('m_node_api').value.trim();
           const domain_suffix = $('m_domain').value.trim();
+          const http_enabled = !!$('m_http_enabled').checked;
+          const https_enabled = !!$('m_https_enabled').checked;
           if (!node_id || !server) { toast('warn','node_id/server 必填'); return; }
+          if ((http_enabled || https_enabled) && !domain_suffix) { toast('warn','开启 HTTP/HTTPS 必须填写 domain_suffix'); return; }
           try{
-            await api('/api/v1/admin/official_nodes/upsert', { method:'POST', body: JSON.stringify({ node_id, name, server, token, node_api, domain_suffix }) });
+            await api('/api/v1/admin/official_nodes/upsert', { method:'POST', body: JSON.stringify({ node_id, name, server, token, node_api, domain_suffix, http_enabled, https_enabled }) });
             toast('ok','已保存');
             closeModal();
             loadOfficial();

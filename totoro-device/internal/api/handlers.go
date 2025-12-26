@@ -260,6 +260,8 @@ func (s *Server) handleFRPBuiltinUse(c *gin.Context) {
 		AdminUser:    strings.TrimSpace(off.AdminUser),
 		AdminPwd:     strings.TrimSpace(off.AdminPwd),
 		DomainSuffix: strings.TrimPrefix(strings.TrimSpace(off.DomainSuffix), "."),
+		HTTPEnabled:  off.HTTPEnabled,
+		HTTPSEnabled: off.HTTPSEnabled,
 	}
 	s.config.FRPServer.Mode = config.FRPModeBuiltin
 	s.config.FRPServer.SyncActiveFromMode()
@@ -1871,6 +1873,20 @@ func (s *Server) handleFRPAddTunnel(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, models.ErrorResponse(400, "参数错误: "+err.Error()))
 		return
 	}
+	// HTTP/HTTPS 隧道能力由桥梁节点配置下发决定：未开启或缺少 domain_suffix 时禁止创建
+	t := strings.ToLower(strings.TrimSpace(req.Type))
+	if t == "http" {
+		if !s.config.FRPServer.HTTPEnabled || strings.TrimSpace(s.config.FRPServer.DomainSuffix) == "" {
+			c.JSON(http.StatusBadRequest, models.ErrorResponse(400, "当前节点未开启 HTTP 隧道或缺少 domain_suffix"))
+			return
+		}
+	}
+	if t == "https" {
+		if !s.config.FRPServer.HTTPSEnabled || strings.TrimSpace(s.config.FRPServer.DomainSuffix) == "" {
+			c.JSON(http.StatusBadRequest, models.ErrorResponse(400, "当前节点未开启 HTTPS 隧道或缺少 domain_suffix"))
+			return
+		}
+	}
 
 	if err := s.frpClient.AddTunnel(&req); err != nil {
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse(500, err.Error()))
@@ -1908,6 +1924,20 @@ func (s *Server) handleFRPUpdateTunnel(c *gin.Context) {
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, models.ErrorResponse(400, "参数错误: "+err.Error()))
 		return
+	}
+	// 同上：禁止绕过前端创建 HTTP/HTTPS 隧道
+	t := strings.ToLower(strings.TrimSpace(req.Type))
+	if t == "http" {
+		if !s.config.FRPServer.HTTPEnabled || strings.TrimSpace(s.config.FRPServer.DomainSuffix) == "" {
+			c.JSON(http.StatusBadRequest, models.ErrorResponse(400, "当前节点未开启 HTTP 隧道或缺少 domain_suffix"))
+			return
+		}
+	}
+	if t == "https" {
+		if !s.config.FRPServer.HTTPSEnabled || strings.TrimSpace(s.config.FRPServer.DomainSuffix) == "" {
+			c.JSON(http.StatusBadRequest, models.ErrorResponse(400, "当前节点未开启 HTTPS 隧道或缺少 domain_suffix"))
+			return
+		}
 	}
 
 	if err := s.frpClient.UpdateTunnel(name, &req); err != nil {
@@ -1960,6 +1990,8 @@ func (s *Server) handleConfigGet(c *gin.Context) {
 			"admin_addr":    s.config.FRPServer.AdminAddr,
 			"admin_user":    s.config.FRPServer.AdminUser,
 			"domain_suffix": s.config.FRPServer.DomainSuffix,
+			"http_enabled":  s.config.FRPServer.HTTPEnabled,
+			"https_enabled": s.config.FRPServer.HTTPSEnabled,
 			"public": gin.H{
 				"node_api":          s.config.FRPServer.Public.NodeAPI,
 				"invite_code":       "***",

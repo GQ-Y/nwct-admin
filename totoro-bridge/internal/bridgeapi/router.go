@@ -210,6 +210,8 @@ func (a *Router) handlePublicNodeConnect(c *gin.Context) {
 			"node_id":       n.NodeID,
 			"endpoints":     n.Endpoints,
 			"domain_suffix": n.DomainSuffix,
+			"http_enabled":  n.HTTPEnabled,
+			"https_enabled": n.HTTPSEnabled,
 		},
 		"connection_ticket": tok,
 		"expires_at":        exp.UTC().Format(time.RFC3339),
@@ -239,6 +241,8 @@ type heartbeatReq struct {
 	Endpoints    []store.NodeEndpoint `json:"endpoints"`
 	NodeAPI      string               `json:"node_api"`
 	DomainSuffix string               `json:"domain_suffix"`
+	HTTPEnabled  bool                 `json:"http_enabled"`
+	HTTPSEnabled bool                 `json:"https_enabled"`
 	TCPPortPool  *store.PortPool      `json:"tcp_port_pool"`
 	UDPPortPool  *store.PortPool      `json:"udp_port_pool"`
 	Version      any                  `json:"version"`
@@ -294,6 +298,8 @@ func (a *Router) handleNodeHeartbeat(c *gin.Context) {
 		Endpoints:    req.Endpoints,
 		NodeAPI:      strings.TrimSpace(req.NodeAPI),
 		DomainSuffix: strings.TrimSpace(req.DomainSuffix),
+		HTTPEnabled:  req.HTTPEnabled,
+		HTTPSEnabled: req.HTTPSEnabled,
 		TCPPortPool:  req.TCPPortPool,
 		UDPPortPool:  req.UDPPortPool,
 		MetricsJSON:  metricsJSON,
@@ -476,6 +482,8 @@ func (a *Router) handleInvitePreview(c *gin.Context) {
 			"node_id":       node.NodeID,
 			"endpoints":     node.Endpoints,
 			"domain_suffix": node.DomainSuffix,
+			"http_enabled":  node.HTTPEnabled,
+			"https_enabled": node.HTTPSEnabled,
 			"tcp_port_pool": node.TCPPortPool,
 			"udp_port_pool": node.UDPPortPool,
 		},
@@ -527,6 +535,8 @@ func (a *Router) handleInviteRedeem(c *gin.Context) {
 			"node_id":       node.NodeID,
 			"endpoints":     node.Endpoints,
 			"domain_suffix": node.DomainSuffix,
+			"http_enabled":  node.HTTPEnabled,
+			"https_enabled": node.HTTPSEnabled,
 			"tcp_port_pool": node.TCPPortPool,
 			"udp_port_pool": node.UDPPortPool,
 		},
@@ -603,6 +613,8 @@ type adminUpsertOfficialNodeReq struct {
 	AdminPwd     string `json:"admin_pwd"`
 	NodeAPI      string `json:"node_api"`
 	DomainSuffix string `json:"domain_suffix"`
+	HTTPEnabled  *bool  `json:"http_enabled"`
+	HTTPSEnabled *bool  `json:"https_enabled"`
 }
 
 func (a *Router) handleAdminUpsertOfficialNode(c *gin.Context) {
@@ -610,6 +622,14 @@ func (a *Router) handleAdminUpsertOfficialNode(c *gin.Context) {
 	if err := c.ShouldBindJSON(&req); err != nil {
 		apiresp.Fail(c, http.StatusBadRequest, 400, err.Error())
 		return
+	}
+	httpEnabled := false
+	httpsEnabled := false
+	if req.HTTPEnabled != nil {
+		httpEnabled = *req.HTTPEnabled
+	}
+	if req.HTTPSEnabled != nil {
+		httpsEnabled = *req.HTTPSEnabled
 	}
 	n := store.OfficialNode{
 		NodeID:       strings.TrimSpace(req.NodeID),
@@ -621,6 +641,8 @@ func (a *Router) handleAdminUpsertOfficialNode(c *gin.Context) {
 		AdminPwd:     strings.TrimSpace(req.AdminPwd),
 		NodeAPI:      strings.TrimSpace(req.NodeAPI),
 		DomainSuffix: strings.TrimPrefix(strings.TrimSpace(req.DomainSuffix), "."),
+		HTTPEnabled:  httpEnabled,
+		HTTPSEnabled: httpsEnabled,
 	}
 	if err := a.store.UpsertOfficialNode(n); err != nil {
 		apiresp.Fail(c, http.StatusInternalServerError, 500, err.Error())
