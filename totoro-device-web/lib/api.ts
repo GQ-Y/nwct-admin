@@ -148,6 +148,8 @@ export const api = {
   frpReload: () => request<any>("/api/v1/frp/reload", { method: "POST", body: "{}" }),
 
   publicNodes: () => request<{ nodes: any[] }>("/api/v1/public/nodes"),
+  inviteResolve: (req: { node_api: string; code: string }) =>
+    request<any>("/api/v1/public/invites/resolve", { method: "POST", body: JSON.stringify(req) }),
   inviteConnect: (req: { node_api: string; code: string }) =>
     request<any>("/api/v1/public/invites/connect", { method: "POST", body: JSON.stringify(req) }),
 

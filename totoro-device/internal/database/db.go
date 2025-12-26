@@ -124,11 +124,24 @@ func createTables() error {
 		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 	);`
 
+	// 桥梁 device session（device_token 持久化）
+	bridgeSessionTable := `
+	CREATE TABLE IF NOT EXISTS bridge_session (
+		id INTEGER PRIMARY KEY CHECK (id = 1),
+		bridge_url TEXT NOT NULL DEFAULT '',
+		device_id TEXT NOT NULL DEFAULT '',
+		mac TEXT NOT NULL DEFAULT '',
+		device_token TEXT NOT NULL DEFAULT '',
+		expires_at INTEGER NOT NULL DEFAULT 0,
+		updated_at INTEGER NOT NULL DEFAULT 0
+	);`
+
 	tables := []string{
 		devicesTable,
 		devicePortsTable,
 		deviceHistoryTable,
 		frpTunnelsTable,
+		bridgeSessionTable,
 	}
 
 	for _, table := range tables {

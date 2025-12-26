@@ -216,6 +216,10 @@ func main() {
 			NodeID:  nodeID,
 			NodeKey: nodeKey,
 		}
+		// node_api：默认使用 public_addr + api 端口（可通过环境变量覆盖）
+		apiPort := strings.TrimLeft(strings.TrimSpace(apiAddr), ":")
+		defaultNodeAPI := "http://" + strings.TrimSpace(getenv("TOTOTO_NODE_PUBLIC_ADDR", "127.0.0.1")) + ":" + apiPort
+		publicNodeAPI := strings.TrimSpace(getenv("TOTOTO_NODE_PUBLIC_API", defaultNodeAPI))
 		for range ticker.C {
 			cfg, _, err := st.GetNodeConfig()
 			if err != nil {
@@ -237,6 +241,7 @@ func main() {
 				Region: cfg.Region,
 				ISP:    cfg.ISP,
 				Tags:   cfg.Tags,
+				NodeAPI: publicNodeAPI,
 				Endpoints: func() []any {
 					out := make([]any, 0, len(cfg.Endpoints))
 					for _, ep := range cfg.Endpoints {

@@ -122,9 +122,12 @@ func (s *Server) initRouter() {
 		api.DELETE("/frp/tunnels/:name", s.authMiddleware(), s.handleFRPRemoveTunnel)
 		api.PUT("/frp/tunnels/:name", s.authMiddleware(), s.handleFRPUpdateTunnel)
 		api.POST("/frp/reload", s.authMiddleware(), s.handleFRPReload)
+		api.POST("/frp/mode", s.authMiddleware(), s.handleFRPModeSet)
 
 		// 官方桥梁：公开节点列表（设备侧透传/缓存入口）
 		api.GET("/public/nodes", s.authMiddleware(), s.handlePublicNodes)
+		// 邀请码解析预览（仅解析，不写配置/不连接）
+		api.POST("/public/invites/resolve", s.authMiddleware(), s.handleInviteResolve)
 		// 邀请码一键连接（从节点兑换 ticket 并连接）
 		api.POST("/public/invites/connect", s.authMiddleware(), s.handleInviteConnect)
 

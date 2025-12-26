@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"totoro-device/internal/bridgeclient"
 	"totoro-device/config"
 	"totoro-device/internal/database"
 	"totoro-device/internal/frp"
@@ -43,11 +44,46 @@ func (s *Server) handlePublicNodes(c *gin.Context) {
 	u := bridge + "/api/v1/public/nodes"
 
 	req, _ := http.NewRequest(http.MethodGet, u, nil)
+	// bridge 需要设备 session token：从本地 SQLite 读取；若无/过期则尝试用 device_id+mac 重新注册后重试一次
+	if db := database.GetDB(); db != nil {
+		if sess, err := database.GetBridgeSession(db); err == nil && sess != nil && !database.BridgeSessionExpired(sess, 30*time.Second) {
+			req.Header.Set("X-Device-Token", strings.TrimSpace(sess.DeviceToken))
+		}
+	}
 	client := &http.Client{Timeout: 5 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
 		c.JSON(http.StatusBadGateway, models.ErrorResponse(502, "桥梁不可达: "+err.Error()))
 		return
+	}
+	// token 失效：尝试重新注册并重试一次
+	if resp.StatusCode == http.StatusUnauthorized {
+		_ = resp.Body.Close()
+		deviceID := strings.TrimSpace(s.config.Device.ID)
+		mac := strings.TrimSpace(s.config.Bridge.LastMAC)
+		if deviceID != "" && mac != "" {
+			bc := &bridgeclient.Client{BaseURL: bridge}
+			if reg, rerr := bc.Register(deviceID, mac); rerr == nil && reg != nil && strings.TrimSpace(reg.DeviceToken) != "" {
+				if db := database.GetDB(); db != nil {
+					_ = database.UpsertBridgeSession(db, database.BridgeSession{
+						BridgeURL:   bridge,
+						DeviceID:    deviceID,
+						MAC:         mac,
+						DeviceToken: strings.TrimSpace(reg.DeviceToken),
+						ExpiresAt:   bridgeclient.ParseExpiresAt(reg.ExpiresAt),
+					})
+				}
+				// retry
+				req2, _ := http.NewRequest(http.MethodGet, u, nil)
+				req2.Header.Set("X-Device-Token", strings.TrimSpace(reg.DeviceToken))
+				resp2, err2 := client.Do(req2)
+				if err2 != nil {
+					c.JSON(http.StatusBadGateway, models.ErrorResponse(502, "桥梁不可达: "+err2.Error()))
+					return
+				}
+				resp = resp2
+			}
+		}
 	}
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(resp.Body)
@@ -1172,36 +1208,71 @@ func (s *Server) handleFRPStatus(c *gin.Context) {
 // handleFRPConnect 处理FRP连接请求
 func (s *Server) handleFRPConnect(c *gin.Context) {
 	var req struct {
-		Server    string `json:"server"`
-		Token     string `json:"token"`
+		Server       string `json:"server"`
+		Token        string `json:"token"`
 		TotoroTicket string `json:"totoro_ticket"`
 		AdminAddr string `json:"admin_addr"`
 		AdminUser string `json:"admin_user"`
 		AdminPwd  string `json:"admin_pwd"`
 	}
 
-	if err := c.ShouldBindJSON(&req); err != nil {
-		// 允许空请求体：使用已有配置（实现"一键连接"）
-	}
+	_ = c.ShouldBindJSON(&req) // 允许空请求体：使用“当前模式”一键连接
 
-	// 合并配置：请求未提供的字段则沿用已有配置
-	if strings.TrimSpace(req.Server) != "" {
-		s.config.FRPServer.Server = strings.TrimSpace(req.Server)
-	}
-	if strings.TrimSpace(req.Token) != "" {
-		s.config.FRPServer.Token = strings.TrimSpace(req.Token)
-	}
-	if strings.TrimSpace(req.TotoroTicket) != "" {
-		s.config.FRPServer.TotoroTicket = strings.TrimSpace(req.TotoroTicket)
-	}
-	if strings.TrimSpace(req.AdminAddr) != "" {
-		s.config.FRPServer.AdminAddr = strings.TrimSpace(req.AdminAddr)
-	}
-	if strings.TrimSpace(req.AdminUser) != "" {
-		s.config.FRPServer.AdminUser = strings.TrimSpace(req.AdminUser)
-	}
-	if strings.TrimSpace(req.AdminPwd) != "" {
-		s.config.FRPServer.AdminPwd = strings.TrimSpace(req.AdminPwd)
+	// 如果请求显式传了 server/token 等，认为是“手动模式”
+	if strings.TrimSpace(req.Server) != "" || strings.TrimSpace(req.Token) != "" || strings.TrimSpace(req.AdminAddr) != "" || strings.TrimSpace(req.AdminUser) != "" || strings.TrimSpace(req.AdminPwd) != "" || strings.TrimSpace(req.TotoroTicket) != "" {
+		s.config.FRPServer.Mode = config.FRPModeManual
+
+		// 合并 manual profile：请求未提供的字段则沿用已有 manual
+		p := s.config.FRPServer.Manual
+		if strings.TrimSpace(req.Server) != "" {
+			p.Server = strings.TrimSpace(req.Server)
+		}
+		if strings.TrimSpace(req.Token) != "" {
+			p.Token = strings.TrimSpace(req.Token)
+		}
+		if strings.TrimSpace(req.TotoroTicket) != "" {
+			p.TotoroTicket = strings.TrimSpace(req.TotoroTicket)
+		}
+		if strings.TrimSpace(req.AdminAddr) != "" {
+			p.AdminAddr = strings.TrimSpace(req.AdminAddr)
+		}
+		if strings.TrimSpace(req.AdminUser) != "" {
+			p.AdminUser = strings.TrimSpace(req.AdminUser)
+		}
+		if strings.TrimSpace(req.AdminPwd) != "" {
+			p.AdminPwd = strings.TrimSpace(req.AdminPwd)
+		}
+		// domain_suffix 仍通过 /config 更新（这里不改动）
+		s.config.FRPServer.Manual = p
+		s.config.FRPServer.SyncActiveFromMode()
+		_ = s.config.Save()
+	} else {
+		// 走当前模式
+		s.config.FRPServer.SyncActiveFromMode()
+
+		// public 模式：如果 ticket 缺失/过期，尝试自动换票
+		if s.config.FRPServer.Mode == config.FRPModePublic {
+			if strings.TrimSpace(s.config.FRPServer.Public.NodeAPI) == "" || strings.TrimSpace(s.config.FRPServer.Public.InviteCode) == "" {
+				c.JSON(http.StatusBadRequest, models.ErrorResponse(400, "public 模式未配置 node_api/invite_code"))
+				return
+			}
+			if strings.TrimSpace(s.config.FRPServer.Public.TotoroTicket) == "" || frp.TicketExpired(s.config.FRPServer.Public.TicketExpiresAt, 30*time.Second) {
+				res, err := frp.ResolveInviteToTicket(s.config.FRPServer.Public.NodeAPI, s.config.FRPServer.Public.InviteCode)
+				if err != nil {
+					s.config.FRPServer.Public.LastResolveError = err.Error()
+					_ = s.config.Save()
+					c.JSON(http.StatusBadGateway, models.ErrorResponse(502, "自动换票失败: "+err.Error()))
+					return
+				}
+				s.config.FRPServer.Public.LastResolveError = ""
+				s.config.FRPServer.Public.Server = res.Server
+				s.config.FRPServer.Public.TotoroTicket = res.Ticket
+				s.config.FRPServer.Public.TicketExpiresAt = res.ExpiresAtRFC
+				s.config.FRPServer.Public.Token = ""
+				s.config.FRPServer.SyncActiveFromMode()
+				_ = s.config.Save()
+			}
+		}
 	}
 
 	if err := s.frpClient.Connect(); err != nil {
@@ -1231,55 +1302,23 @@ func (s *Server) handleInviteConnect(c *gin.Context) {
 		return
 	}
 
-	// 调用节点 resolve
-	u := nodeAPI + "/api/v1/invites/resolve"
-	body := fmt.Sprintf(`{"code":%q}`, code)
-	httpReq, _ := http.NewRequest(http.MethodPost, u, strings.NewReader(body))
-	httpReq.Header.Set("Content-Type", "application/json")
-	client := &http.Client{Timeout: 6 * time.Second}
-	resp, err := client.Do(httpReq)
+	// 调用节点 resolve（兑换 ticket）
+	res, err := frp.ResolveInviteToTicket(nodeAPI, code)
 	if err != nil {
-		c.JSON(http.StatusBadGateway, models.ErrorResponse(502, "节点不可达: "+err.Error()))
+		c.JSON(http.StatusBadGateway, models.ErrorResponse(502, err.Error()))
 		return
 	}
-	defer resp.Body.Close()
-	raw, _ := io.ReadAll(resp.Body)
-	var nodeResp struct {
-		Code    int             `json:"code"`
-		Message string          `json:"message"`
-		Data    json.RawMessage `json:"data"`
-	}
-	if err := json.Unmarshal(raw, &nodeResp); err != nil || nodeResp.Code != 0 {
-		msg := strings.TrimSpace(nodeResp.Message)
-		if msg == "" {
-			msg = "节点解析邀请码失败"
-		}
-		c.JSON(http.StatusBadGateway, models.ErrorResponse(502, msg))
-		return
-	}
-	var data struct {
-		Node struct {
-			NodeID    string `json:"node_id"`
-			Endpoints []struct {
-				Addr  string `json:"addr"`
-				Port  int    `json:"port"`
-				Proto string `json:"proto"`
-			} `json:"endpoints"`
-		} `json:"node"`
-		ConnectionTicket string `json:"connection_ticket"`
-		ExpiresAt        string `json:"expires_at"`
-	}
-	if err := json.Unmarshal(nodeResp.Data, &data); err != nil {
-		c.JSON(http.StatusBadGateway, models.ErrorResponse(502, "节点响应解析失败"))
-		return
-	}
-	if len(data.Node.Endpoints) == 0 {
-		c.JSON(http.StatusBadGateway, models.ErrorResponse(502, "节点缺少 endpoints"))
-		return
-	}
-	ep := data.Node.Endpoints[0]
-	s.config.FRPServer.Server = fmt.Sprintf("%s:%d", ep.Addr, ep.Port)
-	s.config.FRPServer.TotoroTicket = strings.TrimSpace(data.ConnectionTicket)
+
+	// 切换为 public 模式并持久化（下次启动自动换票 + 自动连接）
+	s.config.FRPServer.Mode = config.FRPModePublic
+	s.config.FRPServer.Public.NodeAPI = nodeAPI
+	s.config.FRPServer.Public.InviteCode = code
+	s.config.FRPServer.Public.LastResolveError = ""
+	s.config.FRPServer.Public.Server = res.Server
+	s.config.FRPServer.Public.TotoroTicket = res.Ticket
+	s.config.FRPServer.Public.TicketExpiresAt = res.ExpiresAtRFC
+	s.config.FRPServer.Public.Token = ""
+	s.config.FRPServer.SyncActiveFromMode()
 	_ = s.config.Save()
 
 	if err := s.frpClient.Connect(); err != nil {
@@ -1287,10 +1326,68 @@ func (s *Server) handleInviteConnect(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, models.SuccessResponse(gin.H{
-		"node_id":    data.Node.NodeID,
 		"server":     s.config.FRPServer.Server,
-		"expires_at": data.ExpiresAt,
+		"expires_at": res.ExpiresAtRFC,
 	}))
+}
+
+// handleInviteResolve 仅解析邀请码并返回节点信息（不保存/不连接）
+func (s *Server) handleInviteResolve(c *gin.Context) {
+	var req struct {
+		NodeAPI string `json:"node_api" binding:"required"`
+		Code    string `json:"code" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse(400, "参数错误: "+err.Error()))
+		return
+	}
+	nodeAPI := strings.TrimRight(strings.TrimSpace(req.NodeAPI), "/")
+	code := strings.TrimSpace(req.Code)
+	res, err := frp.ResolveInviteToTicket(nodeAPI, code)
+	if err != nil {
+		c.JSON(http.StatusBadGateway, models.ErrorResponse(502, err.Error()))
+		return
+	}
+	c.JSON(http.StatusOK, models.SuccessResponse(gin.H{
+		"node": gin.H{
+			"node_id":       res.NodeID,
+			"endpoints":     res.Endpoints,
+			"domain_suffix": res.DomainSuffix,
+		},
+		"server":     res.Server,
+		"expires_at": res.ExpiresAtRFC,
+	}))
+}
+
+// handleFRPModeSet 切换 frpc 连接模式，并自动连接
+func (s *Server) handleFRPModeSet(c *gin.Context) {
+	var req struct {
+		Mode config.FRPMode `json:"mode" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse(400, "参数错误: "+err.Error()))
+		return
+	}
+	if req.Mode != config.FRPModeBuiltin && req.Mode != config.FRPModeManual && req.Mode != config.FRPModePublic {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse(400, "mode 无效"))
+		return
+	}
+
+	s.config.FRPServer.Mode = req.Mode
+	s.config.FRPServer.SyncActiveFromMode()
+	_ = s.config.Save()
+
+	// public 模式不在此处强制换票（避免必须带邀请码）；需要连接请走 /public/invites/connect 或 /frp/connect(空体)
+	if req.Mode == config.FRPModePublic {
+		c.JSON(http.StatusOK, models.SuccessResponse(gin.H{"mode": req.Mode}))
+		return
+	}
+
+	if err := s.frpClient.Connect(); err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse(500, err.Error()))
+		return
+	}
+	c.JSON(http.StatusOK, models.SuccessResponse(gin.H{"mode": req.Mode}))
 }
 
 // handleFRPDisconnect 处理FRP断开请求
@@ -1405,12 +1502,22 @@ func (s *Server) handleConfigGet(c *gin.Context) {
 		},
 		"network": net,
 		"frp_server": gin.H{
+			"mode":          s.config.FRPServer.Mode,
 			"server":        s.config.FRPServer.Server,
 			"token":         "***",
 			"totoro_ticket": "***",
 			"admin_addr":    s.config.FRPServer.AdminAddr,
 			"admin_user":    s.config.FRPServer.AdminUser,
 			"domain_suffix": s.config.FRPServer.DomainSuffix,
+			"public": gin.H{
+				"node_api":          s.config.FRPServer.Public.NodeAPI,
+				"invite_code":       "***",
+				"ticket_expires_at": s.config.FRPServer.Public.TicketExpiresAt,
+				"last_resolve_error": func() string {
+					// 仅用于排障，不算敏感
+					return s.config.FRPServer.Public.LastResolveError
+				}(),
+			},
 		},
 		"scanner": s.config.Scanner,
 	}

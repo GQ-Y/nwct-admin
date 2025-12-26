@@ -14,6 +14,7 @@ type Config struct {
 	Initialized bool            `json:"initialized"`
 	Device      DeviceConfig    `json:"device"`
 	Network     NetworkConfig   `json:"network"`
+	Bridge      BridgeConfig    `json:"bridge"`
 	FRPServer   FRPServerConfig `json:"frp_server"`
 	Scanner     ScannerConfig   `json:"scanner"`
 	Server      ServerConfig    `json:"server"`
@@ -61,8 +62,57 @@ type WiFiProfile struct {
 	LastError     string `json:"last_error,omitempty"`
 }
 
+// BridgeConfig 桥梁平台配置（设备侧）
+type BridgeConfig struct {
+	URL         string `json:"url"`          // 例如 http://127.0.0.1:18090
+	DeviceToken string `json:"device_token"` // 注册成功后下发，设备本地持久化
+	ExpiresAt   string `json:"expires_at"`   // RFC3339
+	LastMAC     string `json:"last_mac"`     // 仅记录
+}
+
+// FRPMode 设备端 frpc 连接 frps 的工作模式
+// - builtin：默认连接“内置/预设”的 frps（官方/你的默认节点）
+// - manual：用户手动填写 frps 连接信息
+// - public：通过公开节点（node_api + 邀请码）兑换 ticket 后连接
+type FRPMode string
+
+const (
+	FRPModeBuiltin FRPMode = "builtin"
+	FRPModeManual  FRPMode = "manual"
+	FRPModePublic  FRPMode = "public"
+)
+
+// FRPProfile 一种模式下的连接配置快照（会持久化）
+type FRPProfile struct {
+	Server       string `json:"server"`
+	Token        string `json:"token"`
+	AdminAddr    string `json:"admin_addr"`
+	AdminUser    string `json:"admin_user"`
+	AdminPwd     string `json:"admin_pwd"`
+	TotoroTicket string `json:"totoro_ticket,omitempty"`
+	DomainSuffix string `json:"domain_suffix"`
+}
+
+// FRPPublicProfile 公开节点模式的持久化信息
+type FRPPublicProfile struct {
+	FRPProfile
+	NodeAPI          string `json:"node_api,omitempty"`           // 例如 http://1.2.3.4:18080
+	InviteCode       string `json:"invite_code,omitempty"`        // 用户输入的邀请码（用于启动时自动换票）
+	TicketExpiresAt  string `json:"ticket_expires_at,omitempty"`  // RFC3339
+	LastResolveError string `json:"last_resolve_error,omitempty"` // 最近一次自动换票失败原因（仅用于排障）
+}
+
 // FRPServerConfig FRP服务端配置
 type FRPServerConfig struct {
+	// Mode 当前选择的连接方式（选择后保持）
+	Mode FRPMode `json:"mode"`
+
+	// 三种模式各自的“最后一次配置”，用于切换后能恢复
+	Builtin FRPProfile       `json:"builtin"`
+	Manual  FRPProfile       `json:"manual"`
+	Public  FRPPublicProfile `json:"public"`
+
+	// Active（当前生效配置）：为了减少全项目改动，保留这些字段作为“当前模式的展开值”
 	Server    string `json:"server"`     // 117.172.29.237:7000
 	Token     string `json:"token"`      // token123456
 	AdminAddr string `json:"admin_addr"` // 117.172.29.237:7500
@@ -73,6 +123,94 @@ type FRPServerConfig struct {
 	TotoroTicket string `json:"totoro_ticket,omitempty"`
 	// DomainSuffix HTTP/HTTPS 隧道的默认域名后缀（前端只填写前缀即可）
 	DomainSuffix string `json:"domain_suffix"` // frpc.zyckj.club
+}
+
+func (c *FRPServerConfig) ensureDefaults() {
+	// 默认模式：builtin
+	if c.Mode == "" {
+		c.Mode = FRPModeBuiltin
+	}
+	// 预设 builtin 默认值（保持和历史默认一致）
+	if strings.TrimSpace(c.Builtin.Server) == "" {
+		c.Builtin.Server = "117.172.29.237:7000"
+	}
+	if strings.TrimSpace(c.Builtin.Token) == "" {
+		c.Builtin.Token = "token123456"
+	}
+	if strings.TrimSpace(c.Builtin.AdminAddr) == "" {
+		c.Builtin.AdminAddr = "117.172.29.237:7500"
+	}
+	if strings.TrimSpace(c.Builtin.AdminUser) == "" {
+		c.Builtin.AdminUser = "admin"
+	}
+	if strings.TrimSpace(c.Builtin.AdminPwd) == "" {
+		c.Builtin.AdminPwd = "admin_nAhTnN"
+	}
+	if strings.TrimSpace(c.Builtin.DomainSuffix) == "" {
+		c.Builtin.DomainSuffix = "frpc.zyckj.club"
+	}
+
+	// 若是旧配置（只写了 Active 字段），把 Active 回填到对应 mode profile，避免丢失
+	switch c.Mode {
+	case FRPModeManual:
+		if strings.TrimSpace(c.Manual.Server) == "" && strings.TrimSpace(c.Server) != "" {
+			c.Manual = FRPProfile{
+				Server:       c.Server,
+				Token:        c.Token,
+				AdminAddr:    c.AdminAddr,
+				AdminUser:    c.AdminUser,
+				AdminPwd:     c.AdminPwd,
+				TotoroTicket: c.TotoroTicket,
+				DomainSuffix: c.DomainSuffix,
+			}
+		}
+	case FRPModePublic:
+		if strings.TrimSpace(c.Public.Server) == "" && strings.TrimSpace(c.Server) != "" {
+			c.Public.FRPProfile = FRPProfile{
+				Server:       c.Server,
+				Token:        c.Token,
+				AdminAddr:    c.AdminAddr,
+				AdminUser:    c.AdminUser,
+				AdminPwd:     c.AdminPwd,
+				TotoroTicket: c.TotoroTicket,
+				DomainSuffix: c.DomainSuffix,
+			}
+		}
+	default:
+		// builtin：如果旧配置只写了 active，则把 active 当作 builtin 的一次快照
+		if strings.TrimSpace(c.Builtin.Server) == "" && strings.TrimSpace(c.Server) != "" {
+			c.Builtin = FRPProfile{
+				Server:       c.Server,
+				Token:        c.Token,
+				AdminAddr:    c.AdminAddr,
+				AdminUser:    c.AdminUser,
+				AdminPwd:     c.AdminPwd,
+				TotoroTicket: c.TotoroTicket,
+				DomainSuffix: c.DomainSuffix,
+			}
+		}
+	}
+}
+
+// SyncActiveFromMode 把当前 mode 的 profile 展开到 Active 字段，供其它模块直接读取
+func (c *FRPServerConfig) SyncActiveFromMode() {
+	c.ensureDefaults()
+	var p FRPProfile
+	switch c.Mode {
+	case FRPModeManual:
+		p = c.Manual
+	case FRPModePublic:
+		p = c.Public.FRPProfile
+	default:
+		p = c.Builtin
+	}
+	c.Server = strings.TrimSpace(p.Server)
+	c.Token = strings.TrimSpace(p.Token)
+	c.AdminAddr = strings.TrimSpace(p.AdminAddr)
+	c.AdminUser = strings.TrimSpace(p.AdminUser)
+	c.AdminPwd = strings.TrimSpace(p.AdminPwd)
+	c.TotoroTicket = strings.TrimSpace(p.TotoroTicket)
+	c.DomainSuffix = strings.TrimPrefix(strings.TrimSpace(p.DomainSuffix), ".")
 }
 
 // ScannerConfig 扫描器配置
@@ -104,23 +242,36 @@ func DefaultConfig() *Config {
 	return &Config{
 		Initialized: false,
 		Device: DeviceConfig{
-			ID:   "device_001",
+			ID:   "DEV001",
 			Name: "内网穿透盒子",
 		},
 		Network: NetworkConfig{
 			Interface: "eth0",
 			IPMode:    "dhcp",
 		},
-		FRPServer: FRPServerConfig{
-			Server: "117.172.29.237:7000",
-			// 默认不设置 token：Totoro 模式优先通过 meta_totoro_ticket 做鉴权；
-			// 如果你需要传统 token 鉴权，请在配置文件中显式配置 token。
-			Token:        "",
-			AdminAddr:    "117.172.29.237:7500",
-			AdminUser:    "admin",
-			AdminPwd:     "admin_nAhTnN",
-			DomainSuffix: "frpc.zyckj.club",
+		Bridge: BridgeConfig{
+			URL: "",
 		},
+		FRPServer: func() FRPServerConfig {
+			// 默认模式：builtin（内置/预设 frps）
+			builtin := FRPProfile{
+				Server:       "117.172.29.237:7000",
+				Token:        "token123456",
+				AdminAddr:    "117.172.29.237:7500",
+				AdminUser:    "admin",
+				AdminPwd:     "admin_nAhTnN",
+				DomainSuffix: "frpc.zyckj.club",
+			}
+			c := FRPServerConfig{
+				Mode:    FRPModeBuiltin,
+				Builtin: builtin,
+				Manual:  FRPProfile{},
+				Public:  FRPPublicProfile{},
+			}
+			// 展开到 Active 字段（保持旧代码读取不变）
+			c.SyncActiveFromMode()
+			return c
+		}(),
 		Scanner: ScannerConfig{
 			AutoScan:     true,
 			ScanInterval: 300,
@@ -247,25 +398,13 @@ func LoadConfig() (*Config, error) {
 
 	// MQTT defaults
 
-	// FRP defaults
-	if strings.TrimSpace(cfg.FRPServer.Server) == "" {
-		cfg.FRPServer.Server = "117.172.29.237:7000"
-		changed = true
-	}
-	if strings.TrimSpace(cfg.FRPServer.AdminAddr) == "" {
-		cfg.FRPServer.AdminAddr = "117.172.29.237:7500"
-		changed = true
-	}
-	if strings.TrimSpace(cfg.FRPServer.AdminUser) == "" {
-		cfg.FRPServer.AdminUser = "admin"
-		changed = true
-	}
-	if strings.TrimSpace(cfg.FRPServer.AdminPwd) == "" {
-		cfg.FRPServer.AdminPwd = "admin_nAhTnN"
-		changed = true
-	}
-	if strings.TrimSpace(cfg.FRPServer.DomainSuffix) == "" {
-		cfg.FRPServer.DomainSuffix = "frpc.zyckj.club"
+	// FRP defaults：三种模式 + Active 展开
+	modeBefore := cfg.FRPServer.Mode
+	serverBefore := strings.TrimSpace(cfg.FRPServer.Server)
+	domainBefore := strings.TrimSpace(cfg.FRPServer.DomainSuffix)
+	cfg.FRPServer.SyncActiveFromMode()
+	// 如果之前没有 mode 或 server/域名为空，说明我们补齐过默认值
+	if modeBefore == "" || serverBefore == "" || domainBefore == "" {
 		changed = true
 	}
 

@@ -25,6 +25,7 @@ type Heartbeat struct {
 	ISP          string        `json:"isp"`
 	Tags         []string      `json:"tags"`
 	Endpoints    []any         `json:"endpoints"`
+	NodeAPI      string        `json:"node_api,omitempty"`
 	DomainSuffix string        `json:"domain_suffix"`
 	TCPPortPool  map[string]int `json:"tcp_port_pool,omitempty"`
 	UDPPortPool  map[string]int `json:"udp_port_pool,omitempty"`
