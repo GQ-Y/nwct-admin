@@ -16,7 +16,12 @@
   </head>
   <body>
     <h2>Totoro Node（节点管理）</h2>
-    <div class="hint">这是 Linux 节点的最小管理面板：查看/修改节点配置、切换公开、设置 bridge、生成邀请码。</div>
+    <div class="hint">
+      这是 Linux 节点的最小管理面板：查看/修改节点配置、切换公开、设置 bridge、生成邀请码。<br/>
+      <b>X-Admin-Key</b>：仅用于保护本管理面板/API（对应环境变量 TOTOTO_NODE_ADMIN_KEY）。若节点配置了该值，则这里必须填写才能操作。<br/>
+      <b>X-Node-Key</b>：节点的密钥（对应环境变量 TOTOTO_NODE_KEY），用于“保存配置/生成邀请码/撤销邀请码”等敏感操作的签名校验。<br/>
+      <b>BridgeURL</b>：桥梁平台地址（例如 http://127.0.0.1:18090），用于节点上报 & 通过桥梁生成/撤销邀请码（符合你的业务逻辑）。
+    </div>
 
     <div class="row">
       <label>AdminKey</label>
@@ -29,6 +34,8 @@
     <div class="row">
       <label>Public</label>
       <input id="public" placeholder="true/false" />
+      <label>描述</label>
+      <input id="desc" placeholder="节点描述（纯文本）" />
       <label>BridgeURL</label>
       <input id="bridgeUrl" placeholder="http://bridge:18090" />
       <button onclick="saveCfg()">保存配置</button>
@@ -65,6 +72,7 @@
           if (j && j.code === 0 && j.data) {
             document.getElementById('public').value = String(!!j.data.public);
             document.getElementById('bridgeUrl').value = j.data.bridge_url || '';
+            document.getElementById('desc').value = j.data.description || '';
           }
         } catch (e) { setOut(String(e)); }
       }
@@ -72,7 +80,8 @@
         try {
           const body = {
             public: document.getElementById('public').value.trim() === 'true',
-            bridge_url: document.getElementById('bridgeUrl').value.trim()
+            bridge_url: document.getElementById('bridgeUrl').value.trim(),
+            description: document.getElementById('desc').value.trim()
           };
           const res = await fetch('/api/v1/node/config', { method:'POST', headers: headers(), body: JSON.stringify(body) });
           const j = await res.json();

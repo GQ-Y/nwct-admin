@@ -1,0 +1,74 @@
+{
+  "initialized": true,
+  "device": {
+    "id": "DEV001",
+    "name": "内网穿透盒子"
+  },
+  "network": {
+    "interface": "en0",
+    "ip_mode": "dhcp",
+    "ip": "",
+    "netmask": "",
+    "gateway": "",
+    "dns": "",
+    "wifi": {
+      "ssid": "",
+      "password": "",
+      "security": ""
+    },
+    "wifi_profiles": []
+  },
+  "bridge": {
+    "url": "http://127.0.0.1:18090",
+    "last_mac": "a0:78:17:a1:a9:4a"
+  },
+  "frp_server": {
+    "mode": "public",
+    "builtin": {
+      "server": "117.172.29.237:7000",
+      "token": "token123456",
+      "admin_addr": "",
+      "admin_user": "",
+      "admin_pwd": "",
+      "domain_suffix": "frpc.zyckj.club"
+    },
+    "manual": {
+      "server": "117.172.29.237:7000",
+      "token": "token123",
+      "admin_addr": "",
+      "admin_user": "",
+      "admin_pwd": "",
+      "domain_suffix": "frpc.zyckj.club"
+    },
+    "public": {
+      "server": "117.172.29.237:7000",
+      "token": "token123456",
+      "admin_addr": "",
+      "admin_user": "",
+      "admin_pwd": "",
+      "domain_suffix": "frpc.zyckj.club"
+    },
+    "server": "117.172.29.237:7000",
+    "token": "token123456",
+    "admin_addr": "",
+    "admin_user": "",
+    "admin_pwd": "",
+    "domain_suffix": "frpc.zyckj.club"
+  },
+  "scanner": {
+    "auto_scan": true,
+    "scan_interval": 300,
+    "timeout": 30,
+    "concurrency": 5
+  },
+  "server": {
+    "port": 80,
+    "host": "0.0.0.0"
+  },
+  "database": {
+    "path": "/Users/hook/Code.localized/Go/nwct/totoro-bridge/data/devices.db"
+  },
+  "auth": {
+    "password_hash": "$2a$10$VDtLHlNb.3wiT0.11/cRNe38u.NajVgji28R5lAWsJ.3r3CAnqxrG"
+  }
+}

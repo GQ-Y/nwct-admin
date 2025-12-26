@@ -74,6 +74,21 @@ func bridgeRegisterIfConfigured(cfg *config.Config, netManager network.Manager) 
 		logger.Warn("桥梁注册跳过：无法获取设备 MAC")
 		return
 	}
+	// 无论 bridge 是否可达，都先记录 MAC（仅用于注册/审计，不涉密）
+	cfg.Bridge.URL = base
+	cfg.Bridge.LastMAC = mac
+	// 确保设备侧密钥对存在（用于桥梁加密返回解密）
+	var privB64, pubB64 string
+	if db := database.GetDB(); db != nil {
+		if dc, err := database.GetOrCreateDeviceCrypto(db); err == nil && dc != nil {
+			privB64 = strings.TrimSpace(dc.PrivKeyB64)
+			pubB64 = strings.TrimSpace(dc.PubKeyB64)
+		}
+	}
+	if privB64 == "" || pubB64 == "" {
+		logger.Warn("桥梁注册跳过：设备密钥不可用")
+		return
+	}
 
 	// 先尝试复用 SQLite 中的 session（未过期则不重复注册）
 	if db := database.GetDB(); db != nil {
@@ -82,29 +97,26 @@ func bridgeRegisterIfConfigured(cfg *config.Config, netManager network.Manager) 
 				strings.TrimSpace(sess.DeviceID) == deviceID &&
 				!database.BridgeSessionExpired(sess, 30*time.Second) {
 				cfg.Bridge.URL = base
-				cfg.Bridge.DeviceToken = strings.TrimSpace(sess.DeviceToken)
-				cfg.Bridge.ExpiresAt = time.Unix(sess.ExpiresAt, 0).UTC().Format(time.RFC3339)
 				cfg.Bridge.LastMAC = strings.TrimSpace(sess.MAC)
-				_ = cfg.Save()
 				logger.Info("桥梁 session 复用：device_id=%s", deviceID)
 				return
 			}
 		}
 	}
 
-	c := &bridgeclient.Client{BaseURL: base}
-	resp, err := c.Register(deviceID, mac)
+	c := &bridgeclient.Client{
+		BaseURL:          base,
+		DeviceID:         deviceID,
+		DevicePrivKeyB64: privB64,
+	}
+	resp, err := c.Register(deviceID, mac, pubB64)
 	if err != nil {
 		logger.Error("桥梁注册失败: %v", err)
 		return
 	}
 	if resp != nil && strings.TrimSpace(resp.DeviceToken) != "" {
-		// 持久化到本地配置（便于 UI 展示）
 		cfg.Bridge.URL = base
-		cfg.Bridge.DeviceToken = strings.TrimSpace(resp.DeviceToken)
-		cfg.Bridge.ExpiresAt = strings.TrimSpace(resp.ExpiresAt)
 		cfg.Bridge.LastMAC = mac
-		_ = cfg.Save()
 		// 持久化到 SQLite（source of truth）
 		if db := database.GetDB(); db != nil {
 			_ = database.UpsertBridgeSession(db, database.BridgeSession{
@@ -114,6 +126,26 @@ func bridgeRegisterIfConfigured(cfg *config.Config, netManager network.Manager) 
 				DeviceToken: strings.TrimSpace(resp.DeviceToken),
 				ExpiresAt:   bridgeclient.ParseExpiresAt(resp.ExpiresAt),
 			})
+		}
+
+		// builtin 模式：从桥梁下发 official_nodes 写入本地配置（不再硬编码默认节点）
+		if cfg.FRPServer.Mode == config.FRPModeBuiltin {
+			if len(resp.OfficialNodes) == 0 {
+				logger.Warn("桥梁未配置官方内置节点（official_nodes 为空），builtin 暂不自动连接")
+			} else {
+				off := resp.OfficialNodes[0]
+				cfg.FRPServer.Builtin = config.FRPProfile{
+					Server:       strings.TrimSpace(off.Server),
+					Token:        strings.TrimSpace(off.Token),
+					AdminAddr:    strings.TrimSpace(off.AdminAddr),
+					AdminUser:    strings.TrimSpace(off.AdminUser),
+					AdminPwd:     strings.TrimSpace(off.AdminPwd),
+					DomainSuffix: strings.TrimPrefix(strings.TrimSpace(off.DomainSuffix), "."),
+				}
+				cfg.FRPServer.SyncActiveFromMode()
+				_ = cfg.Save()
+				logger.Info("已从桥梁同步官方内置节点：%s", cfg.FRPServer.Builtin.Server)
+			}
 		}
 		logger.Info("桥梁注册成功：device_id=%s mac=%s", deviceID, mac)
 	}
@@ -367,29 +399,87 @@ func main() {
 
 		switch cfg.FRPServer.Mode {
 		case config.FRPModePublic:
-			// public：自动换票并连接（需要 node_api + invite_code）
-			if strings.TrimSpace(cfg.FRPServer.Public.NodeAPI) == "" || strings.TrimSpace(cfg.FRPServer.Public.InviteCode) == "" {
-				logger.Warn("FRP(public) 未配置 node_api/invite_code，跳过自动连接")
+			// public：
+			// - 若配置了邀请码：bridge 兑换邀请码 -> 下发短期 ticket
+			// - 若选择了公开节点：bridge 为该 public node 签发短期 ticket（无需邀请码）
+			db := database.GetDB()
+			if db == nil {
+				logger.Warn("FRP(public) 数据库未初始化，跳过自动连接")
 				return
 			}
-			if cfg.FRPServer.Public.TicketExpiresAt == "" || frp.TicketExpired(cfg.FRPServer.Public.TicketExpiresAt, 30*time.Second) || strings.TrimSpace(cfg.FRPServer.Public.TotoroTicket) == "" {
-				res, err := frp.ResolveInviteToTicket(cfg.FRPServer.Public.NodeAPI, cfg.FRPServer.Public.InviteCode)
+			code, _ := database.GetPublicInviteCode(db)
+			pubNodeID, _ := database.GetPublicNodeID(db)
+			if strings.TrimSpace(code) == "" && strings.TrimSpace(pubNodeID) == "" {
+				logger.Warn("FRP(public) 未配置邀请码/未选择公开节点，跳过自动连接")
+				return
+			}
+			// 确保 bridge session 可用（过期则重新注册）
+			if sess, _ := database.GetBridgeSession(db); sess == nil || database.BridgeSessionExpired(sess, 30*time.Second) {
+				bridgeRegisterIfConfigured(cfg, netManager)
+			}
+			sess, _ := database.GetBridgeSession(db)
+			if sess == nil || strings.TrimSpace(sess.DeviceToken) == "" {
+				logger.Warn("FRP(public) 缺少 bridge device_token，跳过自动连接")
+				return
+			}
+			dc, err := database.GetOrCreateDeviceCrypto(db)
+			if err != nil || dc == nil || strings.TrimSpace(dc.PrivKeyB64) == "" {
+				logger.Warn("FRP(public) 设备密钥不可用，跳过自动连接")
+				return
+			}
+			bridgeBase := strings.TrimRight(strings.TrimSpace(cfg.Bridge.URL), "/")
+			if bridgeBase == "" {
+				bridgeBase = strings.TrimRight(strings.TrimSpace(os.Getenv("TOTOTO_BRIDGE_URL")), "/")
+			}
+			if bridgeBase == "" {
+				logger.Warn("FRP(public) 未配置 bridge URL，跳过自动连接")
+				return
+			}
+			bc := &bridgeclient.Client{
+				BaseURL:          bridgeBase,
+				DeviceToken:      strings.TrimSpace(sess.DeviceToken),
+				DeviceID:         strings.TrimSpace(cfg.Device.ID),
+				DevicePrivKeyB64: strings.TrimSpace(dc.PrivKeyB64),
+			}
+			if strings.TrimSpace(code) != "" {
+				res, err := bc.RedeemInvite(code)
 				if err != nil {
 					cfg.FRPServer.Public.LastResolveError = err.Error()
-					_ = cfg.Save()
 					logger.Error("FRP(public) 自动换票失败: %v", err)
 					return
 				}
 				cfg.FRPServer.Public.LastResolveError = ""
-				cfg.FRPServer.Public.Server = res.Server
-				cfg.FRPServer.Public.TotoroTicket = res.Ticket
-				cfg.FRPServer.Public.TicketExpiresAt = res.ExpiresAtRFC
-				// public 模式下不使用 token
-				cfg.FRPServer.Public.Token = ""
-				cfg.FRPServer.Mode = config.FRPModePublic
-				cfg.FRPServer.SyncActiveFromMode()
-				_ = cfg.Save()
+				if len(res.Node.Endpoints) == 0 {
+					logger.Error("FRP(public) bridge 未返回 endpoints")
+					return
+				}
+				ep := res.Node.Endpoints[0]
+				cfg.FRPServer.Public.Server = fmt.Sprintf("%s:%d", strings.TrimSpace(ep.Addr), ep.Port)
+				cfg.FRPServer.Public.TotoroTicket = strings.TrimSpace(res.ConnectionTicket)
+				cfg.FRPServer.Public.TicketExpiresAt = strings.TrimSpace(res.ExpiresAt)
+				cfg.FRPServer.Public.DomainSuffix = strings.TrimPrefix(strings.TrimSpace(res.Node.DomainSuffix), ".")
+			} else {
+				res, err := bc.ConnectPublicNode(pubNodeID)
+				if err != nil {
+					cfg.FRPServer.Public.LastResolveError = err.Error()
+					logger.Error("FRP(public) 自动换票失败: %v", err)
+					return
+				}
+				cfg.FRPServer.Public.LastResolveError = ""
+				if len(res.Node.Endpoints) == 0 {
+					logger.Error("FRP(public) bridge 未返回 endpoints")
+					return
+				}
+				ep := res.Node.Endpoints[0]
+				cfg.FRPServer.Public.Server = fmt.Sprintf("%s:%d", strings.TrimSpace(ep.Addr), ep.Port)
+				cfg.FRPServer.Public.TotoroTicket = strings.TrimSpace(res.ConnectionTicket)
+				cfg.FRPServer.Public.TicketExpiresAt = strings.TrimSpace(res.ExpiresAt)
+				cfg.FRPServer.Public.DomainSuffix = strings.TrimPrefix(strings.TrimSpace(res.Node.DomainSuffix), ".")
 			}
+			// public 模式下不使用 token
+			cfg.FRPServer.Public.Token = ""
+			cfg.FRPServer.Mode = config.FRPModePublic
+			cfg.FRPServer.SyncActiveFromMode()
 		default:
 			// builtin/manual：直接用当前 Active 配置连接
 			if strings.TrimSpace(cfg.FRPServer.Server) == "" {

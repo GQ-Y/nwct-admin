@@ -4,6 +4,7 @@ import { Pause, Play, Save, Activity, Users, ArrowUp, ArrowDown, RefreshCw, Plus
 import { useLanguage } from '../contexts/LanguageContext';
 import { api } from '../lib/api';
 import { useRealtime } from '../contexts/RealtimeContext';
+import { Toast } from '../components/Toast';
 
 export const FRPPage: React.FC = () => {
   const { t } = useLanguage();
@@ -15,6 +16,9 @@ export const FRPPage: React.FC = () => {
   const [token, setToken] = useState('');
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [domainSuffix, setDomainSuffix] = useState('frpc.zyckj.club');
+  const [toastOpen, setToastOpen] = useState(false);
+  const [toastType, setToastType] = useState<"success" | "error" | "info">("info");
+  const [toastMsg, setToastMsg] = useState("");
   
   // 隧道管理相关状态
   const [showTunnelModal, setShowTunnelModal] = useState(false);
@@ -35,7 +39,7 @@ export const FRPPage: React.FC = () => {
 
   const serverLabel = useMemo(() => {
     const s = rt.frpStatus ?? status;
-    return s?.server || server || '-';
+    return (s?.display_server || s?.server || server || '-') as any;
   }, [rt.frpStatus, status, server]);
 
   useEffect(() => {
@@ -74,17 +78,59 @@ export const FRPPage: React.FC = () => {
     }
   };
 
+  const useBuiltin = async () => {
+    setLoading(true);
+    try {
+      await api.frpUseBuiltin();
+      await api.frpConnect({});
+      await refresh();
+      setToastType("success");
+      setToastMsg("已使用官方内置并完成连接。");
+      setToastOpen(true);
+    } catch (e: any) {
+      setToastType("error");
+      setToastMsg(e?.message || String(e));
+      setToastOpen(true);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const saveAndConnectManual = async () => {
+    setLoading(true);
+    try {
+      await api.frpConfigSave({
+        server: server.trim(),
+        token: token.trim(),
+        domain_suffix: domainSuffix.trim(),
+      });
+      // 保存即切换到手动配置，并立即使用该配置连接
+      await api.frpConnect({});
+      await refresh();
+      setToastType("success");
+      setToastMsg("已保存并连接。");
+      setToastOpen(true);
+    } catch (e: any) {
+      setToastType("error");
+      setToastMsg(e?.message || String(e));
+      setToastOpen(true);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const onToggle = async () => {
     setLoading(true);
     try {
       if (connected) {
         await api.frpDisconnect();
       } else {
-        const req = {
-          server: server.trim() || undefined,
-          token: token.trim() || undefined,
-        };
-        await api.frpConnect(req);
+        // 连接：默认使用“已保存配置”（mode 决定来源）
+        // manual 模式下，如果用户输入了 server/token，则先保存再连接
+        if (mode === 'manual' && server.trim()) {
+          await api.frpConfigSave({ server: server.trim(), token: token.trim(), domain_suffix: domainSuffix.trim() });
+        }
+        await api.frpConnect({});
       }
       const s = await api.frpStatus();
       setStatus(s);
@@ -231,6 +277,7 @@ export const FRPPage: React.FC = () => {
 
   return (
     <div>
+      <Toast open={toastOpen} type={toastType} message={toastMsg} onClose={() => setToastOpen(false)} />
       <div className="grid-2" style={{ marginBottom: 24 }}>
         <Card title="FRP 连接">
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24 }}>
@@ -261,17 +308,18 @@ export const FRPPage: React.FC = () => {
           <div style={{ background: '#f5f5f5', padding: 20, borderRadius: 12 }}>
             <div style={{ fontSize: 13, color: '#666', marginBottom: 12, fontWeight: 500 }}>{t('services.config')}</div>
             <div className="grid-2">
-              <Input value={server} onChange={(e) => setServer((e.target as any).value)} placeholder="117.172.29.237:7000" />
+              <Input value={server} onChange={(e) => setServer((e.target as any).value)} placeholder="" />
               <Input value={token} onChange={(e) => setToken((e.target as any).value)} type="password" placeholder="token" />
             </div>
             <div style={{ marginTop: 12, display: "flex", gap: 8 }}>
-              <Button variant="ghost" onClick={refresh} disabled={loading}>
-                刷新
+              <Button variant="ghost" onClick={refresh} disabled={loading}>{t('frp.refresh')}</Button>
+              <Button variant="outline" onClick={useBuiltin} disabled={loading}>
+                {t('frp.use_builtin')}
+              </Button>
+              <Button variant="primary" onClick={saveAndConnectManual} disabled={loading || !server.trim()}>
+                <Save size={16} /> {t('frp.save_config')}
               </Button>
             </div>
-            <Button style={{ marginTop: 16 }} variant="primary" onClick={onToggle} disabled={loading}>
-              <Save size={16} /> {connected ? t('common.disconnect') : t('services.save_config')}
-            </Button>
             {status?.last_error ? (
               <div style={{ marginTop: 12, color: "#b91c1c", fontSize: 12 }}>
                 last_error: {status.last_error}

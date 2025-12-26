@@ -4,6 +4,8 @@ import (
 	"net/http"
 	"totoro-device/models"
 	"totoro-device/internal/realtime"
+	"totoro-device/config"
+	"totoro-device/internal/database"
 	"totoro-device/utils"
 	"strings"
 	"time"
@@ -63,12 +65,65 @@ func (s *Server) handleWebSocket(c *gin.Context) {
 	netStatus, _ := s.netManager.GetNetworkStatus()
 	scanStatus := s.scanner.GetScanStatus()
 	frpStatus, _ := s.frpClient.GetStatus()
+
+	// 注意：前端优先使用 hello.frp_status 作为初始展示，因此这里也要遵循“非手动不暴露 IP/端口”的规则
+	frpStatusUI := any(frpStatus)
+	if frpStatus != nil {
+		mode := s.config.FRPServer.Mode
+		display := ""
+		source := ""
+		switch mode {
+		case config.FRPModeManual:
+			display = strings.TrimSpace(frpStatus.Server)
+			source = "manual"
+		case config.FRPModeBuiltin:
+			display = "Totoro云节点"
+			source = "builtin"
+		case config.FRPModePublic:
+			db := database.GetDB()
+			code := ""
+			nodeID := ""
+			if db != nil {
+				code, _ = database.GetPublicInviteCode(db)
+				nodeID, _ = database.GetPublicNodeID(db)
+			}
+			if strings.TrimSpace(code) != "" {
+				display = "私有分享云节点"
+				source = "invite"
+			} else if strings.TrimSpace(nodeID) != "" {
+				display = "公开云节点"
+				source = "public"
+			} else {
+				display = "公开云节点"
+				source = "public"
+			}
+		default:
+			display = "Totoro云节点"
+			source = "unknown"
+		}
+		serverOut := frpStatus.Server
+		if mode != config.FRPModeManual {
+			serverOut = ""
+		}
+		frpStatusUI = gin.H{
+			"connected":      frpStatus.Connected,
+			"server":         serverOut,
+			"connected_at":   frpStatus.ConnectedAt,
+			"pid":            frpStatus.PID,
+			"last_error":     frpStatus.LastError,
+			"tunnels":        frpStatus.Tunnels,
+			"log_path":       frpStatus.LogPath,
+			"display_server": display,
+			"mode":           string(mode),
+			"source":         source,
+		}
+	}
 	hub.Hello(cl, gin.H{
 		"message":     "WebSocket连接成功",
 		"device_id":   s.config.Device.ID,
 		"network":     netStatus,
 		"scan_status": scanStatus,
-		"frp_status":  frpStatus,
+		"frp_status":  frpStatusUI,
 	})
 
 	// 写循环

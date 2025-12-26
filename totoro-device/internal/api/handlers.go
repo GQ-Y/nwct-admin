@@ -2,13 +2,18 @@ package api
 
 import (
 	"bufio"
-	"encoding/json"
 	"fmt"
-	"io"
 	"net"
 	"net/http"
-	"totoro-device/internal/bridgeclient"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
+	"strconv"
+	"strings"
+	"time"
 	"totoro-device/config"
+	"totoro-device/internal/bridgeclient"
 	"totoro-device/internal/database"
 	"totoro-device/internal/frp"
 	"totoro-device/internal/logger"
@@ -18,13 +23,6 @@ import (
 	"totoro-device/internal/version"
 	"totoro-device/models"
 	"totoro-device/utils"
-	"os"
-	"os/exec"
-	"path/filepath"
-	"runtime"
-	"strconv"
-	"strings"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/shirou/gopsutil/v3/cpu"
@@ -32,6 +30,24 @@ import (
 	"github.com/shirou/gopsutil/v3/host"
 	"github.com/shirou/gopsutil/v3/mem"
 )
+
+func pickDeviceMAC(netManager network.Manager) string {
+	if netManager == nil {
+		return ""
+	}
+	interfaces, err := netManager.GetInterfaces()
+	if err != nil {
+		return ""
+	}
+	for _, i := range interfaces {
+		mac := strings.TrimSpace(i.MAC)
+		if mac == "" || strings.EqualFold(mac, "00:00:00:00:00:00") {
+			continue
+		}
+		return mac
+	}
+	return ""
+}
 
 // handlePublicNodes 透传官方桥梁的公开节点列表
 // 环境变量：TOTOTO_BRIDGE_URL，例如 http://127.0.0.1:18090
@@ -41,71 +57,312 @@ func (s *Server) handlePublicNodes(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, models.ErrorResponse(400, "未配置 TOTOTO_BRIDGE_URL"))
 		return
 	}
-	u := bridge + "/api/v1/public/nodes"
-
-	req, _ := http.NewRequest(http.MethodGet, u, nil)
-	// bridge 需要设备 session token：从本地 SQLite 读取；若无/过期则尝试用 device_id+mac 重新注册后重试一次
-	if db := database.GetDB(); db != nil {
-		if sess, err := database.GetBridgeSession(db); err == nil && sess != nil && !database.BridgeSessionExpired(sess, 30*time.Second) {
-			req.Header.Set("X-Device-Token", strings.TrimSpace(sess.DeviceToken))
+	deviceID := strings.TrimSpace(s.config.Device.ID)
+	mac := strings.TrimSpace(s.config.Bridge.LastMAC)
+	if mac == "" {
+		// 兜底：即便 bridge 不可达，也应允许前端继续工作（实时取一次 MAC）
+		mac = pickDeviceMAC(s.netManager)
+		if mac != "" {
+			s.config.Bridge.LastMAC = mac
 		}
 	}
-	client := &http.Client{Timeout: 5 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		c.JSON(http.StatusBadGateway, models.ErrorResponse(502, "桥梁不可达: "+err.Error()))
+	if deviceID == "" || mac == "" {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse(400, "设备未初始化（缺少 device_id/mac）"))
 		return
 	}
-	// token 失效：尝试重新注册并重试一次
-	if resp.StatusCode == http.StatusUnauthorized {
-		_ = resp.Body.Close()
-		deviceID := strings.TrimSpace(s.config.Device.ID)
-		mac := strings.TrimSpace(s.config.Bridge.LastMAC)
-		if deviceID != "" && mac != "" {
-			bc := &bridgeclient.Client{BaseURL: bridge}
-			if reg, rerr := bc.Register(deviceID, mac); rerr == nil && reg != nil && strings.TrimSpace(reg.DeviceToken) != "" {
-				if db := database.GetDB(); db != nil {
-					_ = database.UpsertBridgeSession(db, database.BridgeSession{
-						BridgeURL:   bridge,
-						DeviceID:    deviceID,
-						MAC:         mac,
-						DeviceToken: strings.TrimSpace(reg.DeviceToken),
-						ExpiresAt:   bridgeclient.ParseExpiresAt(reg.ExpiresAt),
-					})
-				}
-				// retry
-				req2, _ := http.NewRequest(http.MethodGet, u, nil)
-				req2.Header.Set("X-Device-Token", strings.TrimSpace(reg.DeviceToken))
-				resp2, err2 := client.Do(req2)
-				if err2 != nil {
-					c.JSON(http.StatusBadGateway, models.ErrorResponse(502, "桥梁不可达: "+err2.Error()))
+	db := database.GetDB()
+	if db == nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse(500, "数据库未初始化"))
+		return
+	}
+	dc, err := database.GetOrCreateDeviceCrypto(db)
+	if err != nil || dc == nil || strings.TrimSpace(dc.PrivKeyB64) == "" || strings.TrimSpace(dc.PubKeyB64) == "" {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse(500, "设备密钥不可用"))
+		return
+	}
+	var token string
+	if sess, err := database.GetBridgeSession(db); err == nil && sess != nil && !database.BridgeSessionExpired(sess, 30*time.Second) {
+		token = strings.TrimSpace(sess.DeviceToken)
+	}
+	bc := &bridgeclient.Client{
+		BaseURL:          bridge,
+		DeviceToken:      token,
+		DeviceID:         deviceID,
+		DevicePrivKeyB64: strings.TrimSpace(dc.PrivKeyB64),
+	}
+	// token 不可用则注册
+	if strings.TrimSpace(bc.DeviceToken) == "" {
+		reg, rerr := bc.Register(deviceID, mac, strings.TrimSpace(dc.PubKeyB64))
+		if rerr != nil || reg == nil || strings.TrimSpace(reg.DeviceToken) == "" {
+			c.JSON(http.StatusBadGateway, models.ErrorResponse(502, "桥梁注册失败"))
+			return
+		}
+		_ = database.UpsertBridgeSession(db, database.BridgeSession{
+			BridgeURL:   bridge,
+			DeviceID:    deviceID,
+			MAC:         mac,
+			DeviceToken: strings.TrimSpace(reg.DeviceToken),
+			ExpiresAt:   bridgeclient.ParseExpiresAt(reg.ExpiresAt),
+		})
+		bc.DeviceToken = strings.TrimSpace(reg.DeviceToken)
+	}
+	nodes, err := bc.GetPublicNodes()
+	if err != nil {
+		// 兼容：bridge 可能要求重新注册（例如缺少 pub_key 或 token 失效）
+		if strings.Contains(err.Error(), "status=401") || strings.Contains(err.Error(), "status=500") {
+			reg, rerr := bc.Register(deviceID, mac, strings.TrimSpace(dc.PubKeyB64))
+			if rerr == nil && reg != nil && strings.TrimSpace(reg.DeviceToken) != "" {
+				_ = database.UpsertBridgeSession(db, database.BridgeSession{
+					BridgeURL:   bridge,
+					DeviceID:    deviceID,
+					MAC:         mac,
+					DeviceToken: strings.TrimSpace(reg.DeviceToken),
+					ExpiresAt:   bridgeclient.ParseExpiresAt(reg.ExpiresAt),
+				})
+				bc.DeviceToken = strings.TrimSpace(reg.DeviceToken)
+				nodes2, err2 := bc.GetPublicNodes()
+				if err2 == nil {
+					c.JSON(http.StatusOK, models.SuccessResponse(gin.H{"nodes": nodes2}))
 					return
 				}
-				resp = resp2
+				err = err2
 			}
 		}
-	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
-	// 桥梁返回格式为 {code:0,data:{nodes:[]}}，而设备侧统一格式为 {code:200,...}
-	var bridgeResp struct {
-		Code    int         `json:"code"`
-		Message string      `json:"message"`
-		Data    interface{} `json:"data"`
-	}
-	if err := json.Unmarshal(body, &bridgeResp); err != nil {
-		c.JSON(http.StatusBadGateway, models.ErrorResponse(502, "桥梁响应非JSON"))
+		c.JSON(http.StatusBadGateway, models.ErrorResponse(502, "请求桥梁失败: "+err.Error()))
 		return
 	}
-	if resp.StatusCode/100 != 2 || bridgeResp.Code != 0 {
-		msg := strings.TrimSpace(bridgeResp.Message)
-		if msg == "" {
-			msg = "桥梁响应错误"
+	// 安全展示：公开节点列表不向前端暴露 IP/端口等敏感信息（endpoints/node_api）
+	out := make([]any, 0, len(nodes))
+	for _, n := range nodes {
+		m, ok := n.(map[string]any)
+		if !ok {
+			// 兜底：非对象就直接丢弃
+			continue
 		}
-		c.JSON(http.StatusBadGateway, models.ErrorResponse(502, msg))
+		delete(m, "endpoints")
+		delete(m, "node_api")
+		out = append(out, m)
+	}
+	c.JSON(http.StatusOK, models.SuccessResponse(gin.H{"nodes": out}))
+}
+
+// handleFRPConfigSave 保存 FRP 配置（manual 模式），不立即连接（连接由 /frp/connect 控制）
+func (s *Server) handleFRPConfigSave(c *gin.Context) {
+	var req struct {
+		Server       string `json:"server"`
+		Token        string `json:"token"`
+		AdminAddr    string `json:"admin_addr"`
+		AdminUser    string `json:"admin_user"`
+		AdminPwd     string `json:"admin_pwd"`
+		DomainSuffix string `json:"domain_suffix"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse(400, "参数错误: "+err.Error()))
 		return
 	}
-	c.JSON(http.StatusOK, models.SuccessResponse(bridgeResp.Data))
+	p := s.config.FRPServer.Manual
+	if strings.TrimSpace(req.Server) != "" {
+		p.Server = strings.TrimSpace(req.Server)
+	}
+	if strings.TrimSpace(req.Token) != "" || req.Token == "" {
+		// 允许显式清空 token（传空字符串）
+		p.Token = strings.TrimSpace(req.Token)
+	}
+	if strings.TrimSpace(req.AdminAddr) != "" || req.AdminAddr == "" {
+		p.AdminAddr = strings.TrimSpace(req.AdminAddr)
+	}
+	if strings.TrimSpace(req.AdminUser) != "" || req.AdminUser == "" {
+		p.AdminUser = strings.TrimSpace(req.AdminUser)
+	}
+	if strings.TrimSpace(req.AdminPwd) != "" || req.AdminPwd == "" {
+		p.AdminPwd = strings.TrimSpace(req.AdminPwd)
+	}
+	if strings.TrimSpace(req.DomainSuffix) != "" || req.DomainSuffix == "" {
+		p.DomainSuffix = strings.TrimPrefix(strings.TrimSpace(req.DomainSuffix), ".")
+	}
+
+	s.config.FRPServer.Mode = config.FRPModeManual
+	s.config.FRPServer.Manual = p
+	s.config.FRPServer.SyncActiveFromMode()
+	if err := s.config.Save(); err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse(500, "保存失败: "+err.Error()))
+		return
+	}
+	c.JSON(http.StatusOK, models.SuccessResponse(gin.H{"saved": true, "mode": s.config.FRPServer.Mode}))
+}
+
+// handleFRPBuiltinUse 从桥梁同步 official_nodes 并应用为 builtin 模式
+func (s *Server) handleFRPBuiltinUse(c *gin.Context) {
+	bridge := strings.TrimRight(strings.TrimSpace(os.Getenv("TOTOTO_BRIDGE_URL")), "/")
+	if bridge == "" {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse(400, "未配置 TOTOTO_BRIDGE_URL"))
+		return
+	}
+	deviceID := strings.TrimSpace(s.config.Device.ID)
+	mac := strings.TrimSpace(s.config.Bridge.LastMAC)
+	if mac == "" {
+		mac = pickDeviceMAC(s.netManager)
+	}
+	if deviceID == "" || mac == "" {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse(400, "设备未初始化（缺少 device_id/mac）"))
+		return
+	}
+	db := database.GetDB()
+	if db == nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse(500, "数据库未初始化"))
+		return
+	}
+	dc, err := database.GetOrCreateDeviceCrypto(db)
+	if err != nil || dc == nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse(500, "设备密钥不可用"))
+		return
+	}
+	// bridge session
+	var token string
+	if sess, _ := database.GetBridgeSession(db); sess != nil && !database.BridgeSessionExpired(sess, 30*time.Second) {
+		token = strings.TrimSpace(sess.DeviceToken)
+	}
+	bc := &bridgeclient.Client{
+		BaseURL:          bridge,
+		DeviceToken:      token,
+		DeviceID:         deviceID,
+		DevicePrivKeyB64: strings.TrimSpace(dc.PrivKeyB64),
+	}
+	if strings.TrimSpace(bc.DeviceToken) == "" {
+		reg, rerr := bc.Register(deviceID, mac, strings.TrimSpace(dc.PubKeyB64))
+		if rerr != nil || reg == nil || strings.TrimSpace(reg.DeviceToken) == "" {
+			c.JSON(http.StatusBadGateway, models.ErrorResponse(502, "桥梁注册失败"))
+			return
+		}
+		_ = database.UpsertBridgeSession(db, database.BridgeSession{
+			BridgeURL:   bridge,
+			DeviceID:    deviceID,
+			MAC:         mac,
+			DeviceToken: strings.TrimSpace(reg.DeviceToken),
+			ExpiresAt:   bridgeclient.ParseExpiresAt(reg.ExpiresAt),
+		})
+		bc.DeviceToken = strings.TrimSpace(reg.DeviceToken)
+	}
+	official, err := bc.GetOfficialNodes()
+	if err != nil {
+		c.JSON(http.StatusBadGateway, models.ErrorResponse(502, "请求桥梁失败: "+err.Error()))
+		return
+	}
+	if len(official) == 0 {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse(400, "桥梁未配置官方内置节点"))
+		return
+	}
+	off := official[0]
+	s.config.FRPServer.Builtin = config.FRPProfile{
+		Server:       strings.TrimSpace(off.Server),
+		Token:        strings.TrimSpace(off.Token),
+		AdminAddr:    strings.TrimSpace(off.AdminAddr),
+		AdminUser:    strings.TrimSpace(off.AdminUser),
+		AdminPwd:     strings.TrimSpace(off.AdminPwd),
+		DomainSuffix: strings.TrimPrefix(strings.TrimSpace(off.DomainSuffix), "."),
+	}
+	s.config.FRPServer.Mode = config.FRPModeBuiltin
+	s.config.FRPServer.SyncActiveFromMode()
+	_ = s.config.Save()
+	c.JSON(http.StatusOK, models.SuccessResponse(gin.H{
+		"applied": true,
+		"mode":    s.config.FRPServer.Mode,
+		"node_id": strings.TrimSpace(off.NodeID),
+		"name":    strings.TrimSpace(off.Name),
+	}))
+}
+
+// handlePublicNodeConnect 公开节点列表“一键连接”（无需邀请码）
+func (s *Server) handlePublicNodeConnect(c *gin.Context) {
+	var req struct {
+		NodeID string `json:"node_id" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse(400, "参数错误: "+err.Error()))
+		return
+	}
+	nodeID := strings.TrimSpace(req.NodeID)
+	if nodeID == "" {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse(400, "node_id 不能为空"))
+		return
+	}
+	bridge := strings.TrimRight(strings.TrimSpace(os.Getenv("TOTOTO_BRIDGE_URL")), "/")
+	if bridge == "" {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse(400, "未配置 TOTOTO_BRIDGE_URL"))
+		return
+	}
+	deviceID := strings.TrimSpace(s.config.Device.ID)
+	mac := strings.TrimSpace(s.config.Bridge.LastMAC)
+	if mac == "" {
+		mac = pickDeviceMAC(s.netManager)
+	}
+	if deviceID == "" || mac == "" {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse(400, "设备未初始化（缺少 device_id/mac）"))
+		return
+	}
+	db := database.GetDB()
+	if db == nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse(500, "数据库未初始化"))
+		return
+	}
+	dc, err := database.GetOrCreateDeviceCrypto(db)
+	if err != nil || dc == nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse(500, "设备密钥不可用"))
+		return
+	}
+	// bridge session
+	var token string
+	if sess, _ := database.GetBridgeSession(db); sess != nil && !database.BridgeSessionExpired(sess, 30*time.Second) {
+		token = strings.TrimSpace(sess.DeviceToken)
+	}
+	bc := &bridgeclient.Client{
+		BaseURL:          bridge,
+		DeviceToken:      token,
+		DeviceID:         deviceID,
+		DevicePrivKeyB64: strings.TrimSpace(dc.PrivKeyB64),
+	}
+	if strings.TrimSpace(bc.DeviceToken) == "" {
+		reg, rerr := bc.Register(deviceID, mac, strings.TrimSpace(dc.PubKeyB64))
+		if rerr != nil || reg == nil || strings.TrimSpace(reg.DeviceToken) == "" {
+			c.JSON(http.StatusBadGateway, models.ErrorResponse(502, "桥梁注册失败"))
+			return
+		}
+		_ = database.UpsertBridgeSession(db, database.BridgeSession{
+			BridgeURL:   bridge,
+			DeviceID:    deviceID,
+			MAC:         mac,
+			DeviceToken: strings.TrimSpace(reg.DeviceToken),
+			ExpiresAt:   bridgeclient.ParseExpiresAt(reg.ExpiresAt),
+		})
+		bc.DeviceToken = strings.TrimSpace(reg.DeviceToken)
+	}
+	res, err := bc.ConnectPublicNode(nodeID)
+	if err != nil {
+		c.JSON(http.StatusBadGateway, models.ErrorResponse(502, "请求桥梁失败: "+err.Error()))
+		return
+	}
+	if len(res.Node.Endpoints) == 0 {
+		c.JSON(http.StatusBadGateway, models.ErrorResponse(502, "桥梁未返回 endpoints"))
+		return
+	}
+	ep := res.Node.Endpoints[0]
+	s.config.FRPServer.Mode = config.FRPModePublic
+	s.config.FRPServer.Public.LastResolveError = ""
+	s.config.FRPServer.Public.Server = fmt.Sprintf("%s:%d", strings.TrimSpace(ep.Addr), ep.Port)
+	s.config.FRPServer.Public.TotoroTicket = strings.TrimSpace(res.ConnectionTicket)
+	s.config.FRPServer.Public.TicketExpiresAt = strings.TrimSpace(res.ExpiresAt)
+	s.config.FRPServer.Public.Token = ""
+	s.config.FRPServer.Public.DomainSuffix = strings.TrimPrefix(strings.TrimSpace(res.Node.DomainSuffix), ".")
+	s.config.FRPServer.SyncActiveFromMode()
+	_ = s.config.Save()
+	// 持久化选择的 node_id（密文），用于重启后自动续票/重连
+	_ = database.SetPublicNodeID(db, nodeID)
+
+	if err := s.frpClient.Connect(); err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse(500, err.Error()))
+		return
+	}
+	c.JSON(http.StatusOK, models.SuccessResponse(gin.H{"connected": true}))
 }
 
 func parsePortsInputToList(v any) []int {
@@ -1201,8 +1458,60 @@ func (s *Server) handleFRPStatus(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse(500, err.Error()))
 		return
 	}
+	// 显示策略：只有手动配置显示真实 server；其余模式显示“云节点”标签，避免暴露 IP/端口
+	mode := s.config.FRPServer.Mode
+	serverRaw := strings.TrimSpace(status.Server)
+	display := ""
+	source := ""
+	switch mode {
+	case config.FRPModeManual:
+		display = serverRaw
+		source = "manual"
+	case config.FRPModeBuiltin:
+		display = "Totoro云节点"
+		source = "builtin"
+	case config.FRPModePublic:
+		// public 可能是：公开节点直连 或 邀请码（私有分享）
+		db := database.GetDB()
+		code := ""
+		nodeID := ""
+		if db != nil {
+			code, _ = database.GetPublicInviteCode(db)
+			nodeID, _ = database.GetPublicNodeID(db)
+		}
+		if strings.TrimSpace(code) != "" {
+			display = "私有分享云节点"
+			source = "invite"
+		} else if strings.TrimSpace(nodeID) != "" {
+			display = "公开云节点"
+			source = "public"
+		} else {
+			display = "公开云节点"
+			source = "public"
+		}
+	default:
+		display = "Totoro云节点"
+		source = "unknown"
+	}
 
-	c.JSON(http.StatusOK, models.SuccessResponse(status))
+	serverOut := status.Server
+	if mode != config.FRPModeManual {
+		// 非手动模式禁止暴露 server
+		serverOut = ""
+	}
+
+	c.JSON(http.StatusOK, models.SuccessResponse(gin.H{
+		"connected":      status.Connected,
+		"server":         serverOut,
+		"connected_at":   status.ConnectedAt,
+		"pid":            status.PID,
+		"last_error":     status.LastError,
+		"tunnels":        status.Tunnels,
+		"log_path":       status.LogPath,
+		"display_server": display,
+		"mode":           string(mode),
+		"source":         source,
+	}))
 }
 
 // handleFRPConnect 处理FRP连接请求
@@ -1211,9 +1520,9 @@ func (s *Server) handleFRPConnect(c *gin.Context) {
 		Server       string `json:"server"`
 		Token        string `json:"token"`
 		TotoroTicket string `json:"totoro_ticket"`
-		AdminAddr string `json:"admin_addr"`
-		AdminUser string `json:"admin_user"`
-		AdminPwd  string `json:"admin_pwd"`
+		AdminAddr    string `json:"admin_addr"`
+		AdminUser    string `json:"admin_user"`
+		AdminPwd     string `json:"admin_pwd"`
 	}
 
 	_ = c.ShouldBindJSON(&req) // 允许空请求体：使用“当前模式”一键连接
@@ -1252,25 +1561,78 @@ func (s *Server) handleFRPConnect(c *gin.Context) {
 
 		// public 模式：如果 ticket 缺失/过期，尝试自动换票
 		if s.config.FRPServer.Mode == config.FRPModePublic {
-			if strings.TrimSpace(s.config.FRPServer.Public.NodeAPI) == "" || strings.TrimSpace(s.config.FRPServer.Public.InviteCode) == "" {
-				c.JSON(http.StatusBadRequest, models.ErrorResponse(400, "public 模式未配置 node_api/invite_code"))
+			db := database.GetDB()
+			if db == nil {
+				c.JSON(http.StatusInternalServerError, models.ErrorResponse(500, "数据库未初始化"))
 				return
 			}
+			code, _ := database.GetPublicInviteCode(db)
+			if strings.TrimSpace(code) == "" {
+				c.JSON(http.StatusBadRequest, models.ErrorResponse(400, "public 模式未配置邀请码"))
+				return
+			}
+			// ticket 缺失/过期 -> bridge 兑换
 			if strings.TrimSpace(s.config.FRPServer.Public.TotoroTicket) == "" || frp.TicketExpired(s.config.FRPServer.Public.TicketExpiresAt, 30*time.Second) {
-				res, err := frp.ResolveInviteToTicket(s.config.FRPServer.Public.NodeAPI, s.config.FRPServer.Public.InviteCode)
+				bridgeBase := strings.TrimRight(strings.TrimSpace(os.Getenv("TOTOTO_BRIDGE_URL")), "/")
+				if bridgeBase == "" {
+					c.JSON(http.StatusBadRequest, models.ErrorResponse(400, "未配置 TOTOTO_BRIDGE_URL"))
+					return
+				}
+				dc, err := database.GetOrCreateDeviceCrypto(db)
+				if err != nil || dc == nil {
+					c.JSON(http.StatusInternalServerError, models.ErrorResponse(500, "设备密钥不可用"))
+					return
+				}
+				sess, _ := database.GetBridgeSession(db)
+				if sess == nil || database.BridgeSessionExpired(sess, 30*time.Second) {
+					// 尝试重新注册（需要 mac）
+					bc := &bridgeclient.Client{
+						BaseURL:          bridgeBase,
+						DeviceID:         strings.TrimSpace(s.config.Device.ID),
+						DevicePrivKeyB64: strings.TrimSpace(dc.PrivKeyB64),
+					}
+					reg, rerr := bc.Register(strings.TrimSpace(s.config.Device.ID), strings.TrimSpace(s.config.Bridge.LastMAC), strings.TrimSpace(dc.PubKeyB64))
+					if rerr != nil || reg == nil || strings.TrimSpace(reg.DeviceToken) == "" {
+						c.JSON(http.StatusBadGateway, models.ErrorResponse(502, "桥梁注册失败"))
+						return
+					}
+					_ = database.UpsertBridgeSession(db, database.BridgeSession{
+						BridgeURL:   bridgeBase,
+						DeviceID:    strings.TrimSpace(s.config.Device.ID),
+						MAC:         strings.TrimSpace(s.config.Bridge.LastMAC),
+						DeviceToken: strings.TrimSpace(reg.DeviceToken),
+						ExpiresAt:   bridgeclient.ParseExpiresAt(reg.ExpiresAt),
+					})
+					sess, _ = database.GetBridgeSession(db)
+				}
+				if sess == nil || strings.TrimSpace(sess.DeviceToken) == "" {
+					c.JSON(http.StatusBadGateway, models.ErrorResponse(502, "缺少 device_token"))
+					return
+				}
+				bc := &bridgeclient.Client{
+					BaseURL:          bridgeBase,
+					DeviceToken:      strings.TrimSpace(sess.DeviceToken),
+					DeviceID:         strings.TrimSpace(s.config.Device.ID),
+					DevicePrivKeyB64: strings.TrimSpace(dc.PrivKeyB64),
+				}
+				res, err := bc.RedeemInvite(code)
 				if err != nil {
 					s.config.FRPServer.Public.LastResolveError = err.Error()
-					_ = s.config.Save()
 					c.JSON(http.StatusBadGateway, models.ErrorResponse(502, "自动换票失败: "+err.Error()))
 					return
 				}
 				s.config.FRPServer.Public.LastResolveError = ""
-				s.config.FRPServer.Public.Server = res.Server
-				s.config.FRPServer.Public.TotoroTicket = res.Ticket
-				s.config.FRPServer.Public.TicketExpiresAt = res.ExpiresAtRFC
+				if len(res.Node.Endpoints) == 0 {
+					c.JSON(http.StatusBadGateway, models.ErrorResponse(502, "桥梁未返回 endpoints"))
+					return
+				}
+				ep := res.Node.Endpoints[0]
+				s.config.FRPServer.Public.Server = fmt.Sprintf("%s:%d", strings.TrimSpace(ep.Addr), ep.Port)
+				s.config.FRPServer.Public.TotoroTicket = strings.TrimSpace(res.ConnectionTicket)
+				s.config.FRPServer.Public.TicketExpiresAt = strings.TrimSpace(res.ExpiresAt)
+				s.config.FRPServer.Public.DomainSuffix = strings.TrimPrefix(strings.TrimSpace(res.Node.DomainSuffix), ".")
 				s.config.FRPServer.Public.Token = ""
 				s.config.FRPServer.SyncActiveFromMode()
-				_ = s.config.Save()
 			}
 		}
 	}
@@ -1285,39 +1647,87 @@ func (s *Server) handleFRPConnect(c *gin.Context) {
 	c.JSON(http.StatusOK, models.SuccessResponse(nil))
 }
 
-// handleInviteConnect 通过节点的 /invites/resolve 获取 ticket，并一键连接到该 frps 节点
+// handleInviteConnect 通过桥梁兑换邀请码获取 ticket，并一键连接到该 frps 节点
 func (s *Server) handleInviteConnect(c *gin.Context) {
 	var req struct {
-		NodeAPI string `json:"node_api" binding:"required"` // 例如 http://1.2.3.4:18080
-		Code    string `json:"code" binding:"required"`
+		Code string `json:"code" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, models.ErrorResponse(400, "参数错误: "+err.Error()))
 		return
 	}
-	nodeAPI := strings.TrimRight(strings.TrimSpace(req.NodeAPI), "/")
 	code := strings.TrimSpace(req.Code)
-	if nodeAPI == "" || code == "" {
-		c.JSON(http.StatusBadRequest, models.ErrorResponse(400, "node_api/code 不能为空"))
+	if code == "" {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse(400, "code 不能为空"))
 		return
 	}
-
-	// 调用节点 resolve（兑换 ticket）
-	res, err := frp.ResolveInviteToTicket(nodeAPI, code)
+	db := database.GetDB()
+	if db == nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse(500, "数据库未初始化"))
+		return
+	}
+	_ = database.SetPublicInviteCode(db, code) // 仅存密文
+	dc, err := database.GetOrCreateDeviceCrypto(db)
+	if err != nil || dc == nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse(500, "设备密钥不可用"))
+		return
+	}
+	bridgeBase := strings.TrimRight(strings.TrimSpace(os.Getenv("TOTOTO_BRIDGE_URL")), "/")
+	if bridgeBase == "" {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse(400, "未配置 TOTOTO_BRIDGE_URL"))
+		return
+	}
+	sess, _ := database.GetBridgeSession(db)
+	if sess == nil || database.BridgeSessionExpired(sess, 30*time.Second) {
+		bc0 := &bridgeclient.Client{
+			BaseURL:          bridgeBase,
+			DeviceID:         strings.TrimSpace(s.config.Device.ID),
+			DevicePrivKeyB64: strings.TrimSpace(dc.PrivKeyB64),
+		}
+		reg, rerr := bc0.Register(strings.TrimSpace(s.config.Device.ID), strings.TrimSpace(s.config.Bridge.LastMAC), strings.TrimSpace(dc.PubKeyB64))
+		if rerr != nil || reg == nil || strings.TrimSpace(reg.DeviceToken) == "" {
+			c.JSON(http.StatusBadGateway, models.ErrorResponse(502, "桥梁注册失败"))
+			return
+		}
+		_ = database.UpsertBridgeSession(db, database.BridgeSession{
+			BridgeURL:   bridgeBase,
+			DeviceID:    strings.TrimSpace(s.config.Device.ID),
+			MAC:         strings.TrimSpace(s.config.Bridge.LastMAC),
+			DeviceToken: strings.TrimSpace(reg.DeviceToken),
+			ExpiresAt:   bridgeclient.ParseExpiresAt(reg.ExpiresAt),
+		})
+		sess, _ = database.GetBridgeSession(db)
+	}
+	if sess == nil || strings.TrimSpace(sess.DeviceToken) == "" {
+		c.JSON(http.StatusBadGateway, models.ErrorResponse(502, "缺少 device_token"))
+		return
+	}
+	bc := &bridgeclient.Client{
+		BaseURL:          bridgeBase,
+		DeviceToken:      strings.TrimSpace(sess.DeviceToken),
+		DeviceID:         strings.TrimSpace(s.config.Device.ID),
+		DevicePrivKeyB64: strings.TrimSpace(dc.PrivKeyB64),
+	}
+	res, err := bc.RedeemInvite(code)
 	if err != nil {
 		c.JSON(http.StatusBadGateway, models.ErrorResponse(502, err.Error()))
 		return
 	}
+	if len(res.Node.Endpoints) == 0 {
+		c.JSON(http.StatusBadGateway, models.ErrorResponse(502, "桥梁未返回 endpoints"))
+		return
+	}
+	ep := res.Node.Endpoints[0]
+	server := fmt.Sprintf("%s:%d", strings.TrimSpace(ep.Addr), ep.Port)
 
 	// 切换为 public 模式并持久化（下次启动自动换票 + 自动连接）
 	s.config.FRPServer.Mode = config.FRPModePublic
-	s.config.FRPServer.Public.NodeAPI = nodeAPI
-	s.config.FRPServer.Public.InviteCode = code
 	s.config.FRPServer.Public.LastResolveError = ""
-	s.config.FRPServer.Public.Server = res.Server
-	s.config.FRPServer.Public.TotoroTicket = res.Ticket
-	s.config.FRPServer.Public.TicketExpiresAt = res.ExpiresAtRFC
+	s.config.FRPServer.Public.Server = server
+	s.config.FRPServer.Public.TotoroTicket = strings.TrimSpace(res.ConnectionTicket)
+	s.config.FRPServer.Public.TicketExpiresAt = strings.TrimSpace(res.ExpiresAt)
 	s.config.FRPServer.Public.Token = ""
+	s.config.FRPServer.Public.DomainSuffix = strings.TrimPrefix(strings.TrimSpace(res.Node.DomainSuffix), ".")
 	s.config.FRPServer.SyncActiveFromMode()
 	_ = s.config.Save()
 
@@ -1326,36 +1736,77 @@ func (s *Server) handleInviteConnect(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, models.SuccessResponse(gin.H{
-		"server":     s.config.FRPServer.Server,
-		"expires_at": res.ExpiresAtRFC,
+		"expires_at": strings.TrimSpace(res.ExpiresAt),
 	}))
 }
 
-// handleInviteResolve 仅解析邀请码并返回节点信息（不保存/不连接）
+// handleInviteResolve 仅预览邀请码并返回节点信息（不消耗次数，不兑换 ticket）
 func (s *Server) handleInviteResolve(c *gin.Context) {
 	var req struct {
-		NodeAPI string `json:"node_api" binding:"required"`
-		Code    string `json:"code" binding:"required"`
+		Code string `json:"code" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, models.ErrorResponse(400, "参数错误: "+err.Error()))
 		return
 	}
-	nodeAPI := strings.TrimRight(strings.TrimSpace(req.NodeAPI), "/")
 	code := strings.TrimSpace(req.Code)
-	res, err := frp.ResolveInviteToTicket(nodeAPI, code)
+	db := database.GetDB()
+	if db == nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse(500, "数据库未初始化"))
+		return
+	}
+	dc, err := database.GetOrCreateDeviceCrypto(db)
+	if err != nil || dc == nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse(500, "设备密钥不可用"))
+		return
+	}
+	bridgeBase := strings.TrimRight(strings.TrimSpace(os.Getenv("TOTOTO_BRIDGE_URL")), "/")
+	if bridgeBase == "" {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse(400, "未配置 TOTOTO_BRIDGE_URL"))
+		return
+	}
+	sess, _ := database.GetBridgeSession(db)
+	if sess == nil || database.BridgeSessionExpired(sess, 30*time.Second) {
+		bc0 := &bridgeclient.Client{
+			BaseURL:          bridgeBase,
+			DeviceID:         strings.TrimSpace(s.config.Device.ID),
+			DevicePrivKeyB64: strings.TrimSpace(dc.PrivKeyB64),
+		}
+		reg, rerr := bc0.Register(strings.TrimSpace(s.config.Device.ID), strings.TrimSpace(s.config.Bridge.LastMAC), strings.TrimSpace(dc.PubKeyB64))
+		if rerr != nil || reg == nil || strings.TrimSpace(reg.DeviceToken) == "" {
+			c.JSON(http.StatusBadGateway, models.ErrorResponse(502, "桥梁注册失败"))
+			return
+		}
+		_ = database.UpsertBridgeSession(db, database.BridgeSession{
+			BridgeURL:   bridgeBase,
+			DeviceID:    strings.TrimSpace(s.config.Device.ID),
+			MAC:         strings.TrimSpace(s.config.Bridge.LastMAC),
+			DeviceToken: strings.TrimSpace(reg.DeviceToken),
+			ExpiresAt:   bridgeclient.ParseExpiresAt(reg.ExpiresAt),
+		})
+		sess, _ = database.GetBridgeSession(db)
+	}
+	if sess == nil || strings.TrimSpace(sess.DeviceToken) == "" {
+		c.JSON(http.StatusBadGateway, models.ErrorResponse(502, "缺少 device_token"))
+		return
+	}
+	bc := &bridgeclient.Client{
+		BaseURL:          bridgeBase,
+		DeviceToken:      strings.TrimSpace(sess.DeviceToken),
+		DeviceID:         strings.TrimSpace(s.config.Device.ID),
+		DevicePrivKeyB64: strings.TrimSpace(dc.PrivKeyB64),
+	}
+	res, err := bc.PreviewInvite(code)
 	if err != nil {
 		c.JSON(http.StatusBadGateway, models.ErrorResponse(502, err.Error()))
 		return
 	}
 	c.JSON(http.StatusOK, models.SuccessResponse(gin.H{
 		"node": gin.H{
-			"node_id":       res.NodeID,
-			"endpoints":     res.Endpoints,
-			"domain_suffix": res.DomainSuffix,
+			"node_id":       strings.TrimSpace(res.Node.NodeID),
+			"domain_suffix": strings.TrimSpace(res.Node.DomainSuffix),
 		},
-		"server":     res.Server,
-		"expires_at": res.ExpiresAtRFC,
+		"expires_at": strings.TrimSpace(res.ExpiresAt),
 	}))
 }
 

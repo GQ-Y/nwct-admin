@@ -238,6 +238,7 @@ func main() {
 				NodeID: cfg.NodeID,
 				Public: cfg.Public,
 				Name:   cfg.Name,
+				Description: cfg.Description,
 				Region: cfg.Region,
 				ISP:    cfg.ISP,
 				Tags:   cfg.Tags,

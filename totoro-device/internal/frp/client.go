@@ -2,16 +2,16 @@ package frp
 
 import (
 	"fmt"
-	"totoro-device/config"
-	"totoro-device/internal/database"
-	"totoro-device/internal/logger"
-	"totoro-device/internal/realtime"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
+	"totoro-device/config"
+	"totoro-device/internal/database"
+	"totoro-device/internal/logger"
+	"totoro-device/internal/realtime"
 )
 
 var globalFRPClient Client
@@ -64,6 +64,11 @@ type frpClient struct {
 	restartCount    int       // 重启计数，避免无限重启
 	lastRestartTime time.Time // 上次重启时间
 	proxyManager    *ProxyManager
+
+	// 只有“当前配置”曾经稳定运行过，才允许进入自动重启循环
+	activeSig   string        // 当前进程对应的配置签名
+	stableSig   string        // 最近一次稳定运行过的配置签名
+	stableAfter time.Duration // 进程启动后需稳定运行多久才视为“连接成功过”
 }
 
 // NewClient 创建FRP客户端
@@ -81,20 +86,65 @@ func NewClient(cfg *config.FRPServerConfig) Client {
 		tunnels:      make(map[string]*Tunnel),
 		configPath:   configPath,
 		proxyManager: NewProxyManager(),
+		stableAfter:  2 * time.Second,
+	}
+}
+
+func (c *frpClient) configSigLocked() string {
+	// 注意：TotoroTicket 可能为空/短期变化，但它本质是“当前连接凭证”的一部分
+	return strings.TrimSpace(c.config.Server) + "|" +
+		strings.TrimSpace(c.config.Token) + "|" +
+		strings.TrimSpace(c.config.TotoroTicket) + "|" +
+		strings.TrimSpace(c.config.AdminAddr) + "|" +
+		strings.TrimSpace(c.config.DomainSuffix)
+}
+
+func (c *frpClient) displayServerForUI() (serverOut string, display string, source string) {
+	mode := c.config.Mode
+	switch mode {
+	case config.FRPModeManual:
+		return c.config.Server, strings.TrimSpace(c.config.Server), "manual"
+	case config.FRPModeBuiltin:
+		return "", "Totoro云节点", "builtin"
+	case config.FRPModePublic:
+		// public 可能是：公开节点直连 或 邀请码（私有分享）
+		db := database.GetDB()
+		code := ""
+		nodeID := ""
+		if db != nil {
+			code, _ = database.GetPublicInviteCode(db)
+			nodeID, _ = database.GetPublicNodeID(db)
+		}
+		if strings.TrimSpace(code) != "" {
+			return "", "私有分享云节点", "invite"
+		}
+		if strings.TrimSpace(nodeID) != "" {
+			return "", "公开云节点", "public"
+		}
+		return "", "公开云节点", "public"
+	default:
+		return "", "Totoro云节点", "unknown"
 	}
 }
 
 // Connect 连接到FRP服务端
 func (c *frpClient) Connect() error {
 	c.mu.Lock()
-	defer c.mu.Unlock()
 
 	if c.connected {
+		c.mu.Unlock()
 		return nil
 	}
 
 	if c.config.Server == "" {
+		c.mu.Unlock()
 		return fmt.Errorf("FRP服务器地址未配置")
+	}
+
+	// 连接凭证必须存在（token 或 totoro_ticket 二选一）
+	if strings.TrimSpace(c.config.Token) == "" && strings.TrimSpace(c.config.TotoroTicket) == "" {
+		c.mu.Unlock()
+		return fmt.Errorf("缺少连接凭证：token 或 totoro_ticket 必须至少配置一个")
 	}
 
 	// 从数据库加载隧道配置
@@ -138,6 +188,7 @@ func (c *frpClient) Connect() error {
 	}
 
 	if err := cmd.Start(); err != nil {
+		c.mu.Unlock()
 		return fmt.Errorf("启动 frpc 失败: %v", err)
 	}
 
@@ -145,70 +196,51 @@ func (c *frpClient) Connect() error {
 	c.connected = true
 	c.connectedAt = time.Now()
 	c.lastError = ""
-	c.restartCount = 0 // 连接成功后重置重启计数
+	c.restartCount = 0
+	sig := c.configSigLocked()
+	c.activeSig = sig
 
+	serverOut, display, source := c.displayServerForUI()
 	// 推送状态变化
 	realtime.Default().Broadcast("frp_status_changed", map[string]interface{}{
-		"connected":    true,
-		"server":       c.config.Server,
-		"connected_at": c.connectedAt.Format(time.RFC3339),
-		"pid":          cmd.Process.Pid,
-		"last_error":   "",
-		"log_path":     c.logPath,
+		"connected":      true,
+		"server":         serverOut,
+		"display_server": display,
+		"mode":           string(c.config.Mode),
+		"source":         source,
+		"connected_at":   c.connectedAt.Format(time.RFC3339),
+		"pid":            cmd.Process.Pid,
+		"last_error":     "",
+		"log_path":       c.logPath,
 	})
 
-	// 监控进程退出并自动重启
-	go func() {
-		err := cmd.Wait()
-		c.mu.Lock()
-		defer c.mu.Unlock()
+	// 监控进程退出并自动重启（仅当该配置曾稳定运行过）
+	go c.monitorProcess(cmd, frcPath, sig)
 
-		// 只有在当前 cmd 还是这个进程时才处理（避免旧进程的 Wait 干扰）
-		if c.cmd != cmd {
-			return
-		}
-
-		c.connected = false
-		if err != nil {
-			c.lastError = err.Error()
-			logger.Error("frpc 进程退出: %v", err)
-		} else {
-			c.lastError = ""
-			logger.Info("frpc 进程已退出")
-		}
-		c.cmd = nil
-
-		realtime.Default().Broadcast("frp_status_changed", map[string]interface{}{
-			"connected":    false,
-			"server":       c.config.Server,
-			"connected_at": "",
-			"pid":          0,
-			"last_error":   c.lastError,
-			"log_path":     c.logPath,
-		})
-
-		// 如果配置了服务器地址，说明应该保持连接，自动重启
-		if c.config.Server != "" {
-			logger.Info("frpc 进程异常退出，3秒后自动重启...")
-			c.mu.Unlock()
-			time.Sleep(3 * time.Second)
-			c.mu.Lock()
-
-			// 再次检查是否应该重启（可能用户已经手动断开或配置已改变）
-			if c.config.Server != "" && c.cmd == nil {
-				logger.Info("开始自动重启 frpc...")
-				// 使用新的 goroutine 避免死锁
-				go func() {
-					if err := c.Connect(); err != nil {
-						logger.Error("frpc 自动重启失败: %v", err)
-					} else {
-						logger.Info("frpc 自动重启成功")
-					}
-				}()
+	// 手动“保存并连接”场景：如果 frpc 很快退出（如 token/ticket 错误），要把失败同步返回给调用方，避免无限重启
+	c.mu.Unlock()
+	deadline := time.Now().Add(c.stableAfter)
+	for time.Now().Before(deadline) {
+		c.mu.RLock()
+		same := c.cmd == cmd
+		alive := c.connected
+		lastErr := c.lastError
+		c.mu.RUnlock()
+		if !same || !alive {
+			if strings.TrimSpace(lastErr) == "" {
+				lastErr = "frpc 启动后立即退出，请检查 server/token/ticket"
 			}
+			return fmt.Errorf("连接失败：%s", lastErr)
 		}
-	}()
+		time.Sleep(150 * time.Millisecond)
+	}
 
+	// 启动后一段时间仍存活，视为“成功连接过一次”，允许后续进入自动重启循环（仅针对该配置签名）
+	c.mu.Lock()
+	if c.cmd == cmd && c.connected && c.activeSig == sig {
+		c.stableSig = sig
+	}
+	c.mu.Unlock()
 	return nil
 }
 
@@ -298,7 +330,7 @@ body { margin:0; padding:0; font-family: -apple-system,BlinkMacSystemFont,"Segoe
 }
 
 // monitorProcess 监控 frpc 进程，退出时自动重启
-func (c *frpClient) monitorProcess(cmd *exec.Cmd, frcPath string) {
+func (c *frpClient) monitorProcess(cmd *exec.Cmd, frcPath string, sig string) {
 	err := cmd.Wait()
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -319,17 +351,43 @@ func (c *frpClient) monitorProcess(cmd *exec.Cmd, frcPath string) {
 	}
 	c.cmd = nil
 
+	serverOut, display, source := c.displayServerForUI()
 	realtime.Default().Broadcast("frp_status_changed", map[string]interface{}{
-		"connected":    false,
-		"server":       c.config.Server,
-		"connected_at": "",
-		"pid":          0,
-		"last_error":   c.lastError,
-		"log_path":     c.logPath,
+		"connected":      false,
+		"server":         serverOut,
+		"display_server": display,
+		"mode":           string(c.config.Mode),
+		"source":         source,
+		"connected_at":   "",
+		"pid":            0,
+		"last_error":     c.lastError,
+		"log_path":       c.logPath,
 	})
 
-	// 如果配置了服务器地址，说明应该保持连接，自动重启
-	// 但需要避免无限重启循环
+	// 只有“该配置签名”曾经稳定运行过，才允许自动重启；否则停止并等待用户修正配置
+	if c.config.Server == "" || c.stableSig != sig {
+		if err != nil {
+			c.lastError = fmt.Sprintf("连接失败（未进入自动重启）：%v", err)
+		} else if strings.TrimSpace(c.lastError) == "" {
+			c.lastError = "连接失败（未进入自动重启）"
+		}
+		logger.Warn("frpc 未稳定连接成功过，停止自动重启。sig=%s err=%v", sig, err)
+		serverOut, display, source := c.displayServerForUI()
+		realtime.Default().Broadcast("frp_status_changed", map[string]interface{}{
+			"connected":      false,
+			"server":         serverOut,
+			"display_server": display,
+			"mode":           string(c.config.Mode),
+			"source":         source,
+			"connected_at":   "",
+			"pid":            0,
+			"last_error":     c.lastError,
+			"log_path":       c.logPath,
+		})
+		return
+	}
+
+	// 已稳定运行过：允许自动重启，但需避免无限循环
 	if c.config.Server != "" {
 		now := time.Now()
 
@@ -339,13 +397,17 @@ func (c *frpClient) monitorProcess(cmd *exec.Cmd, frcPath string) {
 			if c.restartCount > 3 {
 				logger.Error("frpc 在短时间内多次退出，停止自动重启。请检查配置或服务端连接。最后错误: %v", err)
 				c.lastError = fmt.Sprintf("多次重启失败，已停止自动重启。请检查配置: %v", err)
+				serverOut, display, source := c.displayServerForUI()
 				realtime.Default().Broadcast("frp_status_changed", map[string]interface{}{
-					"connected":    false,
-					"server":       c.config.Server,
-					"connected_at": "",
-					"pid":          0,
-					"last_error":   c.lastError,
-					"log_path":     c.logPath,
+					"connected":      false,
+					"server":         serverOut,
+					"display_server": display,
+					"mode":           string(c.config.Mode),
+					"source":         source,
+					"connected_at":   "",
+					"pid":            0,
+					"last_error":     c.lastError,
+					"log_path":       c.logPath,
 				})
 				return
 			}
@@ -392,13 +454,17 @@ func (c *frpClient) Disconnect() error {
 	c.connected = false
 	c.connectedAt = time.Time{}
 	c.lastError = ""
+	serverOut, display, source := c.displayServerForUI()
 	realtime.Default().Broadcast("frp_status_changed", map[string]interface{}{
-		"connected":    false,
-		"server":       c.config.Server,
-		"connected_at": "",
-		"pid":          0,
-		"last_error":   "",
-		"log_path":     c.logPath,
+		"connected":      false,
+		"server":         serverOut,
+		"display_server": display,
+		"mode":           string(c.config.Mode),
+		"source":         source,
+		"connected_at":   "",
+		"pid":            0,
+		"last_error":     "",
+		"log_path":       c.logPath,
 	})
 	return nil
 }
@@ -812,19 +878,27 @@ func (c *frpClient) restartProcess() error {
 	c.connectedAt = time.Now()
 	c.lastError = ""
 	c.restartCount = 0 // 重置重启计数
+	sig := c.configSigLocked()
+	c.activeSig = sig
+	// restartProcess 仅用于“已运行中的进程重启”，认为该配置已成功过
+	c.stableSig = sig
 
+	serverOut, display, source := c.displayServerForUI()
 	// 推送状态变化
 	realtime.Default().Broadcast("frp_status_changed", map[string]interface{}{
-		"connected":    true,
-		"server":       c.config.Server,
-		"connected_at": c.connectedAt.Format(time.RFC3339),
-		"pid":          cmd.Process.Pid,
-		"last_error":   "",
-		"log_path":     c.logPath,
+		"connected":      true,
+		"server":         serverOut,
+		"display_server": display,
+		"mode":           string(c.config.Mode),
+		"source":         source,
+		"connected_at":   c.connectedAt.Format(time.RFC3339),
+		"pid":            cmd.Process.Pid,
+		"last_error":     "",
+		"log_path":       c.logPath,
 	})
 
 	// 监控进程退出并自动重启
-	go c.monitorProcess(cmd, frcPath)
+	go c.monitorProcess(cmd, frcPath, sig)
 
 	return nil
 }

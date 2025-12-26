@@ -51,7 +51,7 @@
       <div class="top">
         <div>
           <h1>Totoro Bridge Admin（临时）</h1>
-          <div class="hint">设备白名单表格：新增/编辑/删除/导入。所有请求通过 <code>X-Admin-Key</code> 鉴权。</div>
+          <div class="hint">临时管理台：设备白名单、官方内置节点配置。所有请求通过 <code>X-Admin-Key</code> 鉴权。</div>
         </div>
         <div class="row">
           <input id="adminKey" placeholder="输入 AdminKey（会本地保存）" style="min-width:260px" />
@@ -60,7 +60,12 @@
         </div>
       </div>
 
-      <div class="card">
+      <div class="row" style="margin: 10px 0 14px">
+        <button class="btn primary" id="tabDevices">设备白名单</button>
+        <button class="btn" id="tabOfficial">官方内置节点</button>
+      </div>
+
+      <div class="card" id="panelDevices">
         <div class="tools">
           <div class="row">
             <span class="pill" id="totalPill">total: -</span>
@@ -92,6 +97,36 @@
 
         <div id="toast" class="toast" style="display:none"></div>
       </div>
+
+      <div class="card" id="panelOfficial" style="display:none">
+        <div class="tools">
+          <div class="row">
+            <span class="pill" id="offTotalPill">total: -</span>
+          </div>
+          <div class="row">
+            <button class="btn primary" id="offAddBtn">新增</button>
+            <button class="btn" id="offRefreshBtn">刷新</button>
+          </div>
+        </div>
+
+        <div style="overflow:auto; border-radius:14px; border:1px solid rgba(255,255,255,.10)">
+          <table>
+            <thead>
+              <tr>
+                <th style="min-width:140px">node_id</th>
+                <th style="min-width:160px">name</th>
+                <th style="min-width:220px">server(frps)</th>
+                <th style="min-width:140px">token</th>
+                <th style="min-width:220px">node_api</th>
+                <th style="min-width:160px">domain_suffix</th>
+                <th style="min-width:180px">updated_at</th>
+                <th style="min-width:160px">actions</th>
+              </tr>
+            </thead>
+            <tbody id="offTbody"></tbody>
+          </table>
+        </div>
+      </div>
     </div>
 
     <!-- modal -->
@@ -100,6 +135,7 @@
     <script>
       const $ = (id) => document.getElementById(id);
       const state = { limit: 50, offset: 0, total: 0, rows: [] };
+      const offState = { rows: [], total: 0 };
 
       function getKey(){ return localStorage.getItem('totoro_bridge_admin_key') || ''; }
       function setKey(v){ localStorage.setItem('totoro_bridge_admin_key', v || ''); }
@@ -162,6 +198,42 @@
           render();
         }catch(e){
           toast('err', e.message || String(e));
+        }
+      }
+
+      async function loadOfficial(){
+        try{
+          const data = await api(`/api/v1/admin/official_nodes`, { method:'GET' });
+          offState.rows = (data && data.nodes) || [];
+          offState.total = offState.rows.length;
+          $('offTotalPill').textContent = 'total: ' + offState.total;
+          renderOfficial();
+        }catch(e){
+          toast('err', e.message || String(e));
+        }
+      }
+
+      function renderOfficial(){
+        const tbody = $('offTbody');
+        tbody.innerHTML = '';
+        for (const r of offState.rows){
+          const tr = document.createElement('tr');
+          tr.innerHTML = `
+            <td><strong>${escapeHtml(r.node_id||'')}</strong></td>
+            <td>${escapeHtml(r.name||'')}</td>
+            <td>${escapeHtml(r.server||'')}</td>
+            <td>${escapeHtml(r.token||'')}</td>
+            <td>${escapeHtml(r.node_api||'')}</td>
+            <td>${escapeHtml(r.domain_suffix||'')}</td>
+            <td style="color: rgba(229,231,235,.8)">${escapeHtml(r.updated_at||'')}</td>
+            <td>
+              <button class="btn" data-act="edit">编辑</button>
+              <button class="btn danger" data-act="del">删除</button>
+            </td>
+          `;
+          tr.querySelector('[data-act="edit"]').onclick = () => openOfficialModal(r);
+          tr.querySelector('[data-act="del"]').onclick = () => confirmDeleteOfficial(r.node_id);
+          tbody.appendChild(tr);
         }
       }
 
@@ -237,6 +309,96 @@
         };
       }
 
+      function openOfficialModal(row){
+        const isEdit = !!row;
+        const r = row || { node_id:'', name:'', server:'', token:'', admin_addr:'', admin_user:'', admin_pwd:'', node_api:'', domain_suffix:'' };
+        modal(`
+          <div class="modalHeader">
+            <div class="modalTitle">${isEdit ? '编辑官方内置节点' : '新增官方内置节点'}</div>
+            <button class="btn ghost" id="closeBtn">×</button>
+          </div>
+          <div class="grid2">
+            <div>
+              <div class="hint" style="margin:6px 0 6px">node_id（必填）</div>
+              <input id="m_node_id" placeholder="例如 official-1" value="${escapeHtml(r.node_id||'')}" ${isEdit ? 'disabled' : ''} />
+            </div>
+            <div>
+              <div class="hint" style="margin:6px 0 6px">name</div>
+              <input id="m_name" placeholder="展示名" value="${escapeHtml(r.name||'')}" />
+            </div>
+          </div>
+          <div class="grid2" style="margin-top:10px">
+            <div>
+              <div class="hint" style="margin:6px 0 6px">server(frps)（必填）</div>
+              <input id="m_server" placeholder="例如 117.xx.xx.xx:7000" value="${escapeHtml(r.server||'')}" />
+            </div>
+            <div>
+              <div class="hint" style="margin:6px 0 6px">token（可选）</div>
+              <input id="m_token" placeholder="frps token" value="${escapeHtml(r.token||'')}" />
+            </div>
+          </div>
+          <div class="grid2" style="margin-top:10px">
+            <div>
+              <div class="hint" style="margin:6px 0 6px">node_api（可选）</div>
+              <input id="m_node_api" placeholder="例如 http://x.x.x.x:18080" value="${escapeHtml(r.node_api||'')}" />
+            </div>
+            <div>
+              <div class="hint" style="margin:6px 0 6px">domain_suffix（可选）</div>
+              <input id="m_domain" placeholder="例如 frpc.example.com" value="${escapeHtml(r.domain_suffix||'')}" />
+            </div>
+          </div>
+          <div class="row" style="justify-content:flex-end; margin-top:14px">
+            <button class="btn" id="cancelBtn">取消</button>
+            <button class="btn primary" id="saveBtn">保存</button>
+          </div>
+        `);
+        $('closeBtn').onclick = closeModal;
+        $('cancelBtn').onclick = closeModal;
+        $('saveBtn').onclick = async () => {
+          const node_id = $('m_node_id').value.trim();
+          const name = $('m_name').value.trim();
+          const server = $('m_server').value.trim();
+          const token = $('m_token').value.trim();
+          const node_api = $('m_node_api').value.trim();
+          const domain_suffix = $('m_domain').value.trim();
+          if (!node_id || !server) { toast('warn','node_id/server 必填'); return; }
+          try{
+            await api('/api/v1/admin/official_nodes/upsert', { method:'POST', body: JSON.stringify({ node_id, name, server, token, node_api, domain_suffix }) });
+            toast('ok','已保存');
+            closeModal();
+            loadOfficial();
+          }catch(e){
+            toast('err', e.message || String(e));
+          }
+        };
+      }
+
+      function confirmDeleteOfficial(nodeID){
+        modal(`
+          <div class="modalHeader">
+            <div class="modalTitle">确认删除官方节点</div>
+            <button class="btn ghost" id="closeBtn">×</button>
+          </div>
+          <div class="hint">将删除：<code>${escapeHtml(nodeID)}</code></div>
+          <div class="row" style="justify-content:flex-end; margin-top:14px">
+            <button class="btn" id="cancelBtn">取消</button>
+            <button class="btn danger" id="delBtn">删除</button>
+          </div>
+        `);
+        $('closeBtn').onclick = closeModal;
+        $('cancelBtn').onclick = closeModal;
+        $('delBtn').onclick = async () => {
+          try{
+            await api('/api/v1/admin/official_nodes/delete', { method:'POST', body: JSON.stringify({ node_id: nodeID }) });
+            toast('ok','已删除');
+            closeModal();
+            loadOfficial();
+          }catch(e){
+            toast('err', e.message || String(e));
+          }
+        };
+      }
+
       function openImportModal(){
         modal(`
           <div class="modalHeader">
@@ -302,6 +464,26 @@
       $('nextBtn').onclick = () => { if (state.offset + state.limit < state.total) state.offset += state.limit; load(); };
       $('addBtn').onclick = () => openUpsertModal(null);
       $('importBtn').onclick = () => openImportModal();
+
+      function setTab(tab){
+        const devBtn = $('tabDevices');
+        const offBtn = $('tabOfficial');
+        const pDev = $('panelDevices');
+        const pOff = $('panelOfficial');
+        if (tab === 'official'){
+          devBtn.classList.remove('primary'); offBtn.classList.add('primary');
+          pDev.style.display = 'none'; pOff.style.display = 'block';
+          loadOfficial();
+        } else {
+          offBtn.classList.remove('primary'); devBtn.classList.add('primary');
+          pOff.style.display = 'none'; pDev.style.display = 'block';
+          load();
+        }
+      }
+      $('tabDevices').onclick = () => setTab('devices');
+      $('tabOfficial').onclick = () => setTab('official');
+      $('offAddBtn').onclick = () => openOfficialModal(null);
+      $('offRefreshBtn').onclick = () => loadOfficial();
 
       load();
     </script>

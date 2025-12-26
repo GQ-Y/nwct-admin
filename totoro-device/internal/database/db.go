@@ -131,8 +131,28 @@ func createTables() error {
 		bridge_url TEXT NOT NULL DEFAULT '',
 		device_id TEXT NOT NULL DEFAULT '',
 		mac TEXT NOT NULL DEFAULT '',
-		device_token TEXT NOT NULL DEFAULT '',
+		device_token TEXT NOT NULL DEFAULT '', -- legacy (避免旧代码崩；新代码写空)
+		device_token_enc TEXT NOT NULL DEFAULT '',
+		device_token_nonce TEXT NOT NULL DEFAULT '',
 		expires_at INTEGER NOT NULL DEFAULT 0,
+		updated_at INTEGER NOT NULL DEFAULT 0
+	);`
+
+	// 设备加密密钥（用于 bridge 返回解密 & 本地密文存储）
+	deviceCryptoTable := `
+	CREATE TABLE IF NOT EXISTS device_crypto (
+		id INTEGER PRIMARY KEY CHECK (id = 1),
+		priv_key_b64 TEXT NOT NULL DEFAULT '',
+		pub_key_b64 TEXT NOT NULL DEFAULT '',
+		updated_at INTEGER NOT NULL DEFAULT 0
+	);`
+
+	// public 模式：邀请码密文存储（用于重启后自动续票）
+	publicInviteTable := `
+	CREATE TABLE IF NOT EXISTS public_invite (
+		id INTEGER PRIMARY KEY CHECK (id = 1),
+		invite_code_enc TEXT NOT NULL DEFAULT '',
+		invite_code_nonce TEXT NOT NULL DEFAULT '',
 		updated_at INTEGER NOT NULL DEFAULT 0
 	);`
 
@@ -142,6 +162,8 @@ func createTables() error {
 		deviceHistoryTable,
 		frpTunnelsTable,
 		bridgeSessionTable,
+		deviceCryptoTable,
+		publicInviteTable,
 	}
 
 	for _, table := range tables {
@@ -159,6 +181,10 @@ func createTables() error {
 	}
 	// 轻量迁移：旧库补字段
 	_ = ensureColumn("frp_tunnels", "fallback_enabled", "INTEGER DEFAULT 1")
+
+	// bridge_session 新列（旧库补）
+	_ = ensureColumn("bridge_session", "device_token_enc", "TEXT NOT NULL DEFAULT ''")
+	_ = ensureColumn("bridge_session", "device_token_nonce", "TEXT NOT NULL DEFAULT ''")
 
 	// 清理历史遗留：彻底移除 mqtt_logs 表
 	_, _ = db.Exec(`DROP TABLE IF EXISTS mqtt_logs`)

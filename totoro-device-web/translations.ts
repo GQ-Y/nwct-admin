@@ -25,7 +25,8 @@ export const translations = {
       of: 'of',
       connect: 'Connect',
       disconnect: 'Disconnect',
-      confirm: 'Confirm'
+      confirm: 'Confirm',
+      degraded: 'Degraded'
     },
     login: {
       title: 'Admin Login',
@@ -41,7 +42,34 @@ export const translations = {
       devices: 'Devices',
       tools: 'Network Tools',
       nps: 'NPS Service',
+      frp: 'FRP Service',
+      public_nodes: 'Public Nodes',
       system: 'System'
+    },
+    frp: {
+      mode: 'Mode',
+      builtin: 'Official Built-in',
+      manual: 'Manual',
+      public: 'Public (Invite)',
+      use_builtin: 'Use Official Built-in',
+      save_config: 'Save Config',
+      refresh: 'Refresh'
+    },
+    public_nodes: {
+      title: 'Public Nodes',
+      total: 'Total',
+      online: 'Online',
+      refresh: 'Refresh',
+      invite_connect: 'Connect by Invite Code',
+      connect: 'Connect',
+      modal_title: 'Quick Connect (Public Node)',
+      enter_invite: 'Enter invite code to preview node info',
+      invite_code: 'Invite Code',
+      resolve: 'Preview',
+      resolving: 'Previewing...',
+      confirm: 'Confirm Connect',
+      connecting: 'Connecting...',
+      preview_title: 'Preview (connect only after confirm)'
     },
     header: {
       system_online: 'System Online',
@@ -189,7 +217,8 @@ export const translations = {
       of: '页 / 共',
       connect: '连接',
       disconnect: '断开',
-      confirm: '确认'
+      confirm: '确认',
+      degraded: '异常'
     },
     login: {
       title: '管理员登录',
@@ -205,7 +234,34 @@ export const translations = {
       devices: '设备管理',
       tools: '网络工具',
       nps: 'NPS 服务',
+      frp: 'FRP 服务',
+      public_nodes: '公开节点',
       system: '系统设置'
+    },
+    frp: {
+      mode: '模式',
+      builtin: '官方内置',
+      manual: '手动配置',
+      public: '公开节点（邀请码）',
+      use_builtin: '使用官方内置',
+      save_config: '保存配置',
+      refresh: '刷新'
+    },
+    public_nodes: {
+      title: '公开节点',
+      total: '共',
+      online: '在线',
+      refresh: '刷新',
+      invite_connect: '邀请码连接',
+      connect: '连接',
+      modal_title: '一键连接（公开节点）',
+      enter_invite: '请输入邀请码以解析节点信息',
+      invite_code: '邀请码',
+      resolve: '解析',
+      resolving: '解析中…',
+      confirm: '确认连接',
+      connecting: '连接中…',
+      preview_title: '解析结果（确认后才会连接）'
     },
     header: {
       system_online: '系统在线',

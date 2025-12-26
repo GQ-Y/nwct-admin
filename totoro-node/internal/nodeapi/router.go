@@ -7,16 +7,16 @@ import (
 	"io/fs"
 	"mime"
 	"net/http"
+	"os"
 	"path"
 	"strings"
 
 	"github.com/gin-gonic/gin"
 
 	"totoro-node/internal/apiresp"
+	"totoro-node/internal/bridgeclient"
 	"totoro-node/internal/nodeui"
 	"totoro-node/internal/store"
-	"totoro-node/internal/ticket"
-	"time"
 )
 
 type Options struct {
@@ -105,36 +105,8 @@ type resolveInviteReq struct {
 }
 
 func (a *API) resolveInvite(c *gin.Context) {
-	var req resolveInviteReq
-	if err := c.ShouldBindJSON(&req); err != nil {
-		apiresp.Fail(c, http.StatusBadRequest, 400, err.Error())
-		return
-	}
-	res, err := a.st.ResolveInviteByCode(req.Code)
-	if err != nil {
-		apiresp.Fail(c, http.StatusBadRequest, 400, err.Error())
-		return
-	}
-	cfg, _, err := a.st.GetNodeConfig()
-	if err != nil {
-		apiresp.Fail(c, http.StatusInternalServerError, 500, err.Error())
-		return
-	}
-	// 票据 TTL：默认 1 小时
-	tok, exp, err := ticket.IssueHMAC(cfg.NodeID, res.InviteID, res.ScopeJSON, a.opts.TicketKey, time.Hour)
-	if err != nil {
-		apiresp.Fail(c, http.StatusInternalServerError, 500, err.Error())
-		return
-	}
-	apiresp.OK(c, gin.H{
-		"node": gin.H{
-			"node_id":       cfg.NodeID,
-			"endpoints":     cfg.Endpoints,
-			"domain_suffix": cfg.DomainSuffix,
-		},
-		"connection_ticket": tok,
-		"expires_at":        exp.Format(time.RFC3339),
-	})
+	// 设计调整：邀请码预览/兑换在桥梁平台完成，节点侧不再解析。
+	apiresp.Fail(c, http.StatusGone, 410, "invites.resolve 已迁移到 bridge（/api/v1/invites/preview & /api/v1/invites/redeem）")
 }
 
 func (a *API) authAdmin() gin.HandlerFunc {
@@ -193,15 +165,39 @@ func (a *API) createInvite(c *gin.Context) {
 		apiresp.Fail(c, http.StatusBadRequest, 400, err.Error())
 		return
 	}
-	code := generateInviteCode()
-	codeHash := storeHash(code)
-	inv, err := a.st.CreateInvite(codeHash, req.TTLSeconds, req.MaxUses, req.ScopeJSON)
+	cfg, _, err := a.st.GetNodeConfig()
 	if err != nil {
 		apiresp.Fail(c, http.StatusInternalServerError, 500, err.Error())
 		return
 	}
-	inv.Code = code
-	apiresp.OK(c, inv)
+	bridge := strings.TrimRight(strings.TrimSpace(cfg.BridgeURL), "/")
+	if bridge == "" {
+		bridge = strings.TrimRight(strings.TrimSpace(os.Getenv("TOTOTO_BRIDGE_URL")), "/")
+	}
+	if bridge == "" {
+		apiresp.Fail(c, http.StatusBadRequest, 400, "未配置 bridge_url（节点配置）或 TOTOTO_BRIDGE_URL（环境变量）")
+		return
+	}
+	adminNodeKey := strings.TrimSpace(c.GetHeader("X-Node-Key"))
+	if adminNodeKey == "" {
+		apiresp.Fail(c, http.StatusUnauthorized, 401, "missing X-Node-Key")
+		return
+	}
+	bc := &bridgeclient.Client{BaseURL: bridge, NodeID: cfg.NodeID, NodeKey: adminNodeKey}
+	out, err := bc.CreateInvite(bridgeclient.CreateInviteReq{
+		ScopeJSON:  strings.TrimSpace(req.ScopeJSON),
+		TTLSeconds: req.TTLSeconds,
+		MaxUses:    req.MaxUses,
+	})
+	if err != nil {
+		apiresp.Fail(c, http.StatusBadGateway, 502, err.Error())
+		return
+	}
+	apiresp.OK(c, gin.H{
+		"invite_id":  strings.TrimSpace(out.InviteID),
+		"code":       strings.TrimSpace(out.Code),
+		"expires_at": strings.TrimSpace(out.ExpiresAt),
+	})
 }
 
 type revokeInviteReq struct {
@@ -218,8 +214,27 @@ func (a *API) revokeInvite(c *gin.Context) {
 		apiresp.Fail(c, http.StatusBadRequest, 400, "invite_id required")
 		return
 	}
-	if err := a.st.RevokeInvite(req.InviteID); err != nil {
+	cfg, _, err := a.st.GetNodeConfig()
+	if err != nil {
 		apiresp.Fail(c, http.StatusInternalServerError, 500, err.Error())
+		return
+	}
+	bridge := strings.TrimRight(strings.TrimSpace(cfg.BridgeURL), "/")
+	if bridge == "" {
+		bridge = strings.TrimRight(strings.TrimSpace(os.Getenv("TOTOTO_BRIDGE_URL")), "/")
+	}
+	if bridge == "" {
+		apiresp.Fail(c, http.StatusBadRequest, 400, "未配置 bridge_url（节点配置）或 TOTOTO_BRIDGE_URL（环境变量）")
+		return
+	}
+	adminNodeKey := strings.TrimSpace(c.GetHeader("X-Node-Key"))
+	if adminNodeKey == "" {
+		apiresp.Fail(c, http.StatusUnauthorized, 401, "missing X-Node-Key")
+		return
+	}
+	bc := &bridgeclient.Client{BaseURL: bridge, NodeID: cfg.NodeID, NodeKey: adminNodeKey}
+	if err := bc.RevokeInvite(strings.TrimSpace(req.InviteID)); err != nil {
+		apiresp.Fail(c, http.StatusBadGateway, 502, err.Error())
 		return
 	}
 	apiresp.OK(c, gin.H{"revoked": true})

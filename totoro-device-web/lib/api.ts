@@ -114,6 +114,17 @@ export const api = {
   scanStatus: () => request<any>("/api/v1/devices/scan/status"),
 
   frpStatus: () => request<any>("/api/v1/frp/status"),
+  frpModeSet: (req: { mode: "builtin" | "manual" | "public" }) =>
+    request<any>("/api/v1/frp/mode", { method: "POST", body: JSON.stringify(req) }),
+  frpConfigSave: (req: {
+    server?: string;
+    token?: string;
+    admin_addr?: string;
+    admin_user?: string;
+    admin_pwd?: string;
+    domain_suffix?: string;
+  }) => request<any>("/api/v1/frp/config", { method: "POST", body: JSON.stringify(req || {}) }),
+  frpUseBuiltin: () => request<any>("/api/v1/frp/builtin/use", { method: "POST", body: "{}" }),
   frpConnect: (req?: {
     server?: string;
     token?: string;
@@ -148,9 +159,11 @@ export const api = {
   frpReload: () => request<any>("/api/v1/frp/reload", { method: "POST", body: "{}" }),
 
   publicNodes: () => request<{ nodes: any[] }>("/api/v1/public/nodes"),
-  inviteResolve: (req: { node_api: string; code: string }) =>
+  publicNodeConnect: (req: { node_id: string }) =>
+    request<any>("/api/v1/public/nodes/connect", { method: "POST", body: JSON.stringify(req) }),
+  inviteResolve: (req: { code: string }) =>
     request<any>("/api/v1/public/invites/resolve", { method: "POST", body: JSON.stringify(req) }),
-  inviteConnect: (req: { node_api: string; code: string }) =>
+  inviteConnect: (req: { code: string }) =>
     request<any>("/api/v1/public/invites/connect", { method: "POST", body: JSON.stringify(req) }),
 
   networkStatus: (opts?: { skipAuth?: boolean }) =>

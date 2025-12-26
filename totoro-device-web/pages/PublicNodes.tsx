@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { api } from "../lib/api";
+import { useLanguage } from "../contexts/LanguageContext";
+import { Toast } from "../components/Toast";
 
-type NodeEndpoint = { addr: string; port: number; proto: string };
 type PublicNode = {
   node_id: string;
   name: string;
@@ -10,19 +11,20 @@ type PublicNode = {
   region?: string;
   isp?: string;
   tags?: string[];
-  endpoints: NodeEndpoint[];
-  node_api?: string;
   domain_suffix?: string;
   heartbeat_age_s?: number;
+  description?: string;
 };
 
 export const PublicNodesPage: React.FC = () => {
+  const { t } = useLanguage();
   const [nodes, setNodes] = useState<PublicNode[]>([]);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const [inviteNodeApi, setInviteNodeApi] = useState("http://127.0.0.1:18080");
   const [inviteCode, setInviteCode] = useState("");
-  const [notice, setNotice] = useState<string | null>(null);
+  const [toastOpen, setToastOpen] = useState(false);
+  const [toastType, setToastType] = useState<"success" | "error" | "info">("info");
+  const [toastMsg, setToastMsg] = useState("");
 
   // 自定义弹窗：公开节点一键连接（输入邀请码 -> 解析预览 -> 确认连接）
   const [connectOpen, setConnectOpen] = useState(false);
@@ -47,33 +49,31 @@ export const PublicNodesPage: React.FC = () => {
   };
 
   const connect = async (n: PublicNode) => {
-    const ep = n.endpoints?.[0];
-    if (!ep) {
-      setErr("该节点缺少 endpoints");
-      return;
-    }
-    // 打开自定义弹窗：输入邀请码 -> 解析预览 -> 确认连接
-    setNotice(null);
+    // 公开节点：直接一键连接（无需邀请码）
     setErr(null);
-    setConnectNode(n);
-    // 由桥梁下发真实 node_api，避免猜端口
-    setInviteNodeApi((n.node_api || "").trim() || `http://${ep.addr}:18080`);
-    setInviteCode("");
-    setResolved(null);
-    setConnectOpen(true);
+    try {
+      await api.publicNodeConnect({ node_id: n.node_id });
+      setToastType("success");
+      setToastMsg("连接成功，已自动启动 FRPC。");
+      setToastOpen(true);
+      load();
+    } catch (e: any) {
+      setToastType("error");
+      setToastMsg(e?.message || "连接失败");
+      setToastOpen(true);
+    }
   };
 
   const resolveInvite = async () => {
-    const nodeApi = inviteNodeApi.trim();
     const code = inviteCode.trim();
-    if (!nodeApi || !code) {
-      setErr("请填写 node_api 与 邀请码");
+    if (!code) {
+      setErr("请填写邀请码");
       return;
     }
     setResolving(true);
     setErr(null);
     try {
-      const data = await api.inviteResolve({ node_api: nodeApi, code });
+      const data = await api.inviteResolve({ code });
       setResolved(data);
     } catch (e: any) {
       setResolved(null);
@@ -84,23 +84,26 @@ export const PublicNodesPage: React.FC = () => {
   };
 
   const confirmConnect = async () => {
-    const nodeApi = inviteNodeApi.trim();
     const code = inviteCode.trim();
-    if (!nodeApi || !code) {
-      setErr("请填写 node_api 与 邀请码");
+    if (!code) {
+      setErr("请填写邀请码");
       return;
     }
     setConnecting(true);
     setErr(null);
     try {
-      await api.inviteConnect({ node_api: nodeApi, code });
+      await api.inviteConnect({ code });
       setConnectOpen(false);
       setConnectNode(null);
       setResolved(null);
-      setNotice("已连接：已保存公开节点配置，并自动启动 FRPC。");
+      setToastType("success");
+      setToastMsg("连接成功，已自动启动 FRPC。");
+      setToastOpen(true);
       load();
     } catch (e: any) {
-      setErr(e?.message || "连接失败");
+      setToastType("error");
+      setToastMsg(e?.message || "连接失败");
+      setToastOpen(true);
     } finally {
       setConnecting(false);
     }
@@ -112,21 +115,17 @@ export const PublicNodesPage: React.FC = () => {
 
   return (
     <div className="page">
-      {notice && (
-        <div className="card glass" style={{ padding: 14, marginBottom: 12, border: "1px solid rgba(65, 186, 65, 0.25)" }}>
-          <div style={{ color: "var(--success)", fontWeight: 700, fontSize: 13 }}>{notice}</div>
-        </div>
-      )}
+      <Toast open={toastOpen} type={toastType} message={toastMsg} onClose={() => setToastOpen(false)} />
       <div className="card glass" style={{ padding: 20, marginBottom: 16 }}>
         <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
           <div>
-            <div style={{ fontSize: 18, fontWeight: 800 }}>公开节点</div>
+            <div style={{ fontSize: 18, fontWeight: 800 }}>{t("public_nodes.title")}</div>
             <div style={{ fontSize: 13, color: "var(--text-secondary)" }}>
-              共 {nodes.length} 个，在线 {onlineCount} 个
+              {t("public_nodes.total")} {nodes.length} {t("public_nodes.online")} {onlineCount}
             </div>
           </div>
           <button className="btn btn-primary" onClick={load} disabled={loading}>
-            {loading ? "刷新中…" : "刷新"}
+            {loading ? t("common.loading") : t("public_nodes.refresh")}
           </button>
         </div>
         <div style={{ display: "flex", gap: 10, marginTop: 14, flexWrap: "wrap" }}>
@@ -136,12 +135,11 @@ export const PublicNodesPage: React.FC = () => {
               setConnectNode(null);
               setResolved(null);
               setErr(null);
-              setNotice(null);
               setConnectOpen(true);
             }}
             disabled={loading}
           >
-            邀请码连接
+            {t("public_nodes.invite_connect")}
           </button>
         </div>
         {err && (
@@ -151,11 +149,16 @@ export const PublicNodesPage: React.FC = () => {
 
       <div className="grid" style={{ display: "grid", gap: 12 }}>
         {nodes.map((n) => {
-          const ep = n.endpoints?.[0];
           const badgeColor =
             n.status === "online" ? "rgba(65,186,65,0.12)" : n.status === "degraded" ? "rgba(245,158,11,0.12)" : "rgba(239,68,68,0.12)";
           const badgeText =
             n.status === "online" ? "#41BA41" : n.status === "degraded" ? "#F59E0B" : "#EF4444";
+          const statusLabel =
+            n.status === "online"
+              ? t("common.online")
+              : n.status === "degraded"
+              ? t("common.degraded")
+              : t("common.offline");
           return (
             <div key={n.node_id} className="card glass" style={{ padding: 16 }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
@@ -163,16 +166,21 @@ export const PublicNodesPage: React.FC = () => {
                   <div style={{ fontWeight: 800, fontSize: 15, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                     {n.name || n.node_id}
                   </div>
+                  {String(n.description || "").trim() ? (
+                    <div style={{ fontSize: 12, color: "var(--text-secondary)", marginTop: 4, lineHeight: 1.35 }}>
+                      {String(n.description || "").trim()}
+                    </div>
+                  ) : null}
                   <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>
-                    {n.region || "-"} · {n.isp || "-"} · {ep ? `${ep.addr}:${ep.port}` : "no-endpoint"}
+                    {n.region || "-"} · {n.isp || "-"}
                   </div>
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                   <div style={{ padding: "6px 10px", borderRadius: 999, background: badgeColor, color: badgeText, fontWeight: 800, fontSize: 12 }}>
-                    {n.status}
+                    {statusLabel}
                   </div>
-                  <button className="btn btn-outline" onClick={() => connect(n)} disabled={!ep || loading}>
-                    连接
+                  <button className="btn btn-outline" onClick={() => connect(n)} disabled={loading}>
+                    {t("public_nodes.connect")}
                   </button>
                 </div>
               </div>
@@ -202,7 +210,7 @@ export const PublicNodesPage: React.FC = () => {
         >
           <div className="card glass modal-panel" onMouseDown={(e) => e.stopPropagation()} style={{ padding: 22 }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
-              <div style={{ fontSize: 18, fontWeight: 800 }}>一键连接（公开节点）</div>
+              <div style={{ fontSize: 18, fontWeight: 800 }}>{t("public_nodes.modal_title")}</div>
               <button
                 className="btn btn-ghost"
                 style={{ width: 40, height: 40, padding: 0, borderRadius: "50%" }}
@@ -215,47 +223,36 @@ export const PublicNodesPage: React.FC = () => {
             </div>
 
             <div style={{ fontSize: 13, color: "var(--text-secondary)", marginBottom: 10 }}>
-              {connectNode ? `目标节点：${connectNode.name || connectNode.node_id}（${connectNode.node_id}）` : "请输入邀请码以解析节点信息"}
+              {connectNode ? `目标节点：${connectNode.name || connectNode.node_id}（${connectNode.node_id}）` : t("public_nodes.enter_invite")}
             </div>
 
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
               <div>
-                <div style={{ fontSize: 12, color: "var(--text-secondary)", marginBottom: 6 }}>node_api（可编辑）</div>
-                <input className="input" value={inviteNodeApi} onChange={(e) => setInviteNodeApi(e.target.value)} placeholder="例如 http://1.2.3.4:18080" />
-              </div>
-              <div>
-                <div style={{ fontSize: 12, color: "var(--text-secondary)", marginBottom: 6 }}>邀请码</div>
+                <div style={{ fontSize: 12, color: "var(--text-secondary)", marginBottom: 6 }}>{t("public_nodes.invite_code")}</div>
                 <input className="input" value={inviteCode} onChange={(e) => setInviteCode(e.target.value)} placeholder="例如 ABCD-EFGH-IJKL" />
               </div>
 
               <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", marginTop: 6 }}>
                 <button className="btn btn-outline" onClick={() => setConnectOpen(false)} disabled={connecting || resolving}>
-                  取消
+                  {t("common.cancel")}
                 </button>
-                <button className="btn btn-outline" onClick={resolveInvite} disabled={connecting || resolving || !inviteNodeApi.trim() || !inviteCode.trim()}>
-                  {resolving ? "解析中…" : "解析"}
+                <button className="btn btn-outline" onClick={resolveInvite} disabled={connecting || resolving || !inviteCode.trim()}>
+                  {resolving ? t("public_nodes.resolving") : t("public_nodes.resolve")}
                 </button>
                 <button className="btn btn-primary" onClick={confirmConnect} disabled={connecting || resolving || !resolved}>
-                  {connecting ? "连接中…" : "确认连接"}
+                  {connecting ? t("public_nodes.connecting") : t("public_nodes.confirm")}
                 </button>
               </div>
 
               {resolved && (
                 <div style={{ marginTop: 10 }}>
-                  <div style={{ fontSize: 13, fontWeight: 800, marginBottom: 8 }}>解析结果（确认后才会连接）</div>
+                  <div style={{ fontSize: 13, fontWeight: 800, marginBottom: 8 }}>{t("public_nodes.preview_title")}</div>
                   <div className="card" style={{ padding: 12, background: "rgba(0,0,0,0.02)" }}>
-                    <div style={{ fontSize: 13, color: "var(--text-primary)", marginBottom: 6 }}>
-                      <strong>server：</strong> {resolved.server}
-                    </div>
                     <div style={{ fontSize: 13, color: "var(--text-primary)", marginBottom: 6 }}>
                       <strong>expires_at：</strong> {resolved.expires_at}
                     </div>
                     <div style={{ fontSize: 13, color: "var(--text-primary)", marginBottom: 6 }}>
                       <strong>node_id：</strong> {resolved?.node?.node_id || "-"}
-                    </div>
-                    <div style={{ fontSize: 13, color: "var(--text-primary)" }}>
-                      <strong>endpoints：</strong>{" "}
-                      {Array.isArray(resolved?.node?.endpoints) ? JSON.stringify(resolved.node.endpoints) : "-"}
                     </div>
                   </div>
                 </div>

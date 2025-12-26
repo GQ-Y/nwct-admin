@@ -27,6 +27,7 @@ type NodeConfig struct {
 	NodeKey      string   `json:"node_key"` // 仅用于运行期；落库只存 hash
 	Public       bool     `json:"public"`
 	Name         string   `json:"name"`
+	Description  string   `json:"description"`
 	Region       string   `json:"region"`
 	ISP          string   `json:"isp"`
 	Tags         []string `json:"tags"`
@@ -72,6 +73,7 @@ CREATE TABLE IF NOT EXISTS node_config (
   node_key_hash TEXT NOT NULL,
   public INTEGER NOT NULL DEFAULT 0,
   name TEXT NOT NULL DEFAULT '',
+  description TEXT NOT NULL DEFAULT '',
   region TEXT NOT NULL DEFAULT '',
   isp TEXT NOT NULL DEFAULT '',
   tags_json TEXT NOT NULL DEFAULT '[]',
@@ -94,6 +96,8 @@ CREATE TABLE IF NOT EXISTS invites (
 CREATE INDEX IF NOT EXISTS idx_invites_revoked ON invites(revoked);
 `
 	_, err := s.db.Exec(schema)
+	// 兼容旧库：补列
+	_, _ = s.db.Exec(`ALTER TABLE node_config ADD COLUMN description TEXT NOT NULL DEFAULT ''`)
 	return err
 }
 
@@ -112,16 +116,16 @@ func (s *Store) InitNodeIfEmpty(cfg NodeConfig) error {
 
 	// 仅当为空时插入
 	_, err := s.db.Exec(`
-INSERT INTO node_config(id,node_id,node_key_hash,public,name,region,isp,tags_json,bridge_url,domain_suffix,endpoints_json,updated_at)
-VALUES(1,?,?,?,?,?,?,?,?,?,?,?)
+INSERT INTO node_config(id,node_id,node_key_hash,public,name,description,region,isp,tags_json,bridge_url,domain_suffix,endpoints_json,updated_at)
+VALUES(1,?,?,?,?,?,?,?,?,?,?,?,?)
 ON CONFLICT(id) DO NOTHING
-`, cfg.NodeID, hashKey(cfg.NodeKey), boolToInt(cfg.Public), cfg.Name, cfg.Region, cfg.ISP, string(tags), cfg.BridgeURL, cfg.DomainSuffix, string(eps), now)
+`, cfg.NodeID, hashKey(cfg.NodeKey), boolToInt(cfg.Public), cfg.Name, cfg.Description, cfg.Region, cfg.ISP, string(tags), cfg.BridgeURL, cfg.DomainSuffix, string(eps), now)
 	return err
 }
 
 func (s *Store) GetNodeConfig() (NodeConfig, string, error) {
 	row := s.db.QueryRow(`
-SELECT node_id,node_key_hash,public,name,region,isp,tags_json,bridge_url,domain_suffix,endpoints_json
+SELECT node_id,node_key_hash,public,name,description,region,isp,tags_json,bridge_url,domain_suffix,endpoints_json
 FROM node_config WHERE id=1
 `)
 	var (
@@ -131,7 +135,7 @@ FROM node_config WHERE id=1
 		tagsJSON     string
 		endpointsJSON string
 	)
-	if err := row.Scan(&cfg.NodeID, &keyHash, &publicInt, &cfg.Name, &cfg.Region, &cfg.ISP, &tagsJSON, &cfg.BridgeURL, &cfg.DomainSuffix, &endpointsJSON); err != nil {
+	if err := row.Scan(&cfg.NodeID, &keyHash, &publicInt, &cfg.Name, &cfg.Description, &cfg.Region, &cfg.ISP, &tagsJSON, &cfg.BridgeURL, &cfg.DomainSuffix, &endpointsJSON); err != nil {
 		return NodeConfig{}, "", err
 	}
 	cfg.Public = publicInt == 1
@@ -152,6 +156,10 @@ func (s *Store) UpdateNodeConfig(adminNodeKey string, patch NodeConfig) error {
 	// merge
 	if patch.Name != "" {
 		cfg.Name = patch.Name
+	}
+	if patch.Description != "" || patch.Description == "" {
+		// 允许显式清空（传空字符串）
+		cfg.Description = patch.Description
 	}
 	if patch.Region != "" {
 		cfg.Region = patch.Region
@@ -179,9 +187,9 @@ func (s *Store) UpdateNodeConfig(adminNodeKey string, patch NodeConfig) error {
 	eps, _ := json.Marshal(cfg.Endpoints)
 	_, err = s.db.Exec(`
 UPDATE node_config
-SET public=?,name=?,region=?,isp=?,tags_json=?,bridge_url=?,domain_suffix=?,endpoints_json=?,updated_at=?
+SET public=?,name=?,description=?,region=?,isp=?,tags_json=?,bridge_url=?,domain_suffix=?,endpoints_json=?,updated_at=?
 WHERE id=1
-`, boolToInt(cfg.Public), cfg.Name, cfg.Region, cfg.ISP, string(tags), cfg.BridgeURL, cfg.DomainSuffix, string(eps), now)
+`, boolToInt(cfg.Public), cfg.Name, cfg.Description, cfg.Region, cfg.ISP, string(tags), cfg.BridgeURL, cfg.DomainSuffix, string(eps), now)
 	return err
 }
 

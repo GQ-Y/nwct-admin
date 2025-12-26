@@ -64,10 +64,10 @@ type WiFiProfile struct {
 
 // BridgeConfig 桥梁平台配置（设备侧）
 type BridgeConfig struct {
-	URL         string `json:"url"`          // 例如 http://127.0.0.1:18090
-	DeviceToken string `json:"device_token"` // 注册成功后下发，设备本地持久化
-	ExpiresAt   string `json:"expires_at"`   // RFC3339
-	LastMAC     string `json:"last_mac"`     // 仅记录
+	URL         string `json:"url"`      // 例如 http://127.0.0.1:18090
+	DeviceToken string `json:"-"`        // 不落盘：SQLite 仅存密文，用时解密到内存
+	ExpiresAt   string `json:"-"`        // 不落盘：同上
+	LastMAC     string `json:"last_mac"` // 仅记录
 }
 
 // FRPMode 设备端 frpc 连接 frps 的工作模式
@@ -89,16 +89,16 @@ type FRPProfile struct {
 	AdminAddr    string `json:"admin_addr"`
 	AdminUser    string `json:"admin_user"`
 	AdminPwd     string `json:"admin_pwd"`
-	TotoroTicket string `json:"totoro_ticket,omitempty"`
+	TotoroTicket string `json:"-"` // 不落盘：属于短期票据
 	DomainSuffix string `json:"domain_suffix"`
 }
 
 // FRPPublicProfile 公开节点模式的持久化信息
 type FRPPublicProfile struct {
 	FRPProfile
-	NodeAPI          string `json:"node_api,omitempty"`           // 例如 http://1.2.3.4:18080
-	InviteCode       string `json:"invite_code,omitempty"`        // 用户输入的邀请码（用于启动时自动换票）
-	TicketExpiresAt  string `json:"ticket_expires_at,omitempty"`  // RFC3339
+	NodeAPI          string `json:"-"`                            // 旧实现遗留，不再使用（兑换在 bridge）
+	InviteCode       string `json:"-"`                            // 不落盘：SQLite 仅存密文
+	TicketExpiresAt  string `json:"-"`                            // 不落盘：短期票据
 	LastResolveError string `json:"last_resolve_error,omitempty"` // 最近一次自动换票失败原因（仅用于排障）
 }
 
@@ -120,7 +120,7 @@ type FRPServerConfig struct {
 	AdminPwd  string `json:"admin_pwd"`  // admin_nAhTnN
 	// TotoroTicket 用于 Totoro 节点的连接票据（写入 frpc metas：meta_totoro_ticket）。
 	// 注意：这不是 frp 的 token。
-	TotoroTicket string `json:"totoro_ticket,omitempty"`
+	TotoroTicket string `json:"-"` // 不落盘：属于短期票据
 	// DomainSuffix HTTP/HTTPS 隧道的默认域名后缀（前端只填写前缀即可）
 	DomainSuffix string `json:"domain_suffix"` // frpc.zyckj.club
 }
@@ -130,25 +130,7 @@ func (c *FRPServerConfig) ensureDefaults() {
 	if c.Mode == "" {
 		c.Mode = FRPModeBuiltin
 	}
-	// 预设 builtin 默认值（保持和历史默认一致）
-	if strings.TrimSpace(c.Builtin.Server) == "" {
-		c.Builtin.Server = "117.172.29.237:7000"
-	}
-	if strings.TrimSpace(c.Builtin.Token) == "" {
-		c.Builtin.Token = "token123456"
-	}
-	if strings.TrimSpace(c.Builtin.AdminAddr) == "" {
-		c.Builtin.AdminAddr = "117.172.29.237:7500"
-	}
-	if strings.TrimSpace(c.Builtin.AdminUser) == "" {
-		c.Builtin.AdminUser = "admin"
-	}
-	if strings.TrimSpace(c.Builtin.AdminPwd) == "" {
-		c.Builtin.AdminPwd = "admin_nAhTnN"
-	}
-	if strings.TrimSpace(c.Builtin.DomainSuffix) == "" {
-		c.Builtin.DomainSuffix = "frpc.zyckj.club"
-	}
+	// builtin 不再内置任何默认节点信息：必须从桥梁平台 official_nodes 同步
 
 	// 若是旧配置（只写了 Active 字段），把 Active 回填到对应 mode profile，避免丢失
 	switch c.Mode {
@@ -253,15 +235,8 @@ func DefaultConfig() *Config {
 			URL: "",
 		},
 		FRPServer: func() FRPServerConfig {
-			// 默认模式：builtin（内置/预设 frps）
-			builtin := FRPProfile{
-				Server:       "117.172.29.237:7000",
-				Token:        "token123456",
-				AdminAddr:    "117.172.29.237:7500",
-				AdminUser:    "admin",
-				AdminPwd:     "admin_nAhTnN",
-				DomainSuffix: "frpc.zyckj.club",
-			}
+			// 默认模式：builtin（官方内置节点从桥梁平台同步，不再硬编码）
+			builtin := FRPProfile{}
 			c := FRPServerConfig{
 				Mode:    FRPModeBuiltin,
 				Builtin: builtin,

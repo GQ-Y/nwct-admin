@@ -116,6 +116,8 @@ func (s *Server) initRouter() {
 		// FRP管理
 		api.GET("/frp/status", s.authMiddleware(), s.handleFRPStatus)
 		api.POST("/frp/connect", s.authMiddleware(), s.handleFRPConnect)
+		api.POST("/frp/config", s.authMiddleware(), s.handleFRPConfigSave)
+		api.POST("/frp/builtin/use", s.authMiddleware(), s.handleFRPBuiltinUse)
 		api.POST("/frp/disconnect", s.authMiddleware(), s.handleFRPDisconnect)
 		api.GET("/frp/tunnels", s.authMiddleware(), s.handleFRPTunnels)
 		api.POST("/frp/tunnels", s.authMiddleware(), s.handleFRPAddTunnel)
@@ -126,6 +128,7 @@ func (s *Server) initRouter() {
 
 		// 官方桥梁：公开节点列表（设备侧透传/缓存入口）
 		api.GET("/public/nodes", s.authMiddleware(), s.handlePublicNodes)
+		api.POST("/public/nodes/connect", s.authMiddleware(), s.handlePublicNodeConnect)
 		// 邀请码解析预览（仅解析，不写配置/不连接）
 		api.POST("/public/invites/resolve", s.authMiddleware(), s.handleInviteResolve)
 		// 邀请码一键连接（从节点兑换 ticket 并连接）
