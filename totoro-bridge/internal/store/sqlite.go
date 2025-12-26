@@ -1,8 +1,10 @@
 package store
 
 import (
+	"crypto/sha256"
 	"database/sql"
 	"encoding/json"
+	"encoding/hex"
 	"fmt"
 	"time"
 
@@ -10,6 +12,8 @@ import (
 )
 
 type Store interface {
+	UpsertNodeAuth(nodeID string, nodeKey string) error
+	VerifyNodeAuth(nodeID string, nodeKey string) (bool, error)
 	UpsertNodeHeartbeat(hb NodeHeartbeat) error
 	ListPublicNodes() ([]PublicNode, error)
 	Close() error
@@ -85,6 +89,12 @@ func (s *SQLiteStore) Close() error { return s.db.Close() }
 
 func (s *SQLiteStore) migrate() error {
 	schema := `
+CREATE TABLE IF NOT EXISTS node_auth (
+  node_id TEXT PRIMARY KEY,
+  node_key_hash TEXT NOT NULL,
+  updated_at INTEGER NOT NULL DEFAULT 0
+);
+
 CREATE TABLE IF NOT EXISTS nodes (
   node_id TEXT PRIMARY KEY,
   name TEXT NOT NULL DEFAULT '',
@@ -105,6 +115,41 @@ CREATE INDEX IF NOT EXISTS idx_nodes_public_lastseen ON nodes(public, last_seen_
 `
 	_, err := s.db.Exec(schema)
 	return err
+}
+
+func hashKey(s string) string {
+	sum := sha256.Sum256([]byte(s))
+	return hex.EncodeToString(sum[:])
+}
+
+func (s *SQLiteStore) UpsertNodeAuth(nodeID string, nodeKey string) error {
+	if nodeID == "" || nodeKey == "" {
+		return fmt.Errorf("node_id/node_key required")
+	}
+	now := time.Now().Unix()
+	_, err := s.db.Exec(`
+INSERT INTO node_auth(node_id,node_key_hash,updated_at)
+VALUES(?,?,?)
+ON CONFLICT(node_id) DO UPDATE SET
+  node_key_hash=excluded.node_key_hash,
+  updated_at=excluded.updated_at
+`, nodeID, hashKey(nodeKey), now)
+	return err
+}
+
+func (s *SQLiteStore) VerifyNodeAuth(nodeID string, nodeKey string) (bool, error) {
+	if nodeID == "" || nodeKey == "" {
+		return false, nil
+	}
+	row := s.db.QueryRow(`SELECT node_key_hash FROM node_auth WHERE node_id=?`, nodeID)
+	var want string
+	if err := row.Scan(&want); err != nil {
+		if err == sql.ErrNoRows {
+			return false, nil
+		}
+		return false, err
+	}
+	return hashKey(nodeKey) == want, nil
 }
 
 func (s *SQLiteStore) UpsertNodeHeartbeat(hb NodeHeartbeat) error {

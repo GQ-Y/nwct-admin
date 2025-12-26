@@ -147,6 +147,10 @@ export const api = {
     }),
   frpReload: () => request<any>("/api/v1/frp/reload", { method: "POST", body: "{}" }),
 
+  publicNodes: () => request<{ nodes: any[] }>("/api/v1/public/nodes"),
+  inviteConnect: (req: { node_api: string; code: string }) =>
+    request<any>("/api/v1/public/invites/connect", { method: "POST", body: JSON.stringify(req) }),
+
   networkStatus: (opts?: { skipAuth?: boolean }) =>
     request<any>("/api/v1/network/status", { skipAuth: Boolean(opts?.skipAuth) }),
   networkInterfaces: (opts?: { skipAuth?: boolean }) =>

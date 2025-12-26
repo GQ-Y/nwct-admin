@@ -2,7 +2,9 @@ package api
 
 import (
 	"bufio"
+	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"totoro-device/config"
@@ -29,6 +31,46 @@ import (
 	"github.com/shirou/gopsutil/v3/host"
 	"github.com/shirou/gopsutil/v3/mem"
 )
+
+// handlePublicNodes 透传官方桥梁的公开节点列表
+// 环境变量：TOTOTO_BRIDGE_URL，例如 http://127.0.0.1:18090
+func (s *Server) handlePublicNodes(c *gin.Context) {
+	bridge := strings.TrimRight(strings.TrimSpace(os.Getenv("TOTOTO_BRIDGE_URL")), "/")
+	if bridge == "" {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse(400, "未配置 TOTOTO_BRIDGE_URL"))
+		return
+	}
+	u := bridge + "/api/v1/public/nodes"
+
+	req, _ := http.NewRequest(http.MethodGet, u, nil)
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		c.JSON(http.StatusBadGateway, models.ErrorResponse(502, "桥梁不可达: "+err.Error()))
+		return
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	// 桥梁返回格式为 {code:0,data:{nodes:[]}}，而设备侧统一格式为 {code:200,...}
+	var bridgeResp struct {
+		Code    int         `json:"code"`
+		Message string      `json:"message"`
+		Data    interface{} `json:"data"`
+	}
+	if err := json.Unmarshal(body, &bridgeResp); err != nil {
+		c.JSON(http.StatusBadGateway, models.ErrorResponse(502, "桥梁响应非JSON"))
+		return
+	}
+	if resp.StatusCode/100 != 2 || bridgeResp.Code != 0 {
+		msg := strings.TrimSpace(bridgeResp.Message)
+		if msg == "" {
+			msg = "桥梁响应错误"
+		}
+		c.JSON(http.StatusBadGateway, models.ErrorResponse(502, msg))
+		return
+	}
+	c.JSON(http.StatusOK, models.SuccessResponse(bridgeResp.Data))
+}
 
 func parsePortsInputToList(v any) []int {
 	// 复用 toolkit.PortScan 的 ports 解析能力（string / []int / []any），但不执行真实扫描
@@ -1132,6 +1174,7 @@ func (s *Server) handleFRPConnect(c *gin.Context) {
 	var req struct {
 		Server    string `json:"server"`
 		Token     string `json:"token"`
+		TotoroTicket string `json:"totoro_ticket"`
 		AdminAddr string `json:"admin_addr"`
 		AdminUser string `json:"admin_user"`
 		AdminPwd  string `json:"admin_pwd"`
@@ -1147,6 +1190,9 @@ func (s *Server) handleFRPConnect(c *gin.Context) {
 	}
 	if strings.TrimSpace(req.Token) != "" {
 		s.config.FRPServer.Token = strings.TrimSpace(req.Token)
+	}
+	if strings.TrimSpace(req.TotoroTicket) != "" {
+		s.config.FRPServer.TotoroTicket = strings.TrimSpace(req.TotoroTicket)
 	}
 	if strings.TrimSpace(req.AdminAddr) != "" {
 		s.config.FRPServer.AdminAddr = strings.TrimSpace(req.AdminAddr)
@@ -1166,6 +1212,85 @@ func (s *Server) handleFRPConnect(c *gin.Context) {
 	_ = s.config.Save()
 
 	c.JSON(http.StatusOK, models.SuccessResponse(nil))
+}
+
+// handleInviteConnect 通过节点的 /invites/resolve 获取 ticket，并一键连接到该 frps 节点
+func (s *Server) handleInviteConnect(c *gin.Context) {
+	var req struct {
+		NodeAPI string `json:"node_api" binding:"required"` // 例如 http://1.2.3.4:18080
+		Code    string `json:"code" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse(400, "参数错误: "+err.Error()))
+		return
+	}
+	nodeAPI := strings.TrimRight(strings.TrimSpace(req.NodeAPI), "/")
+	code := strings.TrimSpace(req.Code)
+	if nodeAPI == "" || code == "" {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse(400, "node_api/code 不能为空"))
+		return
+	}
+
+	// 调用节点 resolve
+	u := nodeAPI + "/api/v1/invites/resolve"
+	body := fmt.Sprintf(`{"code":%q}`, code)
+	httpReq, _ := http.NewRequest(http.MethodPost, u, strings.NewReader(body))
+	httpReq.Header.Set("Content-Type", "application/json")
+	client := &http.Client{Timeout: 6 * time.Second}
+	resp, err := client.Do(httpReq)
+	if err != nil {
+		c.JSON(http.StatusBadGateway, models.ErrorResponse(502, "节点不可达: "+err.Error()))
+		return
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(resp.Body)
+	var nodeResp struct {
+		Code    int             `json:"code"`
+		Message string          `json:"message"`
+		Data    json.RawMessage `json:"data"`
+	}
+	if err := json.Unmarshal(raw, &nodeResp); err != nil || nodeResp.Code != 0 {
+		msg := strings.TrimSpace(nodeResp.Message)
+		if msg == "" {
+			msg = "节点解析邀请码失败"
+		}
+		c.JSON(http.StatusBadGateway, models.ErrorResponse(502, msg))
+		return
+	}
+	var data struct {
+		Node struct {
+			NodeID    string `json:"node_id"`
+			Endpoints []struct {
+				Addr  string `json:"addr"`
+				Port  int    `json:"port"`
+				Proto string `json:"proto"`
+			} `json:"endpoints"`
+		} `json:"node"`
+		ConnectionTicket string `json:"connection_ticket"`
+		ExpiresAt        string `json:"expires_at"`
+	}
+	if err := json.Unmarshal(nodeResp.Data, &data); err != nil {
+		c.JSON(http.StatusBadGateway, models.ErrorResponse(502, "节点响应解析失败"))
+		return
+	}
+	if len(data.Node.Endpoints) == 0 {
+		c.JSON(http.StatusBadGateway, models.ErrorResponse(502, "节点缺少 endpoints"))
+		return
+	}
+	ep := data.Node.Endpoints[0]
+	s.config.FRPServer.Server = fmt.Sprintf("%s:%d", ep.Addr, ep.Port)
+	s.config.FRPServer.TotoroTicket = strings.TrimSpace(data.ConnectionTicket)
+	_ = s.config.Save()
+
+	if err := s.frpClient.Connect(); err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse(500, err.Error()))
+		return
+	}
+	c.JSON(http.StatusOK, models.SuccessResponse(gin.H{
+		"node_id":    data.Node.NodeID,
+		"server":     s.config.FRPServer.Server,
+		"expires_at": data.ExpiresAt,
+	}))
 }
 
 // handleFRPDisconnect 处理FRP断开请求
@@ -1282,6 +1407,7 @@ func (s *Server) handleConfigGet(c *gin.Context) {
 		"frp_server": gin.H{
 			"server":        s.config.FRPServer.Server,
 			"token":         "***",
+			"totoro_ticket": "***",
 			"admin_addr":    s.config.FRPServer.AdminAddr,
 			"admin_user":    s.config.FRPServer.AdminUser,
 			"domain_suffix": s.config.FRPServer.DomainSuffix,

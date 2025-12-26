@@ -14,8 +14,8 @@ export default defineConfig(({ mode }) => {
         allowedHosts: ['.frpc.zyckj.club'],
       },
       build: {
-        // 输出到后端可 embed 的目录（最终由 client-nps 单端口提供）
-        outDir: path.resolve(__dirname, '../client-nps/internal/webui/dist'),
+        // 输出到后端可 embed 的目录（最终由 totoro-device 单端口提供）
+        outDir: path.resolve(__dirname, '../totoro-device/internal/webui/dist'),
         // outDir 在项目根目录之外时，Vite 默认不会清空；这里显式允许清空
         emptyOutDir: true,
       },

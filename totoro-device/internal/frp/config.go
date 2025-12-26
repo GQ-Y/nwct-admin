@@ -2,8 +2,8 @@ package frp
 
 import (
 	"fmt"
-	"totoro-device/config"
 	"strings"
+	"totoro-device/config"
 )
 
 // GenerateConfig 根据隧道列表生成 frpc.ini
@@ -24,6 +24,10 @@ func GenerateConfig(cfg *config.FRPServerConfig, tunnels map[string]*Tunnel) (st
 	sb.WriteString(fmt.Sprintf("server_port = %s\n", serverPort))
 	if cfg.Token != "" {
 		sb.WriteString(fmt.Sprintf("token = %s\n", cfg.Token))
+	}
+	// Totoro 连接票据通过 metas 传递给 frps（对应 frp legacy ini 的 meta_ 前缀）
+	if strings.TrimSpace(cfg.TotoroTicket) != "" {
+		sb.WriteString(fmt.Sprintf("meta_totoro_ticket = %s\n", strings.TrimSpace(cfg.TotoroTicket)))
 	}
 	// 启用 webServer 以支持热重载
 	sb.WriteString("\n[webServer]\n")
@@ -57,4 +61,3 @@ func ParseConfig(configPath string) (map[string]*Tunnel, error) {
 	// 目前返回空 map，因为我们会从内存状态管理
 	return make(map[string]*Tunnel), nil
 }
-

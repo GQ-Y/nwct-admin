@@ -9,6 +9,7 @@ import { Devices } from './pages/Devices';
 import { Tools } from './pages/Tools';
 import { System } from './pages/System';
 import { FRPPage } from './pages/Services';
+import { PublicNodesPage } from './pages/PublicNodes';
 import { LanguageProvider } from './contexts/LanguageContext';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { RealtimeProvider } from './contexts/RealtimeContext';
@@ -44,6 +45,7 @@ export const App: React.FC = () => {
               <Route path="/tools" element={<Tools />} />
               <Route path="/system" element={<System />} />
               <Route path="/frp" element={<FRPPage />} />
+              <Route path="/public-nodes" element={<PublicNodesPage />} />
             </Route>
           </Routes>
         </BrowserRouter>

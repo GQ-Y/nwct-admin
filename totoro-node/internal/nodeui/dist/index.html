@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Totoro Node</title>
+    <style>
+      body { font-family: -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif; margin: 24px; color:#111827;}
+      .row { margin: 10px 0; display:flex; gap: 12px; align-items:center; flex-wrap: wrap; }
+      input { padding: 8px 10px; border:1px solid #d1d5db; border-radius:8px; min-width: 280px;}
+      button { padding: 8px 12px; border:1px solid #111827; background:#111827; color:#fff; border-radius:8px; cursor:pointer;}
+      button.secondary { background:#fff; color:#111827;}
+      pre { background:#0b1020; color:#e5e7eb; padding: 12px; border-radius: 12px; overflow:auto; }
+      .hint { color:#6b7280; font-size: 13px; }
+    </style>
+  </head>
+  <body>
+    <h2>Totoro Node（节点管理）</h2>
+    <div class="hint">这是 Linux 节点的最小管理面板：查看/修改节点配置、切换公开、设置 bridge、生成邀请码。</div>
+
+    <div class="row">
+      <label>AdminKey</label>
+      <input id="adminKey" placeholder="X-Admin-Key（可选）" />
+      <label>NodeKey</label>
+      <input id="nodeKey" placeholder="X-Node-Key（更新配置需要）" />
+      <button class="secondary" onclick="loadCfg()">刷新配置</button>
+    </div>
+
+    <div class="row">
+      <label>Public</label>
+      <input id="public" placeholder="true/false" />
+      <label>BridgeURL</label>
+      <input id="bridgeUrl" placeholder="http://bridge:18090" />
+      <button onclick="saveCfg()">保存配置</button>
+    </div>
+
+    <div class="row">
+      <label>邀请码TTL(s)</label>
+      <input id="ttl" placeholder="86400" />
+      <label>次数</label>
+      <input id="maxUses" placeholder="50" />
+      <button onclick="createInvite()">生成邀请码</button>
+    </div>
+
+    <h3>输出</h3>
+    <pre id="out">ready</pre>
+
+    <script>
+      function headers() {
+        const h = { 'Content-Type': 'application/json' };
+        const adminKey = document.getElementById('adminKey').value.trim();
+        const nodeKey = document.getElementById('nodeKey').value.trim();
+        if (adminKey) h['X-Admin-Key'] = adminKey;
+        if (nodeKey) h['X-Node-Key'] = nodeKey;
+        return h;
+      }
+      function setOut(v) {
+        document.getElementById('out').textContent = typeof v === 'string' ? v : JSON.stringify(v, null, 2);
+      }
+      async function loadCfg() {
+        try {
+          const res = await fetch('/api/v1/node/config', { headers: headers() });
+          const j = await res.json();
+          setOut(j);
+          if (j && j.code === 0 && j.data) {
+            document.getElementById('public').value = String(!!j.data.public);
+            document.getElementById('bridgeUrl').value = j.data.bridge_url || '';
+          }
+        } catch (e) { setOut(String(e)); }
+      }
+      async function saveCfg() {
+        try {
+          const body = {
+            public: document.getElementById('public').value.trim() === 'true',
+            bridge_url: document.getElementById('bridgeUrl').value.trim()
+          };
+          const res = await fetch('/api/v1/node/config', { method:'POST', headers: headers(), body: JSON.stringify(body) });
+          const j = await res.json();
+          setOut(j);
+        } catch (e) { setOut(String(e)); }
+      }
+      async function createInvite() {
+        try {
+          const body = {
+            ttl_seconds: Number(document.getElementById('ttl').value || 0),
+            max_uses: Number(document.getElementById('maxUses').value || 0),
+            scope_json: '{}'
+          };
+          const res = await fetch('/api/v1/node/invites', { method:'POST', headers: headers(), body: JSON.stringify(body) });
+          const j = await res.json();
+          setOut(j);
+        } catch (e) { setOut(String(e)); }
+      }
+      loadCfg();
+    </script>
+  </body>
+</html>
+
+

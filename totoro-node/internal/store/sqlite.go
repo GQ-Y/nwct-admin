@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
@@ -13,6 +14,12 @@ import (
 
 type Store struct {
 	db *sql.DB
+}
+
+type NodeEndpoint struct {
+	Addr  string `json:"addr"`
+	Port  int    `json:"port"`
+	Proto string `json:"proto"`
 }
 
 type NodeConfig struct {
@@ -25,7 +32,7 @@ type NodeConfig struct {
 	Tags         []string `json:"tags"`
 	BridgeURL    string   `json:"bridge_url"`
 	DomainSuffix string   `json:"domain_suffix"`
-	Endpoints    []any    `json:"endpoints"` // 节点侧保持透明（addr/port/proto）
+	Endpoints    []NodeEndpoint `json:"endpoints"`
 }
 
 type Invite struct {
@@ -204,6 +211,66 @@ VALUES(?,?,?,?,?,?,?,?)
 		Used:      0,
 		ScopeJSON: scopeJSON,
 	}, nil
+}
+
+type InviteResolveResult struct {
+	InviteID  string
+	ScopeJSON string
+}
+
+// ResolveInviteByCode 校验邀请码并消耗一次使用次数（MVP/Beta 通用）。
+func (s *Store) ResolveInviteByCode(code string) (InviteResolveResult, error) {
+	code = strings.TrimSpace(code)
+	if code == "" {
+		return InviteResolveResult{}, fmt.Errorf("code required")
+	}
+	ch := hashKey(code)
+
+	// 事务：校验有效性 + used+1
+	tx, err := s.db.Begin()
+	if err != nil {
+		return InviteResolveResult{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	row := tx.QueryRow(`
+SELECT invite_id, revoked, created_at, expires_at, max_uses, used, scope_json
+FROM invites WHERE code_hash=?
+`, ch)
+	var (
+		inviteID string
+		revoked  int
+		createdAt int64
+		expiresAt int64
+		maxUses int
+		used int
+		scopeJSON string
+	)
+	if err := row.Scan(&inviteID, &revoked, &createdAt, &expiresAt, &maxUses, &used, &scopeJSON); err != nil {
+		if err == sql.ErrNoRows {
+			return InviteResolveResult{}, fmt.Errorf("invite_not_found")
+		}
+		return InviteResolveResult{}, err
+	}
+	if revoked == 1 {
+		return InviteResolveResult{}, fmt.Errorf("invite_revoked")
+	}
+	now := time.Now().Unix()
+	if expiresAt > 0 && now > expiresAt {
+		return InviteResolveResult{}, fmt.Errorf("invite_expired")
+	}
+	if maxUses > 0 && used >= maxUses {
+		return InviteResolveResult{}, fmt.Errorf("invite_exhausted")
+	}
+
+	_, err = tx.Exec(`UPDATE invites SET used=used+1 WHERE invite_id=?`, inviteID)
+	if err != nil {
+		return InviteResolveResult{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return InviteResolveResult{}, err
+	}
+	return InviteResolveResult{InviteID: inviteID, ScopeJSON: scopeJSON}, nil
 }
 
 func (s *Store) RevokeInvite(inviteID string) error {

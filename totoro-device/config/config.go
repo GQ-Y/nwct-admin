@@ -68,6 +68,9 @@ type FRPServerConfig struct {
 	AdminAddr string `json:"admin_addr"` // 117.172.29.237:7500
 	AdminUser string `json:"admin_user"` // admin
 	AdminPwd  string `json:"admin_pwd"`  // admin_nAhTnN
+	// TotoroTicket 用于 Totoro 节点的连接票据（写入 frpc metas：meta_totoro_ticket）。
+	// 注意：这不是 frp 的 token。
+	TotoroTicket string `json:"totoro_ticket,omitempty"`
 	// DomainSuffix HTTP/HTTPS 隧道的默认域名后缀（前端只填写前缀即可）
 	DomainSuffix string `json:"domain_suffix"` // frpc.zyckj.club
 }
@@ -109,8 +112,10 @@ func DefaultConfig() *Config {
 			IPMode:    "dhcp",
 		},
 		FRPServer: FRPServerConfig{
-			Server:       "117.172.29.237:7000",
-			Token:        "token123456",
+			Server: "117.172.29.237:7000",
+			// 默认不设置 token：Totoro 模式优先通过 meta_totoro_ticket 做鉴权；
+			// 如果你需要传统 token 鉴权，请在配置文件中显式配置 token。
+			Token:        "",
 			AdminAddr:    "117.172.29.237:7500",
 			AdminUser:    "admin",
 			AdminPwd:     "admin_nAhTnN",
@@ -245,10 +250,6 @@ func LoadConfig() (*Config, error) {
 	// FRP defaults
 	if strings.TrimSpace(cfg.FRPServer.Server) == "" {
 		cfg.FRPServer.Server = "117.172.29.237:7000"
-		changed = true
-	}
-	if strings.TrimSpace(cfg.FRPServer.Token) == "" {
-		cfg.FRPServer.Token = "token123456"
 		changed = true
 	}
 	if strings.TrimSpace(cfg.FRPServer.AdminAddr) == "" {
