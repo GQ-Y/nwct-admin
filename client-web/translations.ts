@@ -132,7 +132,7 @@ export const translations = {
       qos: 'QoS'
     },
     wizard: {
-      welcome_title: 'Welcome to NetAdmin',
+      welcome_title: 'Welcome to Totoro Smart Gateway',
       welcome_desc: 'This wizard will guide you through the initial configuration of your device. We\'ll set up networking, connect to cloud services, and secure your admin account.',
       get_started: 'Get Started',
       network_settings: 'Network Settings',
@@ -296,7 +296,7 @@ export const translations = {
       qos: 'QoS'
     },
     wizard: {
-      welcome_title: '欢迎使用 NetAdmin',
+      welcome_title: '欢迎使用 Totoro 智能网关',
       welcome_desc: '本向导将引导您完成设备的初始配置。我们将设置网络、连接云服务并保护您的管理员帐户。',
       get_started: '开始使用',
       network_settings: '网络设置',

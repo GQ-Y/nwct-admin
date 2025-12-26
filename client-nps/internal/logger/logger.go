@@ -6,6 +6,10 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -15,6 +19,16 @@ var (
 	warnLogger  *log.Logger
 	debugLogger *log.Logger
 	logFile     *os.File
+
+	logMu           sync.Mutex
+	lastRotateCheck int64 // unix nano
+)
+
+const (
+	// MaxLogSizeBytes 单文件最大 5MB，超过就轮转
+	MaxLogSizeBytes int64 = 5 * 1024 * 1024
+	// MaxRotatedFiles 保留最近 N 份轮转文件（不含当前 system.log）
+	MaxRotatedFiles = 2
 )
 
 // InitLogger 初始化日志系统
@@ -62,8 +76,22 @@ func InitLogger() error {
 	return nil
 }
 
+func maybeRotateLocked() {
+	// 限流：最多 1 秒检查一次，避免每条日志都 stat
+	now := time.Now().UnixNano()
+	last := atomic.LoadInt64(&lastRotateCheck)
+	if last != 0 && now-last < int64(time.Second) {
+		return
+	}
+	atomic.StoreInt64(&lastRotateCheck, now)
+	_ = RotateLog(MaxLogSizeBytes)
+}
+
 // Info 记录信息日志
 func Info(format string, v ...interface{}) {
+	logMu.Lock()
+	defer logMu.Unlock()
+	maybeRotateLocked()
 	if infoLogger != nil {
 		infoLogger.Output(2, fmt.Sprintf(format, v...))
 	}
@@ -71,6 +99,9 @@ func Info(format string, v ...interface{}) {
 
 // Error 记录错误日志
 func Error(format string, v ...interface{}) {
+	logMu.Lock()
+	defer logMu.Unlock()
+	maybeRotateLocked()
 	if errorLogger != nil {
 		errorLogger.Output(2, fmt.Sprintf(format, v...))
 	}
@@ -78,6 +109,9 @@ func Error(format string, v ...interface{}) {
 
 // Warn 记录警告日志
 func Warn(format string, v ...interface{}) {
+	logMu.Lock()
+	defer logMu.Unlock()
+	maybeRotateLocked()
 	if warnLogger != nil {
 		warnLogger.Output(2, fmt.Sprintf(format, v...))
 	}
@@ -85,6 +119,9 @@ func Warn(format string, v ...interface{}) {
 
 // Debug 记录调试日志
 func Debug(format string, v ...interface{}) {
+	logMu.Lock()
+	defer logMu.Unlock()
+	maybeRotateLocked()
 	if debugLogger != nil {
 		debugLogger.Output(2, fmt.Sprintf(format, v...))
 	}
@@ -92,6 +129,9 @@ func Debug(format string, v ...interface{}) {
 
 // Fatal 记录致命错误并退出
 func Fatal(format string, v ...interface{}) {
+	logMu.Lock()
+	defer logMu.Unlock()
+	maybeRotateLocked()
 	if errorLogger != nil {
 		errorLogger.Output(2, fmt.Sprintf(format, v...))
 	}
@@ -100,8 +140,48 @@ func Fatal(format string, v ...interface{}) {
 
 // Close 关闭日志文件
 func Close() {
+	logMu.Lock()
+	defer logMu.Unlock()
 	if logFile != nil {
 		logFile.Close()
+	}
+}
+
+// CurrentLogPath 返回当前实际写入的日志文件路径（优先返回已打开的 logFile）
+func CurrentLogPath() string {
+	if logFile != nil {
+		if name := strings.TrimSpace(logFile.Name()); name != "" {
+			return name
+		}
+	}
+	// 兜底：按照 InitLogger 同样的规则推断
+	logDir := os.Getenv("NWCT_LOG_DIR")
+	if logDir == "" {
+		logDir = "/var/log/nwct"
+	}
+	return filepath.Join(logDir, "system.log")
+}
+
+func cleanupRotatedLogs(dir string) {
+	// 清理旧轮转日志：system.YYYYMMDD-HHMMSS.log
+	matches, _ := filepath.Glob(filepath.Join(dir, "system.*.log"))
+	if len(matches) <= MaxRotatedFiles {
+		return
+	}
+	// 按修改时间排序，保留最新 MaxRotatedFiles
+	type fi struct {
+		path string
+		mod  time.Time
+	}
+	arr := make([]fi, 0, len(matches))
+	for _, p := range matches {
+		if st, err := os.Stat(p); err == nil {
+			arr = append(arr, fi{path: p, mod: st.ModTime()})
+		}
+	}
+	sort.Slice(arr, func(i, j int) bool { return arr[i].mod.After(arr[j].mod) })
+	for i := MaxRotatedFiles; i < len(arr); i++ {
+		_ = os.Remove(arr[i].path)
 	}
 }
 
@@ -140,6 +220,9 @@ func RotateLog(maxSize int64) error {
 		errorLogger.SetOutput(multiWriter)
 		warnLogger.SetOutput(multiWriter)
 		debugLogger.SetOutput(multiWriter)
+
+		// 清理旧轮转日志，避免本地堆积
+		cleanupRotatedLogs(baseDir)
 	}
 
 	return nil

@@ -403,21 +403,22 @@ func (s *Server) handleSystemLogs(c *gin.Context) {
 
 // handleSystemLogsClear 清空系统日志（截断日志文件）
 func (s *Server) handleSystemLogsClear(c *gin.Context) {
-	// 推断日志路径：优先 NWCT_LOG_DIR，否则 /var/log/nwct，否则 /tmp/nwct
-	logDir := os.Getenv("NWCT_LOG_DIR")
-	if logDir == "" {
-		logDir = "/var/log/nwct"
-	}
-	logPath := filepath.Join(logDir, "system.log")
-	if _, err := os.Stat(logPath); err != nil {
-		alt := filepath.Join(os.TempDir(), "nwct", "system.log")
-		if _, err2 := os.Stat(alt); err2 == nil {
-			logPath = alt
-		}
+	// 使用 logger 当前实际写入的日志路径，避免因 /var/log 无权限导致清空失败
+	logPath := logger.CurrentLogPath()
+	if strings.TrimSpace(logPath) == "" {
+		logPath = filepath.Join(os.TempDir(), "nwct", "system.log")
 	}
 
 	// 截断文件（不存在则视为已清空）
 	if err := os.Truncate(logPath, 0); err != nil {
+		// 如果无权限，尝试回退到 /tmp/nwct/system.log
+		alt := filepath.Join(os.TempDir(), "nwct", "system.log")
+		if (os.IsPermission(err) || strings.Contains(strings.ToLower(err.Error()), "permission denied")) && alt != logPath {
+			if err2 := os.Truncate(alt, 0); err2 == nil || os.IsNotExist(err2) {
+				c.JSON(http.StatusOK, models.SuccessResponse(gin.H{"cleared": true, "path": alt}))
+				return
+			}
+		}
 		if os.IsNotExist(err) {
 			c.JSON(http.StatusOK, models.SuccessResponse(gin.H{"cleared": true}))
 			return

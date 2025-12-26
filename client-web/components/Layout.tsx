@@ -106,7 +106,7 @@ export const MainLayout: React.FC<LayoutProps> = ({ children }) => {
           }}>
             <Shield size={18} color="white" />
           </div>
-          <span>NetAdmin</span>
+          <span>Totoro 智能网关</span>
         </div>
         <nav className="nav-menu">
           {navItems.map((item) => (
