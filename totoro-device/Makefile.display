@@ -1,0 +1,59 @@
+# NWCT Display System Makefile
+
+.PHONY: all build-preview build-prod test-display clean
+
+# 开发环境构建（Mac M1 SDL2 预览）
+build-preview:
+	@echo "🔨 构建开发预览版本（SDL2）..."
+	go build -tags preview -o bin/nwct-preview ./cmd/display-test/
+	@echo "✅ 构建完成: bin/nwct-preview"
+
+# 生产环境构建（Framebuffer）
+build-prod:
+	@echo "🔨 构建生产版本（Framebuffer）..."
+	go build -o bin/nwct-client ./main.go
+	@echo "✅ 构建完成: bin/nwct-client"
+
+# 交叉编译到 ARM64 Linux（生产环境）
+build-linux-arm64:
+	@echo "🔨 交叉编译到 Linux ARM64..."
+	GOOS=linux GOARCH=arm64 go build -o bin/nwct-client-linux-arm64 ./main.go
+	@echo "✅ 构建完成: bin/nwct-client-linux-arm64"
+
+# 运行开发预览
+run-preview: build-preview
+	@echo "🚀 启动显示预览..."
+	./bin/nwct-preview
+
+# 测试显示系统
+test-display:
+	@echo "🧪 测试显示系统..."
+	go test -v ./internal/display/...
+
+# 清理构建文件
+clean:
+	@echo "🧹 清理构建文件..."
+	rm -rf bin/
+	@echo "✅ 清理完成"
+
+# 安装依赖
+deps:
+	@echo "📦 安装依赖..."
+	brew list sdl2 >/dev/null 2>&1 || brew install sdl2
+	go get github.com/veandco/go-sdl2/sdl
+	@echo "✅ 依赖安装完成"
+
+# 默认目标
+all: build-preview
+
+# 帮助信息
+help:
+	@echo "NWCT Display System - 构建命令:"
+	@echo "  make build-preview       - 构建开发预览版本（SDL2）"
+	@echo "  make build-prod          - 构建生产版本（Framebuffer）"
+	@echo "  make build-linux-arm64   - 交叉编译到 Linux ARM64"
+	@echo "  make run-preview         - 运行开发预览"
+	@echo "  make test-display        - 测试显示系统"
+	@echo "  make clean               - 清理构建文件"
+	@echo "  make deps                - 安装依赖"
+
