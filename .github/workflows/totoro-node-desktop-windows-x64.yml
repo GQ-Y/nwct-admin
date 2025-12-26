@@ -1,0 +1,48 @@
+name: totoro-node-desktop (windows-x64)
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "totoro-node-desktop/**"
+      - ".github/workflows/totoro-node-desktop-windows-x64.yml"
+
+jobs:
+  build:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: totoro-node-desktop
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Flutter Pub Get
+        run: flutter pub get
+
+      - name: Build (Release)
+        run: flutter build windows --release
+
+      - name: Pack Artifact
+        shell: pwsh
+        run: |
+          $outDir = "build\windows\x64\runner\Release"
+          if (!(Test-Path $outDir)) { throw "Build output not found: $outDir" }
+          New-Item -ItemType Directory -Force -Path "..\artifacts" | Out-Null
+          $zip = "..\artifacts\totoro-node-desktop-windows-x64.zip"
+          if (Test-Path $zip) { Remove-Item $zip -Force }
+          Compress-Archive -Path "$outDir\*" -DestinationPath $zip
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: totoro-node-desktop-windows-x64
+          path: artifacts/totoro-node-desktop-windows-x64.zip
+
+

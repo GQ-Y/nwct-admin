@@ -16,6 +16,9 @@ class MainFlutterWindow: NSWindow {
     self.styleMask.insert(.fullSizeContentView)
     self.isMovableByWindowBackground = true
 
+    // 窗口最小尺寸（避免布局被压缩到不可用/触发布局异常）
+    self.minSize = NSSize(width: 1040, height: 700)
+
     super.awakeFromNib()
   }
 }

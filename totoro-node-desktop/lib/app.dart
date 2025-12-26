@@ -1,5 +1,7 @@
-import 'package:flutter/material.dart';
 import 'dart:io' show Platform;
+import 'dart:math' as math;
+
+import 'package:flutter/material.dart';
 
 import 'pages/connection_settings_page.dart';
 import 'pages/invites_page.dart';
@@ -74,12 +76,6 @@ class _HomeShellState extends State<HomeShell> {
         // 这里额外下移一点，让整体更协调且不遮挡。
         final extraTopInset = Platform.isMacOS ? 18.0 : 0.0;
 
-        final sidebar = _Sidebar(
-          nav: _nav,
-          onNav: (k) => setState(() => _nav = k),
-          onOpenSettings: () => setState(() => _nav = _NavKey.settings),
-        );
-
         Widget page = switch (_nav) {
           _NavKey.nodeConfig => NodeConfigPage(controller: widget.controller),
           _NavKey.invites => InvitesPage(controller: widget.controller),
@@ -101,7 +97,17 @@ class _HomeShellState extends State<HomeShell> {
                         children: [
                           SizedBox(
                             width: 270,
-                            child: SizedBox.expand(child: sidebar),
+                            child: LayoutBuilder(
+                              builder: (context, constraints) {
+                                return _Sidebar(
+                                  height: constraints.maxHeight,
+                                  nav: _nav,
+                                  onNav: (k) => setState(() => _nav = k),
+                                  onOpenSettings: () =>
+                                      setState(() => _nav = _NavKey.settings),
+                                );
+                              },
+                            ),
                           ),
                           const SizedBox(width: 16),
                           Expanded(child: page),
@@ -121,57 +127,101 @@ class _HomeShellState extends State<HomeShell> {
 
 class _Sidebar extends StatelessWidget {
   const _Sidebar({
+    required this.height,
     required this.nav,
     required this.onNav,
     required this.onOpenSettings,
   });
 
+  final double height;
   final _NavKey nav;
   final ValueChanged<_NavKey> onNav;
   final VoidCallback onOpenSettings;
 
   @override
   Widget build(BuildContext context) {
-    return HarmonyCard(
-      glass: true,
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        // 重要：侧边栏在某些时序下可能拿到 “0.0<=h<=Infinity”，这里必须 shrink-wrap
-        // 且不使用 Spacer/Expanded，避免触发 unbounded constraints。
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          const Padding(
-            padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            child: Text(
-              'Totoro',
-              style: TextStyle(fontWeight: FontWeight.w900, fontSize: 20),
+    final canPinBottom = height.isFinite && height > 0;
+    const cardPadding = EdgeInsets.all(16);
+    // HarmonyCard 本身会应用 padding（上下各 16）+ 边框，内部再用 height=constraints.maxHeight
+    // 会导致总高度超出，从而触发底部溢出（你截图里的 BOTTOM OVERFLOW）。
+    final innerHeight = math.max(0.0, height - cardPadding.vertical - 2);
+
+    // 无论任何时序都不要把 flex 放进无限高度约束里；只有确认拿到有限高度才吸底。
+    final child = canPinBottom
+        ? SizedBox(
+            height: innerHeight,
+            child: Column(
+              mainAxisSize: MainAxisSize.max,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  child: Text(
+                    'Totoro',
+                    style: TextStyle(fontWeight: FontWeight.w900, fontSize: 20),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                _NavItem(
+                  active: nav == _NavKey.nodeConfig,
+                  text: '节点配置',
+                  onTap: () => onNav(_NavKey.nodeConfig),
+                ),
+                _NavItem(
+                  active: nav == _NavKey.invites,
+                  text: '邀请码',
+                  onTap: () => onNav(_NavKey.invites),
+                ),
+                const Spacer(),
+                Align(
+                  alignment: Alignment.bottomLeft,
+                  child: IconButton(
+                    tooltip: '连接设置',
+                    onPressed: onOpenSettings,
+                    icon: const Icon(Icons.settings_rounded),
+                    color: HarmonyColors.textSecondary,
+                  ),
+                ),
+              ],
             ),
-          ),
-          const SizedBox(height: 12),
-          _NavItem(
-            active: nav == _NavKey.nodeConfig,
-            text: '节点配置',
-            onTap: () => onNav(_NavKey.nodeConfig),
-          ),
-          _NavItem(
-            active: nav == _NavKey.invites,
-            text: '邀请码',
-            onTap: () => onNav(_NavKey.invites),
-          ),
-          const SizedBox(height: 12),
-          Align(
-            alignment: Alignment.centerLeft,
-            child: IconButton(
-              tooltip: '连接设置',
-              onPressed: onOpenSettings,
-              icon: const Icon(Icons.settings_rounded),
-              color: HarmonyColors.textSecondary,
-            ),
-          ),
-        ],
-      ),
-    );
+          )
+        : Column(
+            // 退化模式：高度不确定时 shrink-wrap，避免任何 flex
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                child: Text(
+                  'Totoro',
+                  style: TextStyle(fontWeight: FontWeight.w900, fontSize: 20),
+                ),
+              ),
+              const SizedBox(height: 12),
+              _NavItem(
+                active: nav == _NavKey.nodeConfig,
+                text: '节点配置',
+                onTap: () => onNav(_NavKey.nodeConfig),
+              ),
+              _NavItem(
+                active: nav == _NavKey.invites,
+                text: '邀请码',
+                onTap: () => onNav(_NavKey.invites),
+              ),
+              const SizedBox(height: 12),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: IconButton(
+                  tooltip: '连接设置',
+                  onPressed: onOpenSettings,
+                  icon: const Icon(Icons.settings_rounded),
+                  color: HarmonyColors.textSecondary,
+                ),
+              ),
+            ],
+          );
+
+    return HarmonyCard(glass: true, padding: cardPadding, child: child);
   }
 }
 
