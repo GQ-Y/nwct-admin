@@ -7,8 +7,8 @@
 #include "flutter/generated_plugin_registrant.h"
 
 #include <iphlpapi.h>
-#include <netioapi.h>  // GetIfTable2, MIB_IF_TABLE2, MIB_IF_ROW2
 #include <stdint.h>
+#include <vector>
 
 FlutterWindow::FlutterWindow(const flutter::DartProject& project)
     : project_(project) {}
@@ -43,16 +43,23 @@ bool FlutterWindow::OnCreate() {
         if (call.method_name() == "getNetworkBytes") {
           uint64_t rx = 0;
           uint64_t tx = 0;
-          MIB_IF_TABLE2* table = nullptr;
-          if (GetIfTable2(&table) == NO_ERROR && table != nullptr) {
-            for (ULONG i = 0; i < table->NumEntries; i++) {
-              const MIB_IF_ROW2& row = table->Table[i];
-              if (row.OperStatus != IfOperStatusUp) continue;
-              if (row.Type == IF_TYPE_SOFTWARE_LOOPBACK) continue;
-              rx += static_cast<uint64_t>(row.InOctets);
-              tx += static_cast<uint64_t>(row.OutOctets);
+          // Use older, widely available IP Helper API for compatibility on CI runners.
+          // Note: counters are 32-bit per interface; we accumulate into 64-bit.
+          ULONG size = 0;
+          if (GetIfTable(nullptr, &size, FALSE) == ERROR_INSUFFICIENT_BUFFER &&
+              size > 0) {
+            std::vector<uint8_t> buf(size);
+            PMIB_IFTABLE table = reinterpret_cast<PMIB_IFTABLE>(buf.data());
+            if (GetIfTable(table, &size, FALSE) == NO_ERROR) {
+              for (DWORD i = 0; i < table->dwNumEntries; i++) {
+                const MIB_IFROW& row = table->table[i];
+                // Skip loopback & interfaces that are not up.
+                if (row.dwType == IF_TYPE_SOFTWARE_LOOPBACK) continue;
+                if (row.dwOperStatus != IF_OPER_STATUS_OPERATIONAL) continue;
+                rx += static_cast<uint64_t>(row.dwInOctets);
+                tx += static_cast<uint64_t>(row.dwOutOctets);
+              }
             }
-            FreeMibTable(table);
           }
           flutter::EncodableMap m;
           m[flutter::EncodableValue("rx")] =

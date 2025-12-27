@@ -29,7 +29,6 @@ target_compile_definitions(${BINARY_NAME} PRIVATE "FLUTTER_VERSION_BUILD=${FLUTT
 
 # Disable Windows macros that collide with C++ standard library functions.
 target_compile_definitions(${BINARY_NAME} PRIVATE "NOMINMAX")
-target_compile_definitions(${BINARY_NAME} PRIVATE "_WIN32_WINNT=0x0600")
 
 # Add dependency libraries and include directories. Add any application-specific
 # dependencies here.
