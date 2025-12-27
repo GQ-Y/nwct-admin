@@ -95,7 +95,7 @@ func (p *StatusPage) Update(deltaTime int64) {
 	}
 }
 
-// HandleTouch 处理触摸（点击任意位置进入设置）
+	// HandleTouch 处理触摸（点击任意位置进入应用）
 func (p *StatusPage) HandleTouch(x, y int, touchType TouchType) bool {
 	if touchType == TouchUp {
 		p.lastActivityTime = time.Now()
@@ -132,7 +132,7 @@ func (p *StatusPage) Render(g *Graphics) error {
 	p.drawStatsArea(g, w, h)
 
 	// 5. 底部提示 (深灰色)
-	tipText := "轻触屏幕进入设置"
+	tipText := "轻触屏幕进入应用"
 	tipSize := h * 0.027 // 13px
 	tipWidth := g.MeasureText(tipText, tipSize, FontWeightRegular)
 	tipX := (p.width - tipWidth) / 2

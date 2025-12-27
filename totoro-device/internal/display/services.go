@@ -2,12 +2,16 @@ package display
 
 import (
 	"fmt"
+	"os/exec"
 	"os"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	appcfg "totoro-device/config"
+	"totoro-device/internal/database"
 	"totoro-device/internal/frp"
 	"totoro-device/internal/network"
 )
@@ -239,4 +243,60 @@ func (s *AppServices) UpdateTunnel(oldName string, t *frp.Tunnel) error {
 		return fmt.Errorf("FRP 未初始化")
 	}
 	return s.FRP.UpdateTunnel(oldName, t)
+}
+
+func (s *AppServices) GetFRPStatus() (*frp.FRPStatus, error) {
+	if s.FRP == nil {
+		return &frp.FRPStatus{Connected: false}, nil
+	}
+	return s.FRP.GetStatus()
+}
+
+func (s *AppServices) SetSystemVolume(vol int) error {
+	if s.Config == nil {
+		return fmt.Errorf("config 未初始化")
+	}
+	if vol < 0 {
+		vol = 0
+	}
+	if vol > 30 {
+		vol = 30
+	}
+
+	// 先落盘
+	s.mu.Lock()
+	s.Config.System.Volume = &vol
+	_ = s.Config.Save()
+	s.mu.Unlock()
+
+	// Linux 设备侧：应用到 ALSA（Luckfox 音频文档方式）
+	if runtime.GOOS == "linux" {
+		if _, err := exec.LookPath("amixer"); err != nil {
+			return fmt.Errorf("系统缺少 amixer")
+		}
+		cmd := exec.Command("amixer", "cset", "name=DAC LINEOUT Volume", strconv.Itoa(vol))
+		// 避免卡死
+		timer := time.AfterFunc(2*time.Second, func() {
+			_ = cmd.Process.Kill()
+		})
+		defer timer.Stop()
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			msg := strings.TrimSpace(string(out))
+			if msg != "" {
+				return fmt.Errorf("设置音量失败: %s", msg)
+			}
+			return fmt.Errorf("设置音量失败")
+		}
+	}
+
+	return nil
+}
+
+func (s *AppServices) GetBridgeSession() (*database.BridgeSession, error) {
+	db := database.GetDB()
+	if db == nil {
+		return nil, fmt.Errorf("数据库未初始化")
+	}
+	return database.GetBridgeSession(db)
 }

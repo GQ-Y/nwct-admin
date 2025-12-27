@@ -45,6 +45,14 @@ func NewManagerWithServices(disp Display, services *AppServices) *Manager {
 	splashPage := NewSplashPage(pm)
 	statusPage := NewStatusPage()
 	settingsPage := NewSettingsPage(pm)
+	appsPage := NewAppsPage(pm)
+	systemSettingsPage := NewSystemSettingsPage(pm)
+	soundSettingsPage := NewSoundSettingsPage(pm)
+	screenSettingsPage := NewScreenSettingsPage(pm)
+	cloudPage := NewCloudPage(pm)
+	cloudStatusPage := NewCloudStatusPage(pm)
+	cloudPublicNodesPage := NewCloudPublicNodesPage(pm)
+	cloudInvitePage := NewCloudInvitePage(pm)
 	aboutPage := NewAboutPage(pm)
 	networkPage := NewNetworkPage(pm)
 	ethernetPage := NewEthernetPage(pm)
@@ -55,6 +63,13 @@ func NewManagerWithServices(disp Display, services *AppServices) *Manager {
 
 	// 注入 services
 	statusPage.SetServices(services)
+	systemSettingsPage.SetServices(services)
+	soundSettingsPage.SetServices(services)
+	screenSettingsPage.SetServices(services)
+	cloudPage.SetServices(services)
+	cloudStatusPage.SetServices(services)
+	cloudPublicNodesPage.SetServices(services)
+	cloudInvitePage.SetServices(services)
 	networkPage.SetServices(services)
 	ethernetPage.SetServices(services)
 	wifiListPage.SetServices(services)
@@ -66,6 +81,14 @@ func NewManagerWithServices(disp Display, services *AppServices) *Manager {
 	pm.RegisterPage("splash", splashPage)
 	pm.RegisterPage("status", statusPage)
 	pm.RegisterPage("settings", settingsPage)
+	pm.RegisterPage("apps", appsPage)
+	pm.RegisterPage("system_settings", systemSettingsPage)
+	pm.RegisterPage("sound_settings", soundSettingsPage)
+	pm.RegisterPage("screen_settings", screenSettingsPage)
+	pm.RegisterPage("cloud", cloudPage)
+	pm.RegisterPage("cloud_status", cloudStatusPage)
+	pm.RegisterPage("cloud_public_nodes", cloudPublicNodesPage)
+	pm.RegisterPage("cloud_invite", cloudInvitePage)
 	pm.RegisterPage("about", aboutPage)
 	pm.RegisterPage("network", networkPage)
 	pm.RegisterPage("ethernet", ethernetPage)
@@ -76,7 +99,7 @@ func NewManagerWithServices(disp Display, services *AppServices) *Manager {
 
 	// 设置主页跳转逻辑
 	statusPage.SetOnEnterSettings(func() {
-		pm.NavigateTo("settings")
+		pm.NavigateTo("apps")
 	})
 
 	// 设置默认页面：先启动页（不入栈），再自动切到 status

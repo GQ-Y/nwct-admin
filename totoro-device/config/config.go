@@ -17,6 +17,7 @@ type Config struct {
 	Initialized bool            `json:"initialized"`
 	Device      DeviceConfig    `json:"device"`
 	Network     NetworkConfig   `json:"network"`
+	System      SystemConfig    `json:"system"`
 	Bridge      BridgeConfig    `json:"bridge"`
 	FRPServer   FRPServerConfig `json:"frp_server"`
 	Scanner     ScannerConfig   `json:"scanner"`
@@ -43,6 +44,17 @@ type NetworkConfig struct {
 	WiFi WiFiConfig `json:"wifi"`
 	// WiFiProfiles 记忆的多个WiFi配置（用于自动连接）
 	WiFiProfiles []WiFiProfile `json:"wifi_profiles"`
+}
+
+// SystemConfig 系统设置（设备侧面板设置）
+type SystemConfig struct {
+	// Volume 音量（0~30，对应 Luckfox 文档中的 DAC LINEOUT Volume）
+	// nil 表示未设置（不主动修改系统）
+	Volume *int `json:"volume,omitempty"`
+	// Brightness 亮度（不同屏幕实现不同；若无背光接口则可能不生效）
+	Brightness *int `json:"brightness,omitempty"`
+	// ScreenOffSeconds 熄屏时间（秒，0 表示不熄屏）
+	ScreenOffSeconds *int `json:"screen_off_seconds,omitempty"`
 }
 
 // WiFiConfig WiFi配置
@@ -237,6 +249,8 @@ type AuthConfig struct {
 
 // DefaultConfig 返回默认配置
 func DefaultConfig() *Config {
+	defVol := 15
+	defOff := 0
 	return &Config{
 		Initialized: false,
 		Device: DeviceConfig{
@@ -246,6 +260,11 @@ func DefaultConfig() *Config {
 		Network: NetworkConfig{
 			Interface: "eth0",
 			IPMode:    "dhcp",
+		},
+		System: SystemConfig{
+			Volume:          &defVol,
+			Brightness:      nil,
+			ScreenOffSeconds: &defOff,
 		},
 		Bridge: BridgeConfig{
 			URL: "",

@@ -296,6 +296,9 @@ func main() {
 		logger.Fatal("加载配置失败: %v", err)
 	}
 
+	// 应用系统设置（音量/亮度等）——best-effort，不阻塞启动
+	deviceboot.ApplySystemSettings(cfg)
+
 	// 初始化数据库
 	db, err := database.InitDB(cfg.Database.Path)
 	if err != nil {
