@@ -15,10 +15,10 @@ jobs:
         include:
           # Apple Silicon (M1/M2/M3) runner
           - name: macos-arm64
-            runs_on: macos-14
+            runs_on: macos-latest
           # Intel runner
           - name: macos-x64
-            runs_on: macos-13
+            runs_on: macos-15-intel
 
     runs-on: ${{ matrix.runs_on }}
     defaults:
@@ -38,14 +38,33 @@ jobs:
       - name: Flutter Pub Get
         run: flutter pub get
 
+      - name: Environment Info
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sw_vers
+          uname -m
+          xcodebuild -version
+          flutter --version
+          flutter doctor -v
+
       - name: Build (Release)
-        run: flutter build macos --release
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p ../artifacts
+          # Capture full build logs for debugging CI failures.
+          flutter build macos --release --verbose 2>&1 | tee "../artifacts/flutter-build-${{ matrix.name }}.log"
 
       - name: Pack Artifact
         shell: bash
         run: |
           set -euo pipefail
           OUT_APP="build/macos/Build/Products/Release/totoro_node_desktop.app"
+          # If PRODUCT_NAME changed, prefer any *.app under Release.
+          if [ ! -d "$OUT_APP" ]; then
+            OUT_APP="$(ls -1d build/macos/Build/Products/Release/*.app 2>/dev/null | head -n 1 || true)"
+          fi
           if [ ! -d "$OUT_APP" ]; then
             echo "Build output not found: $OUT_APP"
             ls -la build/macos/Build/Products/Release || true
@@ -62,5 +81,12 @@ jobs:
         with:
           name: totoro-node-desktop-${{ matrix.name }}
           path: artifacts/totoro-node-desktop-${{ matrix.name }}.zip
+
+      - name: Upload Build Log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: totoro-node-desktop-${{ matrix.name }}-buildlog
+          path: artifacts/flutter-build-${{ matrix.name }}.log
 
 

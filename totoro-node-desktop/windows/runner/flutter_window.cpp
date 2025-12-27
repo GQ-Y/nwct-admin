@@ -7,7 +7,8 @@
 #include "flutter/generated_plugin_registrant.h"
 
 #include <iphlpapi.h>
-#pragma comment(lib, "iphlpapi.lib")
+#include <netioapi.h>  // GetIfTable2, MIB_IF_TABLE2, MIB_IF_ROW2
+#include <stdint.h>
 
 FlutterWindow::FlutterWindow(const flutter::DartProject& project)
     : project_(project) {}
@@ -40,22 +41,24 @@ bool FlutterWindow::OnCreate() {
       [](const flutter::MethodCall<flutter::EncodableValue>& call,
          std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result) {
         if (call.method_name() == "getNetworkBytes") {
-          ULONG rx = 0;
-          ULONG tx = 0;
+          uint64_t rx = 0;
+          uint64_t tx = 0;
           MIB_IF_TABLE2* table = nullptr;
           if (GetIfTable2(&table) == NO_ERROR && table != nullptr) {
             for (ULONG i = 0; i < table->NumEntries; i++) {
               const MIB_IF_ROW2& row = table->Table[i];
               if (row.OperStatus != IfOperStatusUp) continue;
               if (row.Type == IF_TYPE_SOFTWARE_LOOPBACK) continue;
-              rx += static_cast<ULONG>(row.InOctets);
-              tx += static_cast<ULONG>(row.OutOctets);
+              rx += static_cast<uint64_t>(row.InOctets);
+              tx += static_cast<uint64_t>(row.OutOctets);
             }
             FreeMibTable(table);
           }
           flutter::EncodableMap m;
-          m[flutter::EncodableValue("rx")] = flutter::EncodableValue(static_cast<int64_t>(rx));
-          m[flutter::EncodableValue("tx")] = flutter::EncodableValue(static_cast<int64_t>(tx));
+          m[flutter::EncodableValue("rx")] =
+              flutter::EncodableValue(static_cast<int64_t>(rx));
+          m[flutter::EncodableValue("tx")] =
+              flutter::EncodableValue(static_cast<int64_t>(tx));
           result->Success(flutter::EncodableValue(m));
           return;
         }
