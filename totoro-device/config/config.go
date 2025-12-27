@@ -9,6 +9,9 @@ import (
 	"strings"
 )
 
+// DefaultBridgeURL 未显式配置（bridge.url / TOTOTO_BRIDGE_URL）时的内置桥梁地址
+const DefaultBridgeURL = "http://192.168.2.32:18090"
+
 // Config 应用配置
 type Config struct {
 	Initialized bool            `json:"initialized"`
@@ -338,6 +341,33 @@ func defaultDBPath() string {
 	return filepath.Join(os.TempDir(), "nwct", "devices.db")
 }
 
+// ResolveBridgeBase 返回设备端应使用的桥梁 BaseURL（带 scheme，且无尾部 /）
+// 优先级：
+// 1) 配置文件 bridge.url
+// 2) 环境变量 TOTOTO_BRIDGE_URL
+// 3) DefaultBridgeURL
+func ResolveBridgeBase(cfg *Config) string {
+	base := ""
+	if cfg != nil {
+		base = strings.TrimSpace(cfg.Bridge.URL)
+	}
+	if base == "" {
+		base = strings.TrimSpace(os.Getenv("TOTOTO_BRIDGE_URL"))
+	}
+	if base == "" {
+		base = DefaultBridgeURL
+	}
+	base = strings.TrimSpace(base)
+	if base == "" {
+		return ""
+	}
+	// 如果用户只填了 host:port，则默认补 http://
+	if !strings.HasPrefix(base, "http://") && !strings.HasPrefix(base, "https://") {
+		base = "http://" + base
+	}
+	return strings.TrimRight(base, "/")
+}
+
 // GetConfigPath 获取配置文件路径
 func GetConfigPath() string {
 	configPath := os.Getenv("NWCT_CONFIG_PATH")
@@ -393,6 +423,13 @@ func LoadConfig() (*Config, error) {
 	cfg.FRPServer.SyncActiveFromMode()
 	// 如果之前没有 mode 或 server/域名为空，说明我们补齐过默认值
 	if modeBefore == "" || serverBefore == "" || domainBefore == "" {
+		changed = true
+	}
+
+	// Bridge defaults：未配置时使用内置桥梁地址
+	bridgeBefore := strings.TrimSpace(cfg.Bridge.URL)
+	cfg.Bridge.URL = ResolveBridgeBase(&cfg)
+	if bridgeBefore == "" && cfg.Bridge.URL != "" {
 		changed = true
 	}
 

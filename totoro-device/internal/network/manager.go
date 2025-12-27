@@ -4,12 +4,12 @@ import (
 	"context"
 	"fmt"
 	"net"
-	"totoro-device/internal/logger"
 	"os/exec"
 	"runtime"
 	"strconv"
 	"strings"
 	"time"
+	"totoro-device/internal/logger"
 )
 
 // Manager 网络管理器接口
@@ -138,7 +138,10 @@ func (nm *networkManager) ConfigureWiFi(ssid, password string) error {
 
 	switch runtime.GOOS {
 	case "linux":
-		return nm.connectWiFiLinuxNmcli(ssid, password)
+		if nm.hasCmd("nmcli") {
+			return nm.connectWiFiLinuxNmcli(ssid, password)
+		}
+		return nm.connectWiFiLinuxFallback(ssid, password)
 	case "darwin":
 		return nm.connectWiFiDarwinNetworksetup(ssid, password)
 	default:
@@ -150,7 +153,10 @@ func (nm *networkManager) ConfigureWiFi(ssid, password string) error {
 func (nm *networkManager) ScanWiFi(opts ScanWiFiOptions) ([]WiFiNetwork, error) {
 	switch runtime.GOOS {
 	case "linux":
-		return nm.scanWiFiLinuxNmcli()
+		if nm.hasCmd("nmcli") {
+			return nm.scanWiFiLinuxNmcli()
+		}
+		return nm.scanWiFiLinuxFallback(opts)
 	case "darwin":
 		return nm.scanWiFiDarwinAirport(opts.AllowRedacted)
 	default:
@@ -175,6 +181,11 @@ func (nm *networkManager) runCmd(timeout time.Duration, name string, args ...str
 		return s, fmt.Errorf("命令失败: %s %v: %v", name, args, err)
 	}
 	return s, nil
+}
+
+func (nm *networkManager) hasCmd(name string) bool {
+	_, err := exec.LookPath(name)
+	return err == nil
 }
 
 func (nm *networkManager) ApplyNetworkConfig(cfg ApplyConfig) error {
@@ -206,9 +217,16 @@ func (nm *networkManager) ApplyNetworkConfig(cfg ApplyConfig) error {
 		return nm.applyStaticDarwin(iface, cfg.IP, cfg.Netmask, cfg.Gateway, cfg.DNS)
 	case "linux":
 		if mode == "dhcp" {
-			return nm.applyDHCPLinux(iface, cfg.DNS)
+			// 优先 nmcli（NetworkManager），无 nmcli 则降级到 Buildroot 常见的 udhcpc/ip/ifconfig
+			if nm.hasCmd("nmcli") {
+				return nm.applyDHCPLinux(iface, cfg.DNS)
+			}
+			return nm.applyDHCPLinuxFallback(iface, cfg.DNS)
 		}
-		return nm.applyStaticLinux(iface, cfg.IP, cfg.Netmask, cfg.Gateway, cfg.DNS)
+		if nm.hasCmd("nmcli") {
+			return nm.applyStaticLinux(iface, cfg.IP, cfg.Netmask, cfg.Gateway, cfg.DNS)
+		}
+		return nm.applyStaticLinuxFallback(iface, cfg.IP, cfg.Netmask, cfg.Gateway, cfg.DNS)
 	default:
 		return fmt.Errorf("当前系统不支持 IP 配置下发: %s", runtime.GOOS)
 	}
@@ -410,6 +428,110 @@ func (nm *networkManager) activeNmcliConnection(device string) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("未找到活动连接（nmcli）: device=%s", device)
+}
+
+func (nm *networkManager) writeResolvConfBestEffort(dns string) {
+	servers := nm.splitDNS(dns)
+	if len(servers) == 0 {
+		return
+	}
+	var b strings.Builder
+	for _, s := range servers {
+		s = strings.TrimSpace(s)
+		if s == "" {
+			continue
+		}
+		b.WriteString("nameserver ")
+		b.WriteString(s)
+		b.WriteByte('\n')
+	}
+	content := strings.TrimSpace(b.String())
+	if content == "" {
+		return
+	}
+	// Buildroot 常见位置：/etc/resolv.conf
+	_ = exec.Command("sh", "-lc", fmt.Sprintf("printf '%s\n' \"%s\" > /etc/resolv.conf", content, strings.ReplaceAll(content, "'", "'\\''"))).Run()
+}
+
+func (nm *networkManager) applyDHCPLinuxFallback(device, dns string) error {
+	logger.Info("设置 DHCP（fallback）: device=%s", device)
+
+	// 尽量把接口拉起来
+	if nm.hasCmd("ip") {
+		_, _ = nm.runCmd(3*time.Second, "ip", "link", "set", device, "up")
+	} else if nm.hasCmd("ifconfig") {
+		_, _ = nm.runCmd(3*time.Second, "ifconfig", device, "up")
+	}
+
+	// BusyBox/Buildroot 常见 DHCP 客户端：udhcpc
+	if nm.hasCmd("udhcpc") {
+		// -n：失败直接退出；-q：安静；-T/-t：超时/次数
+		if _, err := nm.runCmd(20*time.Second, "udhcpc", "-i", device, "-n", "-q", "-T", "3", "-t", "3"); err != nil {
+			return err
+		}
+		nm.writeResolvConfBestEffort(dns)
+		return nil
+	}
+
+	// 兼容 ifup（部分 Buildroot 会带）
+	if nm.hasCmd("ifup") {
+		if _, err := nm.runCmd(20*time.Second, "ifup", device); err != nil {
+			return err
+		}
+		nm.writeResolvConfBestEffort(dns)
+		return nil
+	}
+
+	return fmt.Errorf("DHCP 下发失败：系统缺少 nmcli/udhcpc/ifup（Buildroot 通常应提供 udhcpc）")
+}
+
+func (nm *networkManager) applyStaticLinuxFallback(device, ip, netmask, gateway, dns string) error {
+	ip = strings.TrimSpace(ip)
+	netmask = strings.TrimSpace(netmask)
+	gateway = strings.TrimSpace(gateway)
+	if ip == "" || netmask == "" || gateway == "" {
+		return fmt.Errorf("静态 IP 配置缺失（ip/netmask/gateway 必填）")
+	}
+	prefix, err := netmaskToPrefix(netmask)
+	if err != nil {
+		return err
+	}
+	addr := fmt.Sprintf("%s/%d", ip, prefix)
+	logger.Info("设置静态 IP（fallback）: device=%s addr=%s gw=%s", device, addr, gateway)
+
+	if nm.hasCmd("ip") {
+		_, _ = nm.runCmd(3*time.Second, "ip", "link", "set", device, "up")
+		// 清理旧地址（尽量 best-effort，不要因为 flush 失败而中断）
+		_, _ = nm.runCmd(4*time.Second, "ip", "addr", "flush", "dev", device)
+		if _, err := nm.runCmd(6*time.Second, "ip", "addr", "add", addr, "dev", device); err != nil {
+			return err
+		}
+		if _, err := nm.runCmd(6*time.Second, "ip", "route", "replace", "default", "via", gateway, "dev", device); err != nil {
+			return err
+		}
+		nm.writeResolvConfBestEffort(dns)
+		return nil
+	}
+
+	// 兜底：ifconfig + route（BusyBox 常见）
+	if nm.hasCmd("ifconfig") && nm.hasCmd("route") {
+		if _, err := nm.runCmd(6*time.Second, "ifconfig", device, ip, "netmask", netmask, "up"); err != nil {
+			return err
+		}
+		// 先删再加，避免重复 default
+		_, _ = nm.runCmd(3*time.Second, "route", "del", "default")
+		if _, err := nm.runCmd(6*time.Second, "route", "add", "default", "gw", gateway, device); err != nil {
+			// 有些 BusyBox 语法不带 device
+			_, err2 := nm.runCmd(6*time.Second, "route", "add", "default", "gw", gateway)
+			if err2 != nil {
+				return err
+			}
+		}
+		nm.writeResolvConfBestEffort(dns)
+		return nil
+	}
+
+	return fmt.Errorf("静态 IP 下发失败：系统缺少 ip 或 ifconfig/route")
 }
 
 // GetNetworkStatus 获取网络状态

@@ -58,11 +58,11 @@ func pickDeviceMAC(netManager network.Manager) string {
 }
 
 func bridgeRegisterIfConfigured(cfg *config.Config, netManager network.Manager) {
-	base := strings.TrimRight(strings.TrimSpace(cfg.Bridge.URL), "/")
-	if base == "" {
-		base = strings.TrimRight(strings.TrimSpace(os.Getenv("TOTOTO_BRIDGE_URL")), "/")
+	if cfg == nil {
+		return
 	}
-	if base == "" || cfg == nil {
+	base := config.ResolveBridgeBase(cfg)
+	if base == "" {
 		return
 	}
 	deviceID := strings.TrimSpace(cfg.Device.ID)
@@ -429,10 +429,7 @@ func main() {
 				logger.Warn("FRP(public) 设备密钥不可用，跳过自动连接")
 				return
 			}
-			bridgeBase := strings.TrimRight(strings.TrimSpace(cfg.Bridge.URL), "/")
-			if bridgeBase == "" {
-				bridgeBase = strings.TrimRight(strings.TrimSpace(os.Getenv("TOTOTO_BRIDGE_URL")), "/")
-			}
+			bridgeBase := config.ResolveBridgeBase(cfg)
 			if bridgeBase == "" {
 				logger.Warn("FRP(public) 未配置 bridge URL，跳过自动连接")
 				return

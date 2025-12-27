@@ -50,13 +50,8 @@ func pickDeviceMAC(netManager network.Manager) string {
 }
 
 // handlePublicNodes 透传官方桥梁的公开节点列表
-// 环境变量：TOTOTO_BRIDGE_URL，例如 http://127.0.0.1:18090
 func (s *Server) handlePublicNodes(c *gin.Context) {
-	bridge := strings.TrimRight(strings.TrimSpace(os.Getenv("TOTOTO_BRIDGE_URL")), "/")
-	if bridge == "" {
-		c.JSON(http.StatusBadRequest, models.ErrorResponse(400, "未配置 TOTOTO_BRIDGE_URL"))
-		return
-	}
+	bridge := config.ResolveBridgeBase(s.config)
 	deviceID := strings.TrimSpace(s.config.Device.ID)
 	mac := strings.TrimSpace(s.config.Bridge.LastMAC)
 	if mac == "" {
@@ -193,11 +188,7 @@ func (s *Server) handleFRPConfigSave(c *gin.Context) {
 
 // handleFRPBuiltinUse 从桥梁同步 official_nodes 并应用为 builtin 模式
 func (s *Server) handleFRPBuiltinUse(c *gin.Context) {
-	bridge := strings.TrimRight(strings.TrimSpace(os.Getenv("TOTOTO_BRIDGE_URL")), "/")
-	if bridge == "" {
-		c.JSON(http.StatusBadRequest, models.ErrorResponse(400, "未配置 TOTOTO_BRIDGE_URL"))
-		return
-	}
+	bridge := config.ResolveBridgeBase(s.config)
 	deviceID := strings.TrimSpace(s.config.Device.ID)
 	mac := strings.TrimSpace(s.config.Bridge.LastMAC)
 	if mac == "" {
@@ -287,11 +278,7 @@ func (s *Server) handleFRPSync(c *gin.Context) {
 		return
 	}
 
-	bridge := strings.TrimRight(strings.TrimSpace(os.Getenv("TOTOTO_BRIDGE_URL")), "/")
-	if bridge == "" {
-		c.JSON(http.StatusBadRequest, models.ErrorResponse(400, "未配置 TOTOTO_BRIDGE_URL"))
-		return
-	}
+	bridge := config.ResolveBridgeBase(s.config)
 	deviceID := strings.TrimSpace(s.config.Device.ID)
 	mac := strings.TrimSpace(s.config.Bridge.LastMAC)
 	if mac == "" {
@@ -363,10 +350,10 @@ func (s *Server) handleFRPSync(c *gin.Context) {
 		s.config.FRPServer.SyncActiveFromMode()
 		_ = s.config.Save()
 		c.JSON(http.StatusOK, models.SuccessResponse(gin.H{
-			"synced":       true,
-			"mode":         mode,
+			"synced":        true,
+			"mode":          mode,
 			"domain_suffix": s.config.FRPServer.DomainSuffix,
-			"http_enabled": s.config.FRPServer.HTTPEnabled,
+			"http_enabled":  s.config.FRPServer.HTTPEnabled,
 			"https_enabled": s.config.FRPServer.HTTPSEnabled,
 		}))
 		return
@@ -456,11 +443,7 @@ func (s *Server) handlePublicNodeConnect(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, models.ErrorResponse(400, "node_id 不能为空"))
 		return
 	}
-	bridge := strings.TrimRight(strings.TrimSpace(os.Getenv("TOTOTO_BRIDGE_URL")), "/")
-	if bridge == "" {
-		c.JSON(http.StatusBadRequest, models.ErrorResponse(400, "未配置 TOTOTO_BRIDGE_URL"))
-		return
-	}
+	bridge := config.ResolveBridgeBase(s.config)
 	deviceID := strings.TrimSpace(s.config.Device.ID)
 	mac := strings.TrimSpace(s.config.Bridge.LastMAC)
 	if mac == "" {
@@ -812,18 +795,7 @@ func (s *Server) handleSystemInfo(c *gin.Context) {
 
 // handleCloudStatus 返回 Totoro 云服务（桥梁）连接状态 + 官方节点数量 + 设备号 + 固件版本
 func (s *Server) handleCloudStatus(c *gin.Context) {
-	bridge := strings.TrimRight(strings.TrimSpace(os.Getenv("TOTOTO_BRIDGE_URL")), "/")
-	if bridge == "" {
-		c.JSON(http.StatusOK, models.SuccessResponse(gin.H{
-			"ok":               false,
-			"bridge_url":       "",
-			"error":            "未配置 TOTOTO_BRIDGE_URL",
-			"device_id":        strings.TrimSpace(s.config.Device.ID),
-			"firmware_version": version.Version,
-			"official_nodes":   0,
-		}))
-		return
-	}
+	bridge := config.ResolveBridgeBase(s.config)
 
 	deviceID := strings.TrimSpace(s.config.Device.ID)
 	mac := strings.TrimSpace(s.config.Bridge.LastMAC)
@@ -1846,11 +1818,7 @@ func (s *Server) handleFRPConnect(c *gin.Context) {
 			// ticket 缺失/过期 -> bridge 兑换
 			if strings.TrimSpace(s.config.FRPServer.Public.TotoroTicket) == "" ||
 				frp.TicketExpiredByTokenOrRFC(s.config.FRPServer.Public.TicketExpiresAt, s.config.FRPServer.Public.TotoroTicket, 30*time.Second) {
-				bridgeBase := strings.TrimRight(strings.TrimSpace(os.Getenv("TOTOTO_BRIDGE_URL")), "/")
-				if bridgeBase == "" {
-					c.JSON(http.StatusBadRequest, models.ErrorResponse(400, "未配置 TOTOTO_BRIDGE_URL"))
-					return
-				}
+				bridgeBase := config.ResolveBridgeBase(s.config)
 				dc, err := database.GetOrCreateDeviceCrypto(db)
 				if err != nil || dc == nil {
 					c.JSON(http.StatusInternalServerError, models.ErrorResponse(500, "设备密钥不可用"))
@@ -1947,11 +1915,7 @@ func (s *Server) handleInviteConnect(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse(500, "设备密钥不可用"))
 		return
 	}
-	bridgeBase := strings.TrimRight(strings.TrimSpace(os.Getenv("TOTOTO_BRIDGE_URL")), "/")
-	if bridgeBase == "" {
-		c.JSON(http.StatusBadRequest, models.ErrorResponse(400, "未配置 TOTOTO_BRIDGE_URL"))
-		return
-	}
+	bridgeBase := config.ResolveBridgeBase(s.config)
 	sess, _ := database.GetBridgeSession(db)
 	if sess == nil || database.BridgeSessionExpired(sess, 30*time.Second) {
 		bc0 := &bridgeclient.Client{
@@ -2037,11 +2001,7 @@ func (s *Server) handleInviteResolve(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse(500, "设备密钥不可用"))
 		return
 	}
-	bridgeBase := strings.TrimRight(strings.TrimSpace(os.Getenv("TOTOTO_BRIDGE_URL")), "/")
-	if bridgeBase == "" {
-		c.JSON(http.StatusBadRequest, models.ErrorResponse(400, "未配置 TOTOTO_BRIDGE_URL"))
-		return
-	}
+	bridgeBase := config.ResolveBridgeBase(s.config)
 	sess, _ := database.GetBridgeSession(db)
 	if sess == nil || database.BridgeSessionExpired(sess, 30*time.Second) {
 		bc0 := &bridgeclient.Client{

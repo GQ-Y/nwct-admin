@@ -11,10 +11,6 @@ import (
 	"runtime"
 	"strings"
 	"time"
-
-	"github.com/google/gopacket"
-	"github.com/google/gopacket/layers"
-	"github.com/google/gopacket/pcap"
 )
 
 // ARPDevice ARP扫描发现的设备
@@ -31,81 +27,10 @@ func ARPScan(subnet string, timeout time.Duration) ([]ARPDevice, error) {
 		return nil, fmt.Errorf("无效的网段: %v", err)
 	}
 
-	// 获取本地网络接口
-	iface, err := getInterfaceForSubnet(ipnet)
-	if err != nil {
-		return nil, fmt.Errorf("获取网络接口失败: %v", err)
-	}
-
-	// 打开网络接口进行抓包
-	handle, err := pcap.OpenLive(iface.Name, 1024, true, timeout)
-	if err != nil {
-		// 如果没有权限，使用简化方法
-		return arpScanSimple(ipnet, timeout)
-	}
-	defer handle.Close()
-
-	devices := make(map[string]string) // IP -> MAC
-	done := make(chan bool)
-
-	// 启动抓包goroutine
-	go func() {
-		packetSource := gopacket.NewPacketSource(handle, handle.LinkType())
-		for packet := range packetSource.Packets() {
-			arpLayer := packet.Layer(layers.LayerTypeARP)
-			if arpLayer != nil {
-				arp := arpLayer.(*layers.ARP)
-				if arp.Operation == layers.ARPReply {
-					srcIP := net.IP(arp.SourceProtAddress).String()
-					srcMAC := net.HardwareAddr(arp.SourceHwAddress).String()
-					if ipnet.Contains(net.ParseIP(srcIP)) {
-						devices[srcIP] = srcMAC
-					}
-				}
-			}
-		}
-		done <- true
-	}()
-
-	// 发送ARP请求
-	srcIP := getInterfaceIP(iface)
-	if srcIP == nil {
-		return nil, fmt.Errorf("无法获取接口IP地址")
-	}
-
-	srcMAC, err := net.ParseMAC(iface.HardwareAddr.String())
-	if err != nil {
-		return nil, fmt.Errorf("无效的MAC地址: %v", err)
-	}
-
-	// 遍历网段内所有IP
-	for ip := ip.Mask(ipnet.Mask); ipnet.Contains(ip); inc(ip) {
-		// 跳过网络地址和广播地址
-		if isNetworkOrBroadcast(ip, ipnet) {
-			continue
-		}
-
-		// 发送ARP请求
-		sendARPRequest(handle, srcIP, srcMAC, ip, iface)
-		time.Sleep(10 * time.Millisecond) // 避免发送过快
-	}
-
-	// 等待响应
-	select {
-	case <-done:
-	case <-time.After(timeout):
-	}
-
-	// 转换为结果
-	result := make([]ARPDevice, 0, len(devices))
-	for ip, mac := range devices {
-		result = append(result, ARPDevice{
-			IP:  ip,
-			MAC: mac,
-		})
-	}
-
-	return result, nil
+	_ = ip // 保留局部变量占位（用于未来扩展）
+	// 默认使用纯 Go 兜底路径（Buildroot/交叉编译友好，避免依赖 libpcap/CGO）
+	// 如需抓包加速版本，可使用 `-tags pcap` 构建，会在 arp_pcap.go 中覆盖此实现。
+	return arpScanSimple(ipnet, timeout)
 }
 
 // arpScanSimple 简化的ARP扫描（当没有抓包权限时）
@@ -204,44 +129,6 @@ func getInterfaceIP(iface *net.Interface) net.IP {
 	}
 
 	return nil
-}
-
-// sendARPRequest 发送ARP请求
-func sendARPRequest(handle *pcap.Handle, srcIP net.IP, srcMAC net.HardwareAddr, dstIP net.IP, iface *net.Interface) {
-	if handle == nil {
-		return
-	}
-
-	// 创建ARP请求包
-	eth := &layers.Ethernet{
-		SrcMAC:       srcMAC,
-		DstMAC:       net.HardwareAddr{0xff, 0xff, 0xff, 0xff, 0xff, 0xff}, // 广播
-		EthernetType: layers.EthernetTypeARP,
-	}
-
-	arp := &layers.ARP{
-		AddrType:          layers.LinkTypeEthernet,
-		Protocol:          layers.EthernetTypeIPv4,
-		HwAddressSize:     6,
-		ProtAddressSize:   4,
-		Operation:         layers.ARPRequest,
-		SourceHwAddress:   []byte(srcMAC),
-		SourceProtAddress: []byte(srcIP.To4()),
-		DstHwAddress:      []byte{0, 0, 0, 0, 0, 0},
-		DstProtAddress:    []byte(dstIP.To4()),
-	}
-
-	buf := gopacket.NewSerializeBuffer()
-	opts := gopacket.SerializeOptions{
-		FixLengths:       true,
-		ComputeChecksums: true,
-	}
-
-	if err := gopacket.SerializeLayers(buf, opts, eth, arp); err != nil {
-		return
-	}
-
-	handle.WritePacketData(buf.Bytes())
 }
 
 // inc 增加IP地址

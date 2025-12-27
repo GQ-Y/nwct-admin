@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	_ "github.com/mattn/go-sqlite3"
+	_ "modernc.org/sqlite"
 )
 
 var db *sql.DB
@@ -32,7 +32,8 @@ func InitDB(dbPath string) (*sql.DB, error) {
 	}
 
 	// 打开数据库，设置内存优化参数
-	database, err := sql.Open("sqlite3", dbPath+"?_foreign_keys=1&_journal_mode=WAL&_cache_size=-1000&_synchronous=NORMAL")
+	// 使用 pure-go SQLite 驱动（避免 Buildroot/交叉编译下 CGO 依赖）
+	database, err := sql.Open("sqlite", dbPath)
 	if err != nil {
 		return nil, err
 	}
@@ -48,6 +49,13 @@ func InitDB(dbPath string) (*sql.DB, error) {
 	// _cache_size=-1000 表示 1MB 缓存（针对低内存环境优化，从2MB降低到1MB）
 	// _journal_mode=WAL 使用 WAL 模式，性能更好且内存占用更可控
 	// _synchronous=NORMAL 平衡性能和安全性
+	// busy_timeout: 避免短时间并发写导致 "database is locked"
+	if _, err := db.Exec("PRAGMA busy_timeout = 5000"); err != nil {
+		// 忽略错误，继续执行
+	}
+	if _, err := db.Exec("PRAGMA foreign_keys = ON"); err != nil {
+		// 忽略错误，继续执行
+	}
 	if _, err := db.Exec("PRAGMA cache_size = -1000"); err != nil {
 		// 忽略错误，继续执行
 	}

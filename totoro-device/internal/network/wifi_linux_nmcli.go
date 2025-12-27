@@ -8,6 +8,9 @@ import (
 )
 
 func (nm *networkManager) scanWiFiLinuxNmcli() ([]WiFiNetwork, error) {
+	if !nm.hasCmd("nmcli") {
+		return nil, fmt.Errorf("WiFi扫描失败：系统缺少 nmcli（Buildroot 默认不带 NetworkManager）")
+	}
 	// nmcli -t --separator '\t' -f IN-USE,SSID,SIGNAL,SECURITY dev wifi list --rescan yes
 	out, err := nm.runCmd(15*time.Second, "nmcli",
 		"-t",
@@ -66,6 +69,9 @@ func (nm *networkManager) scanWiFiLinuxNmcli() ([]WiFiNetwork, error) {
 }
 
 func (nm *networkManager) connectWiFiLinuxNmcli(ssid, password string) error {
+	if !nm.hasCmd("nmcli") {
+		return fmt.Errorf("WiFi连接失败：系统缺少 nmcli（Buildroot 默认不带 NetworkManager）")
+	}
 	// nmcli dev wifi connect "<ssid>" [password "<password>"]
 	args := []string{"dev", "wifi", "connect", ssid}
 	if strings.TrimSpace(password) != "" {

@@ -3,39 +3,39 @@
 package display
 
 import (
+	"encoding/binary"
 	"fmt"
 	"image"
 	"os"
 	"syscall"
 	"unsafe"
+
+	"totoro-device/internal/logger"
 )
 
 type fbDisplay struct {
-	fbFile     *os.File
-	fbMem      []byte
+	fbFile *os.File
+	fbMem  []byte
 	// width/height: UI 后缓冲的逻辑分辨率（可为 720x720）
 	width  int
 	height int
 	// fbWidth/fbHeight: /dev/fb0 的真实分辨率
-	fbWidth  int
-	fbHeight int
-	fbBpp    int
+	fbWidth    int
+	fbHeight   int
+	fbBpp      int
 	backBuffer *image.RGBA
 
 	touch touchReader
 }
 
-type fbVarScreenInfo struct {
-	xres           uint32
-	yres           uint32
-	xres_virtual   uint32
-	yres_virtual   uint32
-	xoffset        uint32
-	yoffset        uint32
-	bits_per_pixel uint32
-	grayscale      uint32
-	// 还有更多字段，但我们只需要这些
-}
+// fbVarScreenInfoRaw:
+// Linux 的 FBIOGET_VSCREENINFO 会向用户态写入完整的 struct fb_var_screeninfo。
+// 若这里定义的结构体过小，会导致内核写越界 -> 运行时崩溃（arm 上更明显）。
+//
+// 为避免与不同内核版本的字段差异/对齐问题，这里用足够大的原始 buffer 接收，
+// 再解析我们关心的字段：
+// - xres/yres/xres_virtual/yres_virtual/xoffset/yoffset/bits_per_pixel/grayscale
+type fbVarScreenInfoRaw [160]byte
 
 const (
 	FBIOGET_VSCREENINFO = 0x4600
@@ -57,20 +57,21 @@ func (d *fbDisplay) Init() error {
 	d.fbFile = fbFile
 
 	// 获取 framebuffer 信息
-	var fbInfo fbVarScreenInfo
+	var fbInfo fbVarScreenInfoRaw
 	_, _, errno := syscall.Syscall(
 		syscall.SYS_IOCTL,
 		uintptr(fbFile.Fd()),
 		uintptr(FBIOGET_VSCREENINFO),
-		uintptr(unsafe.Pointer(&fbInfo)),
+		uintptr(unsafe.Pointer(&fbInfo[0])),
 	)
 	if errno != 0 {
 		return fmt.Errorf("获取 framebuffer 信息失败: %v", errno)
 	}
 
-	d.fbWidth = int(fbInfo.xres)
-	d.fbHeight = int(fbInfo.yres)
-	d.fbBpp = int(fbInfo.bits_per_pixel)
+	// Linux fb_var_screeninfo 为小端；Luckfox Pico Ultra (armv7l) 也是小端。
+	d.fbWidth = int(binary.LittleEndian.Uint32(fbInfo[0:4]))
+	d.fbHeight = int(binary.LittleEndian.Uint32(fbInfo[4:8]))
+	d.fbBpp = int(binary.LittleEndian.Uint32(fbInfo[24:28]))
 
 	// 如果外部没有指定逻辑分辨率，则跟随真实 framebuffer
 	if d.width <= 0 || d.height <= 0 {
@@ -79,7 +80,7 @@ func (d *fbDisplay) Init() error {
 	}
 
 	// 映射 framebuffer 内存
-	fbSize := int(fbInfo.xres * fbInfo.yres * fbInfo.bits_per_pixel / 8)
+	fbSize := int(uint64(d.fbWidth) * uint64(d.fbHeight) * uint64(d.fbBpp) / 8)
 	fbMem, err := syscall.Mmap(
 		int(fbFile.Fd()),
 		0,
@@ -98,7 +99,11 @@ func (d *fbDisplay) Init() error {
 	// 初始化触摸（linux evdev）
 	d.touch = newLinuxEvdevTouch(d.width, d.height)
 	if d.touch != nil {
-		_ = d.touch.Init()
+		if err := d.touch.Init(); err != nil {
+			logger.Warn("触摸初始化失败: %v", err)
+		} else {
+			logger.Info("触摸已启用（evdev）")
+		}
 	}
 
 	return nil
@@ -190,4 +195,3 @@ func (d *fbDisplay) GetTouchEvents() []TouchEvent {
 	}
 	return d.touch.Poll()
 }
-
