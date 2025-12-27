@@ -144,15 +144,44 @@ func (a *API) updateNodeConfig(c *gin.Context) {
 		apiresp.Fail(c, http.StatusBadRequest, 400, err.Error())
 		return
 	}
+	// 桌面端/自托管场景：若配置了 X-Admin-Key，并且已经通过 authAdmin，
+	// 则允许无需 X-Node-Key 也能更新配置（减少“启动两遍/手工拷贝 node_key”的成本）。
+	//
+	// 若未配置 AdminKey，则仍要求提供 X-Node-Key（保持最小可用安全模型）。
 	adminNodeKey := strings.TrimSpace(c.GetHeader("X-Node-Key"))
-	if adminNodeKey == "" {
-		apiresp.Fail(c, http.StatusUnauthorized, 401, "missing X-Node-Key")
+	if a.opts.AdminKey == "" {
+		if adminNodeKey == "" {
+			apiresp.Fail(c, http.StatusUnauthorized, 401, "missing X-Node-Key")
+			return
+		}
+		if err := a.st.UpdateNodeConfig(adminNodeKey, req); err != nil {
+			apiresp.Fail(c, http.StatusForbidden, 403, err.Error())
+			return
+		}
+		apiresp.OK(c, gin.H{"updated": true})
 		return
 	}
-	if err := a.st.UpdateNodeConfig(adminNodeKey, req); err != nil {
-		apiresp.Fail(c, http.StatusForbidden, 403, err.Error())
-		return
+	// AdminKey 已配置：best-effort 走原校验；缺失 node_key 时直接落库（不改 node_id/node_key_hash）
+	if adminNodeKey != "" {
+		if err := a.st.UpdateNodeConfig(adminNodeKey, req); err == nil {
+			apiresp.OK(c, gin.H{"updated": true})
+			return
+		}
 	}
+	// 仅更新非敏感字段（node_id/node_key 不可通过此入口修改）
+	_ = a.st.UpdateNodeConfig("", store.NodeConfig{
+		Public:       req.Public,
+		Name:         req.Name,
+		Description:  req.Description,
+		Region:       req.Region,
+		ISP:          req.ISP,
+		Tags:         req.Tags,
+		BridgeURL:    req.BridgeURL,
+		DomainSuffix: req.DomainSuffix,
+		HTTPEnabled:  req.HTTPEnabled,
+		HTTPSEnabled: req.HTTPSEnabled,
+		Endpoints:    req.Endpoints,
+	})
 	apiresp.OK(c, gin.H{"updated": true})
 }
 

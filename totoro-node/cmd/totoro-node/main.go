@@ -2,9 +2,13 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
+	"net"
 	"os"
 	"strings"
 	"time"
@@ -13,6 +17,7 @@ import (
 	frpsserver "github.com/fatedier/frp/server"
 
 	"totoro-node/internal/bridgeclient"
+	"totoro-node/internal/envfile"
 	"totoro-node/internal/frpswrap"
 	"totoro-node/internal/kicker"
 	"totoro-node/internal/limits"
@@ -28,10 +33,53 @@ func getenv(k, def string) string {
 	return def
 }
 
+// defaultBridgeURL 可在编译时通过 -ldflags "-X main.defaultBridgeURL=http://..." 覆盖
+var defaultBridgeURL = "http://192.168.2.32:18090"
+
+func firstMAC() string {
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		return ""
+	}
+	for _, it := range ifaces {
+		// 过滤掉 loopback / down
+		if it.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+		if it.Flags&net.FlagUp == 0 {
+			continue
+		}
+		hw := strings.TrimSpace(it.HardwareAddr.String())
+		if hw == "" {
+			continue
+		}
+		return hw
+	}
+	return ""
+}
+
+func deriveNodeIDFromMAC(mac string) string {
+	mac = strings.TrimSpace(strings.ToLower(mac))
+	if mac == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(mac))
+	// 取 8 字节，足够短且冲突概率极低
+	return "node_" + hex.EncodeToString(sum[:8])
+}
+
+func genRandomKey(n int) string {
+	if n <= 0 {
+		n = 32
+	}
+	b := make([]byte, n)
+	_, _ = rand.Read(b)
+	return hex.EncodeToString(b)
+}
+
 func main() {
-	// 基础身份（节点）
-	nodeID := strings.TrimSpace(getenv("TOTOTO_NODE_ID", "node_local"))
-	nodeKey := strings.TrimSpace(getenv("TOTOTO_NODE_KEY", "change_me"))
+	// 自动加载/生成 .env（无需用命令行手动注入环境变量）
+	envfile.Bootstrap()
 
 	// frps 配置文件（直接复用 frp 的 TOML/YAML/JSON 配置格式）
 	frpsCfgFile := getenv("TOTOTO_FRPS_CONFIG", "./frps.toml")
@@ -47,12 +95,40 @@ func main() {
 		log.Fatalf("open store: %v", err)
 	}
 	defer st.Close()
-	_ = st.InitNodeIfEmpty(store.NodeConfig{
-		NodeID:  nodeID,
-		NodeKey: nodeKey,
-		Public:  false,
-		Name:    nodeID,
-	})
+
+	// 让节点“开箱即用”：
+	// - node_id：默认由 MAC 推导（稳定标识），fallback 随机
+	// - node_key：首次启动随机生成并落库（用于票据校验/桥梁签发 ticket）
+	// - bridge_url：默认使用编译内置 defaultBridgeURL（可被 TOTOTO_BRIDGE_URL 覆盖）
+	firstBoot := false
+	if cfg, _, gerr := st.GetNodeConfig(); gerr != nil || strings.TrimSpace(cfg.NodeID) == "" {
+		firstBoot = true
+		mac := firstMAC()
+		nodeID := deriveNodeIDFromMAC(mac)
+		if nodeID == "" {
+			nodeID = "node_" + genRandomKey(6)
+		}
+		nodeKey := genRandomKey(32)
+		bridgeURL := strings.TrimSpace(getenv("TOTOTO_BRIDGE_URL", strings.TrimSpace(defaultBridgeURL)))
+		_ = st.InitNodeIfEmpty(store.NodeConfig{
+			NodeID:    nodeID,
+			NodeKey:   nodeKey,
+			Public:    false,
+			Name:      nodeID,
+			BridgeURL: bridgeURL,
+		})
+	}
+
+	cfg0, _, _ := st.GetNodeConfig()
+	nodeID := strings.TrimSpace(cfg0.NodeID)
+	nodeKey := strings.TrimSpace(cfg0.NodeKey)
+	if nodeID == "" || nodeKey == "" {
+		log.Fatalf("node config invalid (node_id/node_key empty), db=%s", dbPath)
+	}
+	if firstBoot {
+		// 仅首启打印一次，便于节点所有者保存（后续可通过节点 UI/API 再设置自己的管理鉴权）
+		log.Printf("node initialized: node_id=%s node_key=%s", nodeID, nodeKey)
+	}
 
 	// Beta：frps hook（票据 + 配额）
 	lim := limits.New()
@@ -242,15 +318,15 @@ func main() {
 			httpClient.BaseURL = cfg.BridgeURL
 
 			hb := bridgeclient.Heartbeat{
-				Ts:     time.Now().UTC().Format(time.RFC3339),
-				NodeID: cfg.NodeID,
-				Public: cfg.Public,
-				Name:   cfg.Name,
+				Ts:          time.Now().UTC().Format(time.RFC3339),
+				NodeID:      cfg.NodeID,
+				Public:      cfg.Public,
+				Name:        cfg.Name,
 				Description: cfg.Description,
-				Region: cfg.Region,
-				ISP:    cfg.ISP,
-				Tags:   cfg.Tags,
-				NodeAPI: publicNodeAPI,
+				Region:      cfg.Region,
+				ISP:         cfg.ISP,
+				Tags:        cfg.Tags,
+				NodeAPI:     publicNodeAPI,
 				Endpoints: func() []any {
 					out := make([]any, 0, len(cfg.Endpoints))
 					for _, ep := range cfg.Endpoints {

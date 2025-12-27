@@ -11,6 +11,7 @@ import (
 
 	"totoro-device/config"
 	"totoro-device/internal/logger"
+	"totoro-device/internal/system"
 )
 
 // ApplySystemSettings 启动时应用系统设置（音量/亮度等）。
@@ -42,7 +43,21 @@ func ApplySystemSettings(cfg *config.Config) {
 	}
 
 	// 亮度：不同屏幕实现差异大，这里只做预留（后续在面板里做“可用性检测”）
-	_ = strings.TrimSpace(fmt.Sprintf("%v", cfg.System.Brightness))
+	if cfg.System.Brightness != nil {
+		p := *cfg.System.Brightness
+		go func(percent int) {
+			bl, err := system.DiscoverBacklight()
+			if err != nil || bl == nil {
+				logger.Warn("应用亮度失败: 未检测到背光")
+				return
+			}
+			if err := bl.SetPercent(percent); err != nil {
+				logger.Warn("应用亮度失败: %v", err)
+				return
+			}
+			logger.Info("已应用亮度: %d%%", percent)
+		}(p)
+	}
 }
 
 func runCmd(timeout time.Duration, name string, args ...string) error {

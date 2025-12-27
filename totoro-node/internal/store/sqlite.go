@@ -74,6 +74,7 @@ CREATE TABLE IF NOT EXISTS node_config (
   id INTEGER PRIMARY KEY CHECK (id = 1),
   node_id TEXT NOT NULL,
   node_key_hash TEXT NOT NULL,
+  node_key_plain TEXT NOT NULL DEFAULT '',
   public INTEGER NOT NULL DEFAULT 0,
   name TEXT NOT NULL DEFAULT '',
   description TEXT NOT NULL DEFAULT '',
@@ -104,6 +105,7 @@ CREATE INDEX IF NOT EXISTS idx_invites_revoked ON invites(revoked);
 	_, err := s.db.Exec(schema)
 	// 兼容旧库：补列
 	_, _ = s.db.Exec(`ALTER TABLE node_config ADD COLUMN description TEXT NOT NULL DEFAULT ''`)
+	_, _ = s.db.Exec(`ALTER TABLE node_config ADD COLUMN node_key_plain TEXT NOT NULL DEFAULT ''`)
 	_, _ = s.db.Exec(`ALTER TABLE node_config ADD COLUMN http_enabled INTEGER NOT NULL DEFAULT 0`)
 	_, _ = s.db.Exec(`ALTER TABLE node_config ADD COLUMN https_enabled INTEGER NOT NULL DEFAULT 0`)
 	_, _ = s.db.Exec(`ALTER TABLE invites ADD COLUMN code TEXT NOT NULL DEFAULT ''`)
@@ -125,30 +127,32 @@ func (s *Store) InitNodeIfEmpty(cfg NodeConfig) error {
 
 	// 仅当为空时插入
 	_, err := s.db.Exec(`
-INSERT INTO node_config(id,node_id,node_key_hash,public,name,description,region,isp,tags_json,bridge_url,domain_suffix,http_enabled,https_enabled,endpoints_json,updated_at)
-VALUES(1,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+INSERT INTO node_config(id,node_id,node_key_hash,node_key_plain,public,name,description,region,isp,tags_json,bridge_url,domain_suffix,http_enabled,https_enabled,endpoints_json,updated_at)
+VALUES(1,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 ON CONFLICT(id) DO NOTHING
-`, cfg.NodeID, hashKey(cfg.NodeKey), boolToInt(cfg.Public), cfg.Name, cfg.Description, cfg.Region, cfg.ISP, string(tags), cfg.BridgeURL, cfg.DomainSuffix, boolToInt(cfg.HTTPEnabled), boolToInt(cfg.HTTPSEnabled), string(eps), now)
+`, cfg.NodeID, hashKey(cfg.NodeKey), cfg.NodeKey, boolToInt(cfg.Public), cfg.Name, cfg.Description, cfg.Region, cfg.ISP, string(tags), cfg.BridgeURL, cfg.DomainSuffix, boolToInt(cfg.HTTPEnabled), boolToInt(cfg.HTTPSEnabled), string(eps), now)
 	return err
 }
 
 func (s *Store) GetNodeConfig() (NodeConfig, string, error) {
 	row := s.db.QueryRow(`
-SELECT node_id,node_key_hash,public,name,description,region,isp,tags_json,bridge_url,domain_suffix,http_enabled,https_enabled,endpoints_json
+SELECT node_id,node_key_hash,node_key_plain,public,name,description,region,isp,tags_json,bridge_url,domain_suffix,http_enabled,https_enabled,endpoints_json
 FROM node_config WHERE id=1
 `)
 	var (
 		cfg          NodeConfig
 		keyHash      string
+		keyPlain     string
 		publicInt    int
 		httpInt      int
 		httpsInt     int
 		tagsJSON     string
 		endpointsJSON string
 	)
-	if err := row.Scan(&cfg.NodeID, &keyHash, &publicInt, &cfg.Name, &cfg.Description, &cfg.Region, &cfg.ISP, &tagsJSON, &cfg.BridgeURL, &cfg.DomainSuffix, &httpInt, &httpsInt, &endpointsJSON); err != nil {
+	if err := row.Scan(&cfg.NodeID, &keyHash, &keyPlain, &publicInt, &cfg.Name, &cfg.Description, &cfg.Region, &cfg.ISP, &tagsJSON, &cfg.BridgeURL, &cfg.DomainSuffix, &httpInt, &httpsInt, &endpointsJSON); err != nil {
 		return NodeConfig{}, "", err
 	}
+	cfg.NodeKey = strings.TrimSpace(keyPlain)
 	cfg.Public = publicInt == 1
 	cfg.HTTPEnabled = httpInt == 1
 	cfg.HTTPSEnabled = httpsInt == 1

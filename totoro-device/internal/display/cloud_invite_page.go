@@ -4,9 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"totoro-device/config"
-	"totoro-device/internal/bridgeclient"
 	"totoro-device/internal/database"
+	"totoro-device/internal/bridgeclient"
 )
 
 // CloudInvitePage 私有分享邀请码（MVP：预览/保存邀请码；连接动作后续加按钮）
@@ -59,19 +58,29 @@ func (p *CloudInvitePage) preview() error {
 		return nil
 	}
 
-	sess, err := p.services.GetBridgeSession()
-	if err != nil || sess == nil || strings.TrimSpace(sess.DeviceToken) == "" {
-		p.lastErr = "桥梁未注册（缺少 device_token）"
+	var res *bridgeclient.PreviewResp
+	err := p.services.RegisterBridgeAndRetryOn401(func(bc *bridgeclient.Client) error {
+		r, e := bc.PreviewInvite(code)
+		if e != nil {
+			return e
+		}
+		res = r
 		return nil
-	}
-	bc := &bridgeclient.Client{
-		BaseURL:     config.ResolveBridgeBase(p.services.Config),
-		DeviceToken: strings.TrimSpace(sess.DeviceToken),
-		DeviceID:    strings.TrimSpace(sess.DeviceID),
-	}
-	res, err := bc.PreviewInvite(code)
+	})
 	if err != nil {
-		p.lastErr = err.Error()
+		// 友好化错误提示
+		msg := err.Error()
+		low := strings.ToLower(msg)
+		switch {
+		case strings.Contains(low, "invalid_code"):
+			p.lastErr = "邀请码无效"
+		case strings.Contains(low, "expired"):
+			p.lastErr = "邀请码已过期"
+		case strings.Contains(low, "status=401"):
+			p.lastErr = "桥梁鉴权失败（设备未注册/不在白名单）"
+		default:
+			p.lastErr = msg
+		}
 		return err
 	}
 

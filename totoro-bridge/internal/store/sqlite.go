@@ -15,6 +15,7 @@ import (
 
 type Store interface {
 	UpsertNodeAuth(nodeID string, nodeKey string) error
+	HasNodeAuth(nodeID string) (bool, error)
 	VerifyNodeAuth(nodeID string, nodeKey string) (bool, error)
 	GetNodeKeyPlain(nodeID string) (string, error)
 	UpsertNodeHeartbeat(hb NodeHeartbeat) error
@@ -293,6 +294,22 @@ ON CONFLICT(node_id) DO UPDATE SET
   updated_at=excluded.updated_at
 `, nodeID, hashKey(nodeKey), nodeKey, now)
 	return err
+}
+
+func (s *SQLiteStore) HasNodeAuth(nodeID string) (bool, error) {
+	nodeID = strings.TrimSpace(nodeID)
+	if nodeID == "" {
+		return false, nil
+	}
+	row := s.db.QueryRow(`SELECT 1 FROM node_auth WHERE node_id=? LIMIT 1`, nodeID)
+	var one int
+	if err := row.Scan(&one); err != nil {
+		if err == sql.ErrNoRows {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
 }
 
 func (s *SQLiteStore) VerifyNodeAuth(nodeID string, nodeKey string) (bool, error) {

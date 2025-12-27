@@ -157,6 +157,10 @@ func (c *Client) GetPublicNodes() ([]any, error) {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode/100 != 2 {
+		msg := readBridgeErr(resp)
+		if msg != "" {
+			return nil, fmt.Errorf("bridge public nodes status=%s msg=%s", resp.Status, msg)
+		}
 		return nil, fmt.Errorf("bridge public nodes status=%s", resp.Status)
 	}
 	var wrap struct {
@@ -192,6 +196,10 @@ func (c *Client) GetOfficialNodes() ([]OfficialNode, error) {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode/100 != 2 {
+		msg := readBridgeErr(resp)
+		if msg != "" {
+			return nil, fmt.Errorf("bridge official nodes status=%s msg=%s", resp.Status, msg)
+		}
 		return nil, fmt.Errorf("bridge official nodes status=%s", resp.Status)
 	}
 	var wrap struct {

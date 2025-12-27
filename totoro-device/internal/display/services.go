@@ -2,8 +2,8 @@ package display
 
 import (
 	"fmt"
-	"os/exec"
 	"os"
+	"os/exec"
 	"runtime"
 	"strconv"
 	"strings"
@@ -11,9 +11,11 @@ import (
 	"time"
 
 	appcfg "totoro-device/config"
+	"totoro-device/internal/bridgeclient"
 	"totoro-device/internal/database"
 	"totoro-device/internal/frp"
 	"totoro-device/internal/network"
+	"totoro-device/internal/system"
 )
 
 // AppServices UI 业务服务集合：统一封装 config / network / frp
@@ -263,13 +265,13 @@ func (s *AppServices) SetSystemVolume(vol int) error {
 		vol = 30
 	}
 
-	// 先落盘
+	// 先落盘（用于重启后保持）
 	s.mu.Lock()
 	s.Config.System.Volume = &vol
 	_ = s.Config.Save()
 	s.mu.Unlock()
 
-	// Linux 设备侧：应用到 ALSA（Luckfox 音频文档方式）
+	// Linux 设备侧：立即应用到 ALSA（Luckfox 音频文档方式）
 	if runtime.GOOS == "linux" {
 		if _, err := exec.LookPath("amixer"); err != nil {
 			return fmt.Errorf("系统缺少 amixer")
@@ -293,10 +295,156 @@ func (s *AppServices) SetSystemVolume(vol int) error {
 	return nil
 }
 
+func (s *AppServices) SetSystemBrightness(percent int) error {
+	if s.Config == nil {
+		return fmt.Errorf("config 未初始化")
+	}
+	if percent < 0 {
+		percent = 0
+	}
+	if percent > 100 {
+		percent = 100
+	}
+
+	// 先落盘（用于重启保持）
+	s.mu.Lock()
+	s.Config.System.Brightness = &percent
+	_ = s.Config.Save()
+	s.mu.Unlock()
+
+	// Linux 设备侧：立即应用（写 sysfs 背光）
+	if runtime.GOOS == "linux" {
+		bl, err := system.DiscoverBacklight()
+		if err != nil || bl == nil {
+			return fmt.Errorf("未检测到背光设备")
+		}
+		if err := bl.SetPercent(percent); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *AppServices) SetScreenOffSeconds(sec int) error {
+	if s.Config == nil {
+		return fmt.Errorf("config 未初始化")
+	}
+	if sec < 0 {
+		sec = 0
+	}
+	// 只落盘，运行时逻辑由 display manager 执行
+	s.mu.Lock()
+	s.Config.System.ScreenOffSeconds = &sec
+	_ = s.Config.Save()
+	s.mu.Unlock()
+	return nil
+}
+
 func (s *AppServices) GetBridgeSession() (*database.BridgeSession, error) {
 	db := database.GetDB()
 	if db == nil {
 		return nil, fmt.Errorf("数据库未初始化")
 	}
 	return database.GetBridgeSession(db)
+}
+
+func (s *AppServices) GetDeviceCrypto() (*database.DeviceCrypto, error) {
+	db := database.GetDB()
+	if db == nil {
+		return nil, fmt.Errorf("数据库未初始化")
+	}
+	return database.GetOrCreateDeviceCrypto(db)
+}
+
+// bridgeClientForUI 构造桥梁客户端（可自动注册 token）
+func (s *AppServices) bridgeClientForUI() (*bridgeclient.Client, *database.BridgeSession, *database.DeviceCrypto, error) {
+	if s.Config == nil {
+		return nil, nil, nil, fmt.Errorf("config 未初始化")
+	}
+	db := database.GetDB()
+	if db == nil {
+		return nil, nil, nil, fmt.Errorf("数据库未初始化")
+	}
+	dc, err := database.GetOrCreateDeviceCrypto(db)
+	if err != nil || dc == nil || strings.TrimSpace(dc.PrivKeyB64) == "" || strings.TrimSpace(dc.PubKeyB64) == "" {
+		return nil, nil, nil, fmt.Errorf("设备密钥不可用")
+	}
+	sess, _ := database.GetBridgeSession(db)
+
+	bc := &bridgeclient.Client{
+		BaseURL:          appcfg.ResolveBridgeBase(s.Config),
+		DeviceID:         strings.TrimSpace(s.Config.Device.ID),
+		DevicePrivKeyB64: strings.TrimSpace(dc.PrivKeyB64),
+		DeviceToken:      "",
+	}
+	if sess != nil && !database.BridgeSessionExpired(sess, 30*time.Second) {
+		bc.DeviceToken = strings.TrimSpace(sess.DeviceToken)
+	}
+
+	return bc, sess, dc, nil
+}
+
+func (s *AppServices) ensureBridgeToken(bc *bridgeclient.Client, dc *database.DeviceCrypto) error {
+	if bc == nil || s.Config == nil {
+		return fmt.Errorf("bridge client 未初始化")
+	}
+	if strings.TrimSpace(bc.DeviceToken) != "" {
+		return nil
+	}
+	db := database.GetDB()
+	if db == nil {
+		return fmt.Errorf("数据库未初始化")
+	}
+	deviceID := strings.TrimSpace(s.Config.Device.ID)
+	mac := strings.TrimSpace(s.Config.Bridge.LastMAC)
+	if mac == "" && s.Network != nil {
+		// best-effort：尝试用当前接口 MAC
+		if st, _ := s.Network.GetNetworkStatus(); st != nil {
+			ifaces, _ := s.Network.GetInterfaces()
+			for _, it := range ifaces {
+				if strings.TrimSpace(it.Name) == strings.TrimSpace(st.CurrentInterface) && strings.TrimSpace(it.MAC) != "" {
+					mac = strings.TrimSpace(it.MAC)
+					break
+				}
+			}
+		}
+	}
+	if deviceID == "" || mac == "" {
+		return fmt.Errorf("设备未初始化（缺少 device_id/mac）")
+	}
+	reg, err := bc.Register(deviceID, mac, strings.TrimSpace(dc.PubKeyB64))
+	if err != nil || reg == nil || strings.TrimSpace(reg.DeviceToken) == "" {
+		return fmt.Errorf("桥梁注册失败")
+	}
+	_ = database.UpsertBridgeSession(db, database.BridgeSession{
+		BridgeURL:   bc.BaseURL,
+		DeviceID:    deviceID,
+		MAC:         mac,
+		DeviceToken: strings.TrimSpace(reg.DeviceToken),
+		ExpiresAt:   bridgeclient.ParseExpiresAt(reg.ExpiresAt),
+	})
+	bc.DeviceToken = strings.TrimSpace(reg.DeviceToken)
+	return nil
+}
+
+func (s *AppServices) RegisterBridgeAndRetryOn401(do func(bc *bridgeclient.Client) error) error {
+	bc, _, dc, err := s.bridgeClientForUI()
+	if err != nil {
+		return err
+	}
+	// token 为空先注册
+	if err := s.ensureBridgeToken(bc, dc); err != nil {
+		return err
+	}
+	err = do(bc)
+	if err == nil {
+		return nil
+	}
+	// 401：强制重注册并重试一次
+	if strings.Contains(err.Error(), "status=401") {
+		bc.DeviceToken = ""
+		_ = s.ensureBridgeToken(bc, dc)
+		return do(bc)
+	}
+	return err
 }

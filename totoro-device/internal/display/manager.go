@@ -8,6 +8,7 @@ import (
 	appcfg "totoro-device/config"
 	"totoro-device/internal/frp"
 	"totoro-device/internal/network"
+	"totoro-device/internal/system"
 )
 
 // Manager 显示管理器
@@ -17,6 +18,12 @@ type Manager struct {
 	pageManager *PageManager
 	services    *AppServices
 	running     bool
+
+	// 屏幕熄屏/唤醒（背光）
+	bl           *system.Backlight
+	lastInputAt  time.Time
+	screenIsOff  bool
+	lastBright   int // 0-100（用于恢复）
 }
 
 // NewManager 创建显示管理器
@@ -105,12 +112,22 @@ func NewManagerWithServices(disp Display, services *AppServices) *Manager {
 	// 设置默认页面：先启动页（不入栈），再自动切到 status
 	_ = pm.SwitchTo("splash")
 
+	// 背光探测（best-effort）
+	var bl *system.Backlight
+	if b, err := system.DiscoverBacklight(); err == nil {
+		bl = b
+	}
+
 	return &Manager{
 		display:     disp,
 		graphics:    graphics,
 		pageManager: pm,
 		services:    services,
 		running:     false,
+		bl:          bl,
+		lastInputAt: time.Now(),
+		screenIsOff: false,
+		lastBright:  100,
 	}
 }
 
@@ -160,6 +177,13 @@ func (m *Manager) Run() error {
 
 		// 处理触摸事件
 		events := m.display.GetTouchEvents()
+		if len(events) > 0 {
+			m.lastInputAt = time.Now()
+			// 触摸唤醒
+			if m.screenIsOff {
+				m.wakeScreen()
+			}
+		}
 		// 触摸坐标从“真实像素”映射回 480 逻辑坐标，保证布局/命中区域一致
 		sx := float64(m.display.GetWidth()) / float64(designW)
 		sy := float64(m.display.GetHeight()) / float64(designH)
@@ -175,11 +199,82 @@ func (m *Manager) Run() error {
 			m.pageManager.HandleTouch(x, y, event.Type)
 		}
 
+		// 熄屏逻辑：空闲到时关闭背光；触摸自动唤醒
+		m.maybeScreenOff()
+
 		// 限制帧率
 		time.Sleep(16 * time.Millisecond) // ~60 FPS
 	}
 
 	return nil
+}
+
+func (m *Manager) screenOffSeconds() int {
+	if m.services == nil || m.services.Config == nil || m.services.Config.System.ScreenOffSeconds == nil {
+		return 0
+	}
+	sec := *m.services.Config.System.ScreenOffSeconds
+	if sec < 0 {
+		return 0
+	}
+	return sec
+}
+
+func (m *Manager) desiredBrightness() int {
+	if m.services == nil || m.services.Config == nil || m.services.Config.System.Brightness == nil {
+		// 若用户未设置，则用 lastBright（一般为 100 或上次读取值）
+		return m.lastBright
+	}
+	v := *m.services.Config.System.Brightness
+	if v < 0 {
+		v = 0
+	}
+	if v > 100 {
+		v = 100
+	}
+	return v
+}
+
+func (m *Manager) maybeScreenOff() {
+	if m.bl == nil {
+		return
+	}
+	sec := m.screenOffSeconds()
+	if sec <= 0 {
+		// 不熄屏：如果当前处于熄屏态则唤醒
+		if m.screenIsOff {
+			m.wakeScreen()
+		}
+		return
+	}
+	if m.screenIsOff {
+		return
+	}
+	if time.Since(m.lastInputAt) < time.Duration(sec)*time.Second {
+		return
+	}
+	// 记录恢复亮度：优先用配置亮度，否则读取当前亮度
+	if m.services != nil && m.services.Config != nil && m.services.Config.System.Brightness != nil {
+		m.lastBright = m.desiredBrightness()
+	} else if p, err := m.bl.GetPercent(); err == nil {
+		m.lastBright = p
+	}
+	_ = m.bl.Off()
+	m.screenIsOff = true
+}
+
+func (m *Manager) wakeScreen() {
+	if m.bl == nil {
+		m.screenIsOff = false
+		return
+	}
+	b := m.desiredBrightness()
+	if b <= 0 {
+		// 避免“永远黑屏”：最小恢复到 10%
+		b = 10
+	}
+	_ = m.bl.SetPercent(b)
+	m.screenIsOff = false
 }
 
 // Stop 停止显示循环

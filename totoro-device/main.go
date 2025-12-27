@@ -23,6 +23,7 @@ import (
 	"totoro-device/internal/database"
 	"totoro-device/internal/deviceboot"
 	"totoro-device/internal/display"
+	"totoro-device/internal/envfile"
 	"totoro-device/internal/frp"
 	"totoro-device/internal/logger"
 	"totoro-device/internal/network"
@@ -286,6 +287,9 @@ func main() {
 	}
 	defer logger.Close()
 	logger.Info("启动内网穿透盒子客户端...")
+
+	// 自动加载/生成 .env（无需命令行注入环境变量，便于部署配置）
+	envfile.Bootstrap()
 
 	// 开机语音（不阻塞启动）
 	deviceboot.TryPlayBootAudio()

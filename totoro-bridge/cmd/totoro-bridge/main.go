@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"totoro-bridge/internal/bridgeapi"
+	"totoro-bridge/internal/envfile"
 	"totoro-bridge/internal/store"
 )
 
@@ -16,6 +17,9 @@ func getenv(k, def string) string {
 }
 
 func main() {
+	// 自动加载/生成 .env（无需用命令行手动注入环境变量）
+	envfile.Bootstrap()
+
 	addr := getenv("TOTOTO_BRIDGE_ADDR", ":18090")
 	dbPath := getenv("TOTOTO_BRIDGE_DB", "./bridge.db")
 

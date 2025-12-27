@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strings"
 
-	"totoro-device/config"
 	"totoro-device/internal/bridgeclient"
 )
 
@@ -48,19 +47,16 @@ func (p *CloudPublicNodesPage) refresh() {
 		p.listView.AddItem(&ListItem{Title: "无法加载", Subtitle: p.lastErr})
 		return
 	}
-	sess, err := p.services.GetBridgeSession()
-	if err != nil || sess == nil || strings.TrimSpace(sess.DeviceToken) == "" {
-		p.lastErr = "桥梁未注册（缺少 device_token）"
-		p.listView.AddItem(&ListItem{Title: "未就绪", Subtitle: p.lastErr})
-		return
-	}
 
-	bc := &bridgeclient.Client{
-		BaseURL:     config.ResolveBridgeBase(p.services.Config),
-		DeviceToken: strings.TrimSpace(sess.DeviceToken),
-		DeviceID:    strings.TrimSpace(sess.DeviceID),
-	}
-	nodes, err := bc.GetPublicNodes()
+	var nodes []any
+	err := p.services.RegisterBridgeAndRetryOn401(func(bc *bridgeclient.Client) error {
+		ns, e := bc.GetPublicNodes()
+		if e != nil {
+			return e
+		}
+		nodes = ns
+		return nil
+	})
 	if err != nil {
 		p.lastErr = err.Error()
 		p.listView.AddItem(&ListItem{Title: "加载失败", Subtitle: p.lastErr})

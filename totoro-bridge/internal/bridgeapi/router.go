@@ -494,7 +494,10 @@ type heartbeatReq struct {
 }
 
 func (a *Router) handleNodeHeartbeat(c *gin.Context) {
-	// node 级别鉴权：node_id + node_key（bridge 需要预先登记 node_key）
+	// node 级别鉴权：node_id + node_key
+	//
+	// 设计调整：允许“首次启动自动注册节点”——当 node_id 从未出现过时，bridge 自动写入 node_auth，
+	// 后续再按同一 node_key 校验（避免要求手工预登记 node_key，满足“任何人都可启动节点上报桥梁”的目标）。
 	nodeID := strings.TrimSpace(c.GetHeader("X-Node-Id"))
 	nodeKey := strings.TrimSpace(c.GetHeader("X-Node-Key"))
 	if nodeID == "" || nodeKey == "" {
@@ -507,10 +510,23 @@ func (a *Router) handleNodeHeartbeat(c *gin.Context) {
 		return
 	}
 	if !ok {
-		apiresp.Fail(c, http.StatusUnauthorized, 401, "invalid node auth")
-		return
+		exists, eerr := a.store.HasNodeAuth(nodeID)
+		if eerr != nil {
+			apiresp.Fail(c, http.StatusInternalServerError, 500, eerr.Error())
+			return
+		}
+		if exists {
+			apiresp.Fail(c, http.StatusUnauthorized, 401, "invalid node auth")
+			return
+		}
+		// 首次注册：绑定 node_id -> node_key
+		if err := a.store.UpsertNodeAuth(nodeID, nodeKey); err != nil {
+			apiresp.Fail(c, http.StatusInternalServerError, 500, err.Error())
+			return
+		}
 	}
-	// 重要：bridge 需要 node_key 明文用于签发 ticket。这里在鉴权通过后回填明文（避免旧库 node_key_plain 为空导致 500）。
+	// 重要：bridge 需要 node_key 明文用于签发 ticket。
+	// 这里无条件回填明文（避免旧库 node_key_plain 为空导致 500）。
 	_ = a.store.UpsertNodeAuth(nodeID, nodeKey)
 
 	var req heartbeatReq
