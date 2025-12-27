@@ -77,4 +77,13 @@ func GetPublicNodeID(db *sql.DB) (string, error) {
 	return cryptobox.DecryptLocal(crypto.PrivKeyB64, nonce, ct)
 }
 
+func ClearPublicNodeID(db *sql.DB) error {
+	if db == nil {
+		return fmt.Errorf("数据库未初始化")
+	}
+	_ = EnsurePublicNodeTable(db)
+	_, err := db.Exec(`DELETE FROM public_node_selected WHERE id=1`)
+	return err
+}
+
 

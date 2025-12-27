@@ -86,6 +86,15 @@ type PublicNode struct {
 	DomainSuffix  string   `json:"domain_suffix"`
 	UpdatedAt     string   `json:"updated_at"`
 	HeartbeatAgeS int64    `json:"heartbeat_age_s"`
+	HTTPEnabled   bool     `json:"http_enabled"`
+	HTTPSEnabled  bool     `json:"https_enabled"`
+	TCPPortPool   *PortPool `json:"tcp_port_pool,omitempty"`
+	UDPPortPool   *PortPool `json:"udp_port_pool,omitempty"`
+}
+
+type PortPool struct {
+	Min int `json:"min"`
+	Max int `json:"max"`
 }
 
 func ParseExpiresAt(expiresAt string) int64 {
@@ -234,6 +243,8 @@ type RedeemResp struct {
 		DomainSuffix string `json:"domain_suffix"`
 		HTTPEnabled  bool   `json:"http_enabled"`
 		HTTPSEnabled bool   `json:"https_enabled"`
+		TCPPortPool  *PortPool `json:"tcp_port_pool,omitempty"`
+		UDPPortPool  *PortPool `json:"udp_port_pool,omitempty"`
 	} `json:"node"`
 	ConnectionTicket string `json:"connection_ticket"`
 	ExpiresAt        string `json:"expires_at"`
@@ -250,6 +261,8 @@ type PublicNodeConnectResp struct {
 		DomainSuffix string `json:"domain_suffix"`
 		HTTPEnabled  bool   `json:"http_enabled"`
 		HTTPSEnabled bool   `json:"https_enabled"`
+		TCPPortPool  *PortPool `json:"tcp_port_pool,omitempty"`
+		UDPPortPool  *PortPool `json:"udp_port_pool,omitempty"`
 	} `json:"node"`
 	ConnectionTicket string `json:"connection_ticket"`
 	ExpiresAt        string `json:"expires_at"`
@@ -305,6 +318,8 @@ type PreviewResp struct {
 		DomainSuffix string `json:"domain_suffix"`
 		HTTPEnabled  bool   `json:"http_enabled"`
 		HTTPSEnabled bool   `json:"https_enabled"`
+		TCPPortPool  *PortPool `json:"tcp_port_pool,omitempty"`
+		UDPPortPool  *PortPool `json:"udp_port_pool,omitempty"`
 	} `json:"node"`
 	InviteID  string `json:"invite_id"`
 	ExpiresAt string `json:"expires_at"`

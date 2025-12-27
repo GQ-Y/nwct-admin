@@ -24,3 +24,6 @@ flutter:
   assets:
     - assets/tray/tray.png
     - assets/tray/tray.ico
+    - assets/node/frps.toml
+    - assets/node/totoro-node-macos
+    - assets/node/totoro-node-windows.exe

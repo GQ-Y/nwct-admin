@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"io/fs"
 	"mime"
+	"net"
 	"net/http"
 	"os"
 	"path"
@@ -22,13 +23,25 @@ import (
 )
 
 type Options struct {
-	AdminKey string
+	AdminKey  string
 	TicketKey []byte
 }
 
 type API struct {
 	st   *store.Store
 	opts Options
+}
+
+func isLoopbackIP(s string) bool {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return false
+	}
+	ip := net.ParseIP(s)
+	if ip == nil {
+		return false
+	}
+	return ip.IsLoopback()
 }
 
 func NewRouter(st *store.Store, opts Options) *gin.Engine {
@@ -147,13 +160,33 @@ func (a *API) updateNodeConfig(c *gin.Context) {
 	// 桌面端/自托管场景：若配置了 X-Admin-Key，并且已经通过 authAdmin，
 	// 则允许无需 X-Node-Key 也能更新配置（减少“启动两遍/手工拷贝 node_key”的成本）。
 	//
-	// 若未配置 AdminKey，则仍要求提供 X-Node-Key（保持最小可用安全模型）。
+	// 若未配置 AdminKey：
+	// - 本机回环访问（127.0.0.1/::1）允许不带 X-Node-Key（便于本机部署/桌面端）
+	// - 非回环访问仍要求 X-Node-Key（避免公网裸奔）
 	adminNodeKey := strings.TrimSpace(c.GetHeader("X-Node-Key"))
 	if a.opts.AdminKey == "" {
-		if adminNodeKey == "" {
+		if adminNodeKey == "" && !isLoopbackIP(c.ClientIP()) {
 			apiresp.Fail(c, http.StatusUnauthorized, 401, "missing X-Node-Key")
 			return
 		}
+		if adminNodeKey != "" {
+			if err := a.st.UpdateNodeConfig(adminNodeKey, req); err != nil {
+				apiresp.Fail(c, http.StatusForbidden, 403, err.Error())
+				return
+			}
+		} else {
+			// loopback：免 node_key
+			if err := a.st.UpdateNodeConfigAsAdmin(req); err != nil {
+				apiresp.Fail(c, http.StatusInternalServerError, 500, err.Error())
+				return
+			}
+		}
+		apiresp.OK(c, gin.H{"updated": true})
+		return
+	}
+
+	// AdminKey 已配置：优先走 node_key 校验（如果用户提供了）；否则走“已鉴权的 admin 更新”。
+	if adminNodeKey != "" {
 		if err := a.st.UpdateNodeConfig(adminNodeKey, req); err != nil {
 			apiresp.Fail(c, http.StatusForbidden, 403, err.Error())
 			return
@@ -161,27 +194,10 @@ func (a *API) updateNodeConfig(c *gin.Context) {
 		apiresp.OK(c, gin.H{"updated": true})
 		return
 	}
-	// AdminKey 已配置：best-effort 走原校验；缺失 node_key 时直接落库（不改 node_id/node_key_hash）
-	if adminNodeKey != "" {
-		if err := a.st.UpdateNodeConfig(adminNodeKey, req); err == nil {
-			apiresp.OK(c, gin.H{"updated": true})
-			return
-		}
+	if err := a.st.UpdateNodeConfigAsAdmin(req); err != nil {
+		apiresp.Fail(c, http.StatusInternalServerError, 500, err.Error())
+		return
 	}
-	// 仅更新非敏感字段（node_id/node_key 不可通过此入口修改）
-	_ = a.st.UpdateNodeConfig("", store.NodeConfig{
-		Public:       req.Public,
-		Name:         req.Name,
-		Description:  req.Description,
-		Region:       req.Region,
-		ISP:          req.ISP,
-		Tags:         req.Tags,
-		BridgeURL:    req.BridgeURL,
-		DomainSuffix: req.DomainSuffix,
-		HTTPEnabled:  req.HTTPEnabled,
-		HTTPSEnabled: req.HTTPSEnabled,
-		Endpoints:    req.Endpoints,
-	})
 	apiresp.OK(c, gin.H{"updated": true})
 }
 
@@ -198,9 +214,9 @@ func (a *API) listInvites(c *gin.Context) {
 }
 
 type createInviteReq struct {
-	TTLDays    int    `json:"ttl_days"`
-	MaxUses    int    `json:"max_uses"`
-	ScopeJSON  string `json:"scope_json"`
+	TTLDays   int    `json:"ttl_days"`
+	MaxUses   int    `json:"max_uses"`
+	ScopeJSON string `json:"scope_json"`
 }
 
 func (a *API) createInvite(c *gin.Context) {
@@ -233,14 +249,24 @@ func (a *API) createInvite(c *gin.Context) {
 		return
 	}
 	adminNodeKey := strings.TrimSpace(c.GetHeader("X-Node-Key"))
+	// 若配置了 AdminKey 且已通过 authAdmin，可不传 X-Node-Key，直接用节点本地持久化的 node_key。
 	if adminNodeKey == "" {
-		apiresp.Fail(c, http.StatusUnauthorized, 401, "missing X-Node-Key")
-		return
-	}
-	// 校验 node_key（与更新配置一致）
-	if storeHash(adminNodeKey) != keyHash {
-		apiresp.Fail(c, http.StatusForbidden, 403, "node_key invalid")
-		return
+		if a.opts.AdminKey == "" && !isLoopbackIP(c.ClientIP()) {
+			apiresp.Fail(c, http.StatusUnauthorized, 401, "missing X-Node-Key")
+			return
+		}
+		// loopback 且未配置 AdminKey：允许免 node_key，但需要从 db 取 key 用于签名调用 bridge
+		adminNodeKey = strings.TrimSpace(cfg.NodeKey)
+		if adminNodeKey == "" {
+			apiresp.Fail(c, http.StatusInternalServerError, 500, "node_key missing in node.db")
+			return
+		}
+	} else {
+		// 校验 node_key（与更新配置一致）
+		if storeHash(adminNodeKey) != keyHash {
+			apiresp.Fail(c, http.StatusForbidden, 403, "node_key invalid")
+			return
+		}
 	}
 	bc := &bridgeclient.Client{BaseURL: bridge, NodeID: cfg.NodeID, NodeKey: adminNodeKey}
 	out, err := bc.CreateInvite(bridgeclient.CreateInviteReq{
@@ -295,14 +321,23 @@ func (a *API) revokeInvite(c *gin.Context) {
 		return
 	}
 	adminNodeKey := strings.TrimSpace(c.GetHeader("X-Node-Key"))
+	// 若配置了 AdminKey 且已通过 authAdmin，可不传 X-Node-Key，直接用节点本地持久化的 node_key。
 	if adminNodeKey == "" {
-		apiresp.Fail(c, http.StatusUnauthorized, 401, "missing X-Node-Key")
-		return
-	}
-	// 校验 node_key（与更新配置一致）
-	if storeHash(adminNodeKey) != keyHash {
-		apiresp.Fail(c, http.StatusForbidden, 403, "node_key invalid")
-		return
+		if a.opts.AdminKey == "" && !isLoopbackIP(c.ClientIP()) {
+			apiresp.Fail(c, http.StatusUnauthorized, 401, "missing X-Node-Key")
+			return
+		}
+		adminNodeKey = strings.TrimSpace(cfg.NodeKey)
+		if adminNodeKey == "" {
+			apiresp.Fail(c, http.StatusInternalServerError, 500, "node_key missing in node.db")
+			return
+		}
+	} else {
+		// 校验 node_key（与更新配置一致）
+		if storeHash(adminNodeKey) != keyHash {
+			apiresp.Fail(c, http.StatusForbidden, 403, "node_key invalid")
+			return
+		}
 	}
 	bc := &bridgeclient.Client{BaseURL: bridge, NodeID: cfg.NodeID, NodeKey: adminNodeKey}
 	if err := bc.RevokeInvite(strings.TrimSpace(req.InviteID)); err != nil {
@@ -329,5 +364,3 @@ func storeHash(v string) string {
 	sum := sha256.Sum256([]byte(v))
 	return hex.EncodeToString(sum[:])
 }
-
-

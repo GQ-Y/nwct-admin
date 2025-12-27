@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"totoro-device/internal/database"
 	"totoro-device/internal/bridgeclient"
+	"totoro-device/internal/database"
 )
 
 // CloudInvitePage 私有分享邀请码（MVP：预览/保存邀请码；连接动作后续加按钮）
@@ -19,6 +19,9 @@ type CloudInvitePage struct {
 
 	lastMsg string
 	lastErr string
+
+	previewResp *bridgeclient.PreviewResp
+	confirm ConfirmDialog
 }
 
 func NewCloudInvitePage(pm *PageManager) *CloudInvitePage {
@@ -48,6 +51,7 @@ func (p *CloudInvitePage) SetServices(s *AppServices) {
 func (p *CloudInvitePage) preview() error {
 	p.lastErr = ""
 	p.lastMsg = ""
+	p.previewResp = nil
 	if p.services == nil || p.services.Config == nil {
 		p.lastErr = "服务未初始化"
 		return nil
@@ -90,6 +94,7 @@ func (p *CloudInvitePage) preview() error {
 		_ = database.SetPublicInviteCode(db, code)
 	}
 	p.lastMsg = fmt.Sprintf("预览成功：node=%s", strings.TrimSpace(res.Node.NodeID))
+	p.previewResp = res
 	return nil
 }
 
@@ -113,11 +118,41 @@ func (p *CloudInvitePage) Render(g *Graphics) error {
 		_ = g.DrawTextTTF(p.lastErr, 24, 270, ColorErrorRed, 14, FontWeightRegular)
 	}
 
+	// 预览成功：展示节点信息卡片（不显示地址/端口）
+	if p.previewResp != nil {
+		cardY := 300
+		g.DrawRectRounded(24, cardY, 432, 110, 18, ColorPressed)
+		_ = g.DrawTextTTF("节点信息", 40, cardY+20, ColorTextPrimary, 16, FontWeightMedium)
+		_ = g.DrawTextTTF("NodeID: "+strings.TrimSpace(p.previewResp.Node.NodeID), 40, cardY+46, ColorTextSecondary, 14, FontWeightRegular)
+		// 支持协议
+		protos := []string{}
+		if p.previewResp.Node.TCPPortPool != nil {
+			protos = append(protos, "TCP")
+		} else {
+			protos = append(protos, "TCP")
+		}
+		if p.previewResp.Node.UDPPortPool != nil {
+			protos = append(protos, "UDP")
+		}
+		if p.previewResp.Node.HTTPEnabled {
+			protos = append(protos, "HTTP")
+		}
+		if p.previewResp.Node.HTTPSEnabled {
+			protos = append(protos, "HTTPS")
+		}
+		_ = g.DrawTextTTF("支持协议: "+strings.Join(protos, "/"), 40, cardY+72, ColorTextSecondary, 14, FontWeightRegular)
+		_ = g.DrawTextTTF("轻触卡片连接", 40, cardY+96, ColorTextLight, 12, FontWeightRegular)
+	}
+
 	p.keyboard.Render(g)
+	p.confirm.Render(g)
 	return nil
 }
 
 func (p *CloudInvitePage) HandleTouch(x, y int, touchType TouchType) bool {
+	if p.confirm.Visible {
+		return p.confirm.HandleTouch(x, y, touchType)
+	}
 	if p.keyboard.isVisible {
 		return p.keyboard.HandleTouch(x, y, touchType)
 	}
@@ -133,6 +168,28 @@ func (p *CloudInvitePage) HandleTouch(x, y int, touchType TouchType) bool {
 	if x >= 24 && x <= 456 && y >= 200 && y <= 250 {
 		if touchType == TouchUp {
 			_ = p.preview()
+		}
+		return true
+	}
+
+	// 预览卡片点击 -> 确认连接
+	if p.previewResp != nil && x >= 24 && x <= 456 && y >= 300 && y <= 410 {
+		if touchType == TouchUp {
+			code := strings.TrimSpace(p.codeInput.GetText())
+			nodeID := strings.TrimSpace(p.previewResp.Node.NodeID)
+			p.confirm = ConfirmDialog{
+				Visible: true,
+				Title:   "连接私有分享节点",
+				Message: "确定使用邀请码连接该节点？\nNodeID: " + nodeID,
+				ConfirmText: "连接",
+				CancelText:  "取消",
+				OnConfirm: func() {
+					if p.services != nil {
+						_ = p.services.ConnectInvite(code)
+					}
+					_ = p.pm.NavigateTo("cloud_status")
+				},
+			}
 		}
 		return true
 	}

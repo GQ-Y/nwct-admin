@@ -2,6 +2,8 @@ package display
 
 import (
 	"fmt"
+	"strings"
+	"time"
 )
 
 // CloudPage 云平台入口：Totoro 云 / 公开节点 / 私有邀请码
@@ -92,6 +94,9 @@ type CloudStatusPage struct {
 	navBar   *NavBar
 	pm       *PageManager
 	services *AppServices
+
+	lastLatency int
+	lastLatencyAt time.Time
 }
 
 func NewCloudStatusPage(pm *PageManager) *CloudStatusPage {
@@ -118,17 +123,96 @@ func (p *CloudStatusPage) Render(g *Graphics) error {
 		_ = g.DrawTextTTF("无法获取状态: "+fmt.Sprintf("%v", err), 24, 92, ColorErrorRed, 14, FontWeightRegular)
 		return nil
 	}
-	_ = g.DrawTextTTF(fmt.Sprintf("Connected: %v", st.Connected), 24, 92, ColorTextPrimary, 16, FontWeightRegular)
-	_ = g.DrawTextTTF("Server: "+st.Server, 24, 120, ColorTextSecondary, 14, FontWeightRegular)
-	_ = g.DrawTextTTF("PID: "+fmt.Sprintf("%d", st.PID), 24, 146, ColorTextSecondary, 14, FontWeightRegular)
+
+	// 顶部状态卡片
+	cardX, cardY, cardW, cardH := 24, 92, 432, 150
+	g.DrawRectRounded(cardX, cardY, cardW, cardH, 18, ColorPressed)
+	statusTxt := "未连接"
+	statusColor := ColorErrorRed
+	if st.Connected {
+		statusTxt = "已连接"
+		statusColor = ColorSuccessGreen
+	}
+	_ = g.DrawTextTTF("连接状态", cardX+16, cardY+22, ColorTextPrimary, 16, FontWeightMedium)
+	_ = g.DrawTextTTF(statusTxt, cardX+16, cardY+52, statusColor, 22, FontWeightMedium)
+
+	mode := ""
+	if p.services != nil && p.services.Config != nil {
+		mode = string(p.services.Config.FRPServer.Mode)
+	}
+	modeCN := map[string]string{
+		"builtin": "Totoro 云服务",
+		"public":  "公开/私有分享节点",
+		"manual":  "手动节点",
+	}[strings.TrimSpace(mode)]
+	if modeCN == "" {
+		modeCN = "未知"
+	}
+	_ = g.DrawTextTTF("模式: "+modeCN, cardX+16, cardY+84, ColorTextSecondary, 14, FontWeightRegular)
+
+	server := strings.TrimSpace(st.Server)
+	if server == "" && p.services.Config != nil {
+		server = strings.TrimSpace(p.services.Config.FRPServer.Server)
+	}
+	if server == "" {
+		server = "—"
+	}
+	_ = g.DrawTextTTF("节点: "+server, cardX+16, cardY+110, ColorTextSecondary, 14, FontWeightRegular)
+
+	// 支持协议（基于当前 Active 能力字段）
+	protos := []string{"TCP", "UDP"}
+	if p.services.Config != nil && p.services.Config.FRPServer.HTTPEnabled {
+		protos = append(protos, "HTTP")
+	}
+	if p.services.Config != nil && p.services.Config.FRPServer.HTTPSEnabled {
+		protos = append(protos, "HTTPS")
+	}
+	_ = g.DrawTextTTF("支持协议: "+strings.Join(protos, "/"), cardX+16, cardY+136, ColorTextSecondary, 14, FontWeightRegular)
+
+	// 延迟卡片
+	latY := 260
+	g.DrawRectRounded(24, latY, 432, 90, 18, ColorPressed)
+	_ = g.DrawTextTTF("延迟", 40, latY+20, ColorTextPrimary, 16, FontWeightMedium)
+	lat := p.latencyText()
+	_ = g.DrawTextTTF(lat, 40, latY+52, ColorTextSecondary, 18, FontWeightMedium)
+
 	if st.LastError != "" {
-		_ = g.DrawTextTTF("LastError: "+st.LastError, 24, 174, ColorErrorRed, 12, FontWeightRegular)
+		_ = g.DrawTextTTF("错误: "+st.LastError, 24, 370, ColorErrorRed, 12, FontWeightRegular)
 	}
 	return nil
 }
 
 func (p *CloudStatusPage) HandleTouch(x, y int, touchType TouchType) bool {
 	return p.navBar.HandleTouch(x, y, touchType)
+}
+
+func (p *CloudStatusPage) Update(deltaTime int64) {
+	if p.services == nil || p.services.Config == nil {
+		return
+	}
+	// 每 2 秒刷新一次延迟
+	if !p.lastLatencyAt.IsZero() && time.Since(p.lastLatencyAt) < 2*time.Second {
+		return
+	}
+	p.lastLatencyAt = time.Now()
+
+	server := strings.TrimSpace(p.services.Config.FRPServer.Server)
+	if server == "" {
+		p.lastLatency = -1
+		return
+	}
+	if ms, err := p.services.MeasureLatencyToServer(server); err == nil {
+		p.lastLatency = ms
+	} else {
+		p.lastLatency = -1
+	}
+}
+
+func (p *CloudStatusPage) latencyText() string {
+	if p.lastLatency <= 0 {
+		return "—"
+	}
+	return fmt.Sprintf("%d ms", p.lastLatency)
 }
 
 

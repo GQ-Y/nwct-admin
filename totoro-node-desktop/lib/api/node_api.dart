@@ -186,6 +186,7 @@ class NodeApiClient {
     required String description,
     required String domainSuffix,
   }) async {
+    _requireNodeKeyIfNeeded();
     final res = await http.post(
       _uri('/api/v1/node/config'),
       headers: _headers(includeNodeKey: true),
@@ -204,9 +205,13 @@ class NodeApiClient {
     return <String, dynamic>{'ok': true};
   }
 
-  void _requireNodeKey() {
+  void _requireNodeKeyIfNeeded() {
+    // 后端规则：
+    // - 若节点启用了 X-Admin-Key（桌面端会携带），则 updateConfig/createInvite/revokeInvite 可不带 X-Node-Key
+    // - 若未启用 AdminKey，则仍需要 X-Node-Key
+    if (adminKey.trim().isNotEmpty) return;
     if (nodeKey.trim().isEmpty) {
-      throw ApiException(message: '缺少 X-Node-Key（敏感操作需要）');
+      throw ApiException(message: '缺少 X-Node-Key（未设置 AdminKey 时敏感操作需要）');
     }
   }
 
@@ -215,7 +220,7 @@ class NodeApiClient {
     required int maxUses,
     required String scopeJson,
   }) async {
-    _requireNodeKey();
+    _requireNodeKeyIfNeeded();
     final res = await http.post(
       _uri('/api/v1/node/invites'),
       headers: _headers(includeNodeKey: true),
@@ -270,7 +275,7 @@ class NodeApiClient {
   }
 
   Future<Map<String, dynamic>> revokeInvite({required String inviteId}) async {
-    _requireNodeKey();
+    _requireNodeKeyIfNeeded();
     final id = inviteId.trim();
     if (id.isEmpty) throw ApiException(message: 'invite_id 不能为空');
     final res = await http.post(

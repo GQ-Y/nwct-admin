@@ -427,7 +427,7 @@ class _ConnectionDialogState extends State<_ConnectionDialog> {
               HarmonyField(
                 controller: baseUrl,
                 label: 'Node API Base URL',
-                hintText: '例如 http://127.0.0.1:18080',
+                hintText: '例如 http://127.0.0.1:18081',
               ),
               const SizedBox(height: 12),
               HarmonyField(controller: adminKey, label: 'X-Admin-Key（可选）'),

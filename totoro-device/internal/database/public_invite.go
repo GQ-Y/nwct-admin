@@ -55,4 +55,12 @@ func GetPublicInviteCode(db *sql.DB) (string, error) {
 	return cryptobox.DecryptLocal(crypto.PrivKeyB64, nonce, ct)
 }
 
+func ClearPublicInviteCode(db *sql.DB) error {
+	if db == nil {
+		return fmt.Errorf("数据库未初始化")
+	}
+	_, err := db.Exec(`DELETE FROM public_invite WHERE id=1`)
+	return err
+}
+
 

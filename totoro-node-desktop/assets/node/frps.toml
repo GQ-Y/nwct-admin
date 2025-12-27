@@ -1,0 +1,5 @@
+bindPort = 7001
+
+# 为了先跑通 Totoro 票据鉴权（meta_totoro_ticket），这里不启用 frp 自带 token 校验。
+# 生产环境建议开启 auth，并对接你自己的策略。
+

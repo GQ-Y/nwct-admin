@@ -18,7 +18,7 @@ class AppController extends ChangeNotifier {
   static const _kDraftDomainSuffix = 'draft_domain_suffix';
   static const _kDraftDescription = 'draft_description';
 
-  String baseUrl = 'http://127.0.0.1:18080';
+  String baseUrl = 'http://127.0.0.1:18081';
   String adminKey = '';
   String nodeKey = '';
 

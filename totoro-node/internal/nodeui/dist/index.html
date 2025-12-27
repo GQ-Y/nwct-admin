@@ -19,7 +19,7 @@
     <div class="hint">
       这是 Linux 节点的最小管理面板：查看/修改节点配置、切换公开、设置 bridge、生成邀请码。<br/>
       <b>X-Admin-Key</b>：仅用于保护本管理面板/API（对应环境变量 TOTOTO_NODE_ADMIN_KEY）。若节点配置了该值，则这里必须填写才能操作。<br/>
-      <b>X-Node-Key</b>：节点的密钥（对应环境变量 TOTOTO_NODE_KEY），用于“保存配置/生成邀请码/撤销邀请码”等敏感操作的签名校验。<br/>
+      <b>X-Node-Key</b>：节点的密钥（用于“保存配置/生成邀请码/撤销邀请码”等敏感操作的签名校验）。若从本机访问（127.0.0.1/::1），可不填写。<br/>
       <b>BridgeURL</b>：桥梁平台地址（例如 http://127.0.0.1:18090），用于节点上报 & 通过桥梁生成/撤销邀请码（符合你的业务逻辑）。
     </div>
 
@@ -27,7 +27,7 @@
       <label>AdminKey</label>
       <input id="adminKey" placeholder="X-Admin-Key（可选）" />
       <label>NodeKey</label>
-      <input id="nodeKey" placeholder="X-Node-Key（更新配置需要）" />
+      <input id="nodeKey" placeholder="X-Node-Key（可选，本机访问可不填）" />
       <button class="secondary" onclick="loadCfg()">刷新配置</button>
     </div>
 

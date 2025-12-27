@@ -2,6 +2,7 @@ package display
 
 import (
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"runtime"
@@ -338,6 +339,123 @@ func (s *AppServices) SetScreenOffSeconds(sec int) error {
 	_ = s.Config.Save()
 	s.mu.Unlock()
 	return nil
+}
+
+func (s *AppServices) ConnectPublicNode(nodeID string) error {
+	nodeID = strings.TrimSpace(nodeID)
+	if nodeID == "" {
+		return fmt.Errorf("node_id 不能为空")
+	}
+	if s.Config == nil {
+		return fmt.Errorf("config 未初始化")
+	}
+	if s.FRP == nil {
+		return fmt.Errorf("FRP 未初始化")
+	}
+	db := database.GetDB()
+	if db == nil {
+		return fmt.Errorf("数据库未初始化")
+	}
+
+	var res *bridgeclient.PublicNodeConnectResp
+	err := s.RegisterBridgeAndRetryOn401(func(bc *bridgeclient.Client) error {
+		r, e := bc.ConnectPublicNode(nodeID)
+		if e != nil {
+			return e
+		}
+		res = r
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	if res == nil || len(res.Node.Endpoints) == 0 {
+		return fmt.Errorf("桥梁未返回 endpoints")
+	}
+	ep := res.Node.Endpoints[0]
+
+	s.Config.FRPServer.Mode = appcfg.FRPModePublic
+	s.Config.FRPServer.Public.LastResolveError = ""
+	s.Config.FRPServer.Public.Server = fmt.Sprintf("%s:%d", strings.TrimSpace(ep.Addr), ep.Port)
+	s.Config.FRPServer.Public.TotoroTicket = strings.TrimSpace(res.ConnectionTicket)
+	s.Config.FRPServer.Public.TicketExpiresAt = strings.TrimSpace(res.ExpiresAt)
+	s.Config.FRPServer.Public.Token = ""
+	s.Config.FRPServer.Public.DomainSuffix = strings.TrimPrefix(strings.TrimSpace(res.Node.DomainSuffix), ".")
+	s.Config.FRPServer.Public.HTTPEnabled = res.Node.HTTPEnabled
+	s.Config.FRPServer.Public.HTTPSEnabled = res.Node.HTTPSEnabled
+	s.Config.FRPServer.SyncActiveFromMode()
+	_ = s.Config.Save()
+
+	// 记录选择：node_id 优先于 invite_code
+	_ = database.SetPublicNodeID(db, nodeID)
+	_ = database.ClearPublicInviteCode(db)
+
+	return s.FRP.Connect()
+}
+
+func (s *AppServices) ConnectInvite(code string) error {
+	code = strings.TrimSpace(code)
+	if code == "" {
+		return fmt.Errorf("邀请码不能为空")
+	}
+	if s.Config == nil {
+		return fmt.Errorf("config 未初始化")
+	}
+	if s.FRP == nil {
+		return fmt.Errorf("FRP 未初始化")
+	}
+	db := database.GetDB()
+	if db == nil {
+		return fmt.Errorf("数据库未初始化")
+	}
+
+	var res *bridgeclient.RedeemResp
+	err := s.RegisterBridgeAndRetryOn401(func(bc *bridgeclient.Client) error {
+		r, e := bc.RedeemInvite(code)
+		if e != nil {
+			return e
+		}
+		res = r
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	if res == nil || len(res.Node.Endpoints) == 0 {
+		return fmt.Errorf("桥梁未返回 endpoints")
+	}
+	ep := res.Node.Endpoints[0]
+
+	s.Config.FRPServer.Mode = appcfg.FRPModePublic
+	s.Config.FRPServer.Public.LastResolveError = ""
+	s.Config.FRPServer.Public.Server = fmt.Sprintf("%s:%d", strings.TrimSpace(ep.Addr), ep.Port)
+	s.Config.FRPServer.Public.TotoroTicket = strings.TrimSpace(res.ConnectionTicket)
+	s.Config.FRPServer.Public.TicketExpiresAt = strings.TrimSpace(res.ExpiresAt)
+	s.Config.FRPServer.Public.Token = ""
+	s.Config.FRPServer.Public.DomainSuffix = strings.TrimPrefix(strings.TrimSpace(res.Node.DomainSuffix), ".")
+	s.Config.FRPServer.Public.HTTPEnabled = res.Node.HTTPEnabled
+	s.Config.FRPServer.Public.HTTPSEnabled = res.Node.HTTPSEnabled
+	s.Config.FRPServer.SyncActiveFromMode()
+	_ = s.Config.Save()
+
+	_ = database.SetPublicInviteCode(db, code)
+	_ = database.ClearPublicNodeID(db)
+
+	return s.FRP.Connect()
+}
+
+func (s *AppServices) MeasureLatencyToServer(addr string) (int, error) {
+	addr = strings.TrimSpace(addr)
+	if addr == "" {
+		return 0, fmt.Errorf("addr empty")
+	}
+	start := time.Now()
+	conn, err := net.DialTimeout("tcp", addr, 900*time.Millisecond)
+	if err != nil {
+		return 0, err
+	}
+	_ = conn.Close()
+	return int(time.Since(start).Milliseconds()), nil
 }
 
 func (s *AppServices) GetBridgeSession() (*database.BridgeSession, error) {

@@ -8,6 +8,7 @@ import 'app.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
   if (Platform.isWindows) {
     doWhenWindowReady(() {
       // Keep consistent with macOS minSize, and ensure layouts never get cramped.

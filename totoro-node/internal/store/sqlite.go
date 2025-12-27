@@ -24,30 +24,30 @@ type NodeEndpoint struct {
 }
 
 type NodeConfig struct {
-	NodeID       string   `json:"node_id"`
-	NodeKey      string   `json:"node_key"` // 仅用于运行期；落库只存 hash
-	Public       bool     `json:"public"`
-	Name         string   `json:"name"`
-	Description  string   `json:"description"`
-	Region       string   `json:"region"`
-	ISP          string   `json:"isp"`
-	Tags         []string `json:"tags"`
-	BridgeURL    string   `json:"bridge_url"`
-	DomainSuffix string   `json:"domain_suffix"`
-	HTTPEnabled  bool     `json:"http_enabled"`
-	HTTPSEnabled bool     `json:"https_enabled"`
+	NodeID       string         `json:"node_id"`
+	NodeKey      string         `json:"node_key"` // 仅用于运行期；落库只存 hash
+	Public       bool           `json:"public"`
+	Name         string         `json:"name"`
+	Description  string         `json:"description"`
+	Region       string         `json:"region"`
+	ISP          string         `json:"isp"`
+	Tags         []string       `json:"tags"`
+	BridgeURL    string         `json:"bridge_url"`
+	DomainSuffix string         `json:"domain_suffix"`
+	HTTPEnabled  bool           `json:"http_enabled"`
+	HTTPSEnabled bool           `json:"https_enabled"`
 	Endpoints    []NodeEndpoint `json:"endpoints"`
 }
 
 type Invite struct {
-	InviteID   string `json:"invite_id"`
-	Code       string `json:"code"`
-	Revoked    bool   `json:"revoked"`
-	CreatedAt  string `json:"created_at"`
-	ExpiresAt  string `json:"expires_at"`
-	MaxUses    int    `json:"max_uses"`
-	Used       int    `json:"used"`
-	ScopeJSON  string `json:"scope_json"`
+	InviteID  string `json:"invite_id"`
+	Code      string `json:"code"`
+	Revoked   bool   `json:"revoked"`
+	CreatedAt string `json:"created_at"`
+	ExpiresAt string `json:"expires_at"`
+	MaxUses   int    `json:"max_uses"`
+	Used      int    `json:"used"`
+	ScopeJSON string `json:"scope_json"`
 }
 
 func Open(path string) (*Store, error) {
@@ -140,13 +140,13 @@ SELECT node_id,node_key_hash,node_key_plain,public,name,description,region,isp,t
 FROM node_config WHERE id=1
 `)
 	var (
-		cfg          NodeConfig
-		keyHash      string
-		keyPlain     string
-		publicInt    int
-		httpInt      int
-		httpsInt     int
-		tagsJSON     string
+		cfg           NodeConfig
+		keyHash       string
+		keyPlain      string
+		publicInt     int
+		httpInt       int
+		httpsInt      int
+		tagsJSON      string
 		endpointsJSON string
 	)
 	if err := row.Scan(&cfg.NodeID, &keyHash, &keyPlain, &publicInt, &cfg.Name, &cfg.Description, &cfg.Region, &cfg.ISP, &tagsJSON, &cfg.BridgeURL, &cfg.DomainSuffix, &httpInt, &httpsInt, &endpointsJSON); err != nil {
@@ -170,6 +170,20 @@ func (s *Store) UpdateNodeConfig(adminNodeKey string, patch NodeConfig) error {
 		return fmt.Errorf("node_key invalid")
 	}
 
+	return s.updateNodeConfigUnlocked(cfg, patch)
+}
+
+// UpdateNodeConfigAsAdmin 在“已通过 X-Admin-Key 鉴权”的前提下更新配置（不要求 X-Node-Key）。
+// 注意：不会修改 node_id / node_key_hash / node_key_plain。
+func (s *Store) UpdateNodeConfigAsAdmin(patch NodeConfig) error {
+	cfg, _, err := s.GetNodeConfig()
+	if err != nil {
+		return err
+	}
+	return s.updateNodeConfigUnlocked(cfg, patch)
+}
+
+func (s *Store) updateNodeConfigUnlocked(cfg NodeConfig, patch NodeConfig) error {
 	// merge
 	if patch.Name != "" {
 		cfg.Name = patch.Name
@@ -205,7 +219,7 @@ func (s *Store) UpdateNodeConfig(adminNodeKey string, patch NodeConfig) error {
 	now := time.Now().Unix()
 	tags, _ := json.Marshal(cfg.Tags)
 	eps, _ := json.Marshal(cfg.Endpoints)
-	_, err = s.db.Exec(`
+	_, err := s.db.Exec(`
 UPDATE node_config
 SET public=?,name=?,description=?,region=?,isp=?,tags_json=?,bridge_url=?,domain_suffix=?,http_enabled=?,https_enabled=?,endpoints_json=?,updated_at=?
 WHERE id=1
@@ -370,12 +384,12 @@ SELECT invite_id, revoked, created_at, expires_at, max_uses, used, scope_json
 FROM invites WHERE code_hash=?
 `, ch)
 	var (
-		inviteID string
-		revoked  int
+		inviteID  string
+		revoked   int
 		createdAt int64
 		expiresAt int64
-		maxUses int
-		used int
+		maxUses   int
+		used      int
 		scopeJSON string
 	)
 	if err := row.Scan(&inviteID, &revoked, &createdAt, &expiresAt, &maxUses, &used, &scopeJSON); err != nil {
@@ -416,5 +430,3 @@ func boolToInt(v bool) int {
 	}
 	return 0
 }
-
-

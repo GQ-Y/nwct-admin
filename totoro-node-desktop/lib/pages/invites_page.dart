@@ -87,7 +87,14 @@ class _InvitesPageState extends State<InvitesPage> {
                         c.inviteTtlDays = t;
                         c.inviteMaxUses = m;
                         await c.persist();
-                        await c.createInvite();
+                        try {
+                          await c.createInvite();
+                        } catch (_) {
+                          // AppController 内部已把错误写入 output；这里不再强行提示成功
+                          if (!context.mounted) return;
+                          showToast(context, '生成失败');
+                          return;
+                        }
                         if (!context.mounted) return;
                         showToast(context, '已生成');
                       },
