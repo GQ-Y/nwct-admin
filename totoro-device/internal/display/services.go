@@ -2,6 +2,8 @@ package display
 
 import (
 	"fmt"
+	"os"
+	"runtime"
 	"strings"
 	"sync"
 
@@ -65,6 +67,10 @@ func (s *AppServices) ConnectWiFi(ssid, password string) error {
 		s.mu.Lock()
 		defer s.mu.Unlock()
 
+		// 选择 WiFi 作为主网络接口（重启后依旧优先 WiFi）
+		s.Config.Network.Interface = "wlan0"
+		s.Config.Network.IPMode = "dhcp"
+
 		// 更新/追加 profile
 		found := false
 		for i := range s.Config.Network.WiFiProfiles {
@@ -98,9 +104,9 @@ func (s *AppServices) ForgetWiFi(ssid string) error {
 	if s.Config == nil {
 		return fmt.Errorf("config 未初始化")
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
 
+	// 1) 删除保存的 profile（包含密码）
+	s.mu.Lock()
 	out := make([]appcfg.WiFiProfile, 0, len(s.Config.Network.WiFiProfiles))
 	for _, p := range s.Config.Network.WiFiProfiles {
 		if strings.TrimSpace(p.SSID) != ssid {
@@ -108,7 +114,67 @@ func (s *AppServices) ForgetWiFi(ssid string) error {
 		}
 	}
 	s.Config.Network.WiFiProfiles = out
-	return s.Config.Save()
+	// 旧字段也同步清空（避免残留）
+	if strings.TrimSpace(s.Config.Network.WiFi.SSID) == ssid {
+		s.Config.Network.WiFi.SSID = ""
+		s.Config.Network.WiFi.Password = ""
+		s.Config.Network.WiFi.Security = ""
+	}
+	_ = s.Config.Save()
+	s.mu.Unlock()
+
+	// 2) 立即断开 WiFi（忘记 WiFi 应该断开连接）
+	if s.Network != nil {
+		_ = s.Network.DisconnectWiFi() // best-effort
+	}
+
+	// 3) 有以太网时优先回落到以太网（DHCP）
+	// - Linux: 通过 /sys/class/net/eth0/carrier 判断是否插网线
+	if runtime.GOOS == "linux" && s.Network != nil {
+		if carrierUp("/sys/class/net/eth0/carrier") {
+			_ = s.ApplyDHCP("eth0", strings.TrimSpace(s.Config.Network.DNS))
+		}
+	}
+
+	return nil
+}
+
+func carrierUp(path string) bool {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	return strings.TrimSpace(string(b)) == "1"
+}
+
+func (s *AppServices) ApplyDHCP(iface, dns string) error {
+	if s.Network == nil {
+		return fmt.Errorf("network manager 未初始化")
+	}
+	iface = strings.TrimSpace(iface)
+	if iface == "" {
+		iface = "eth0"
+	}
+	cfg := network.ApplyConfig{
+		Interface: iface,
+		IPMode:    "dhcp",
+		DNS:       strings.TrimSpace(dns),
+	}
+	if err := s.Network.ApplyNetworkConfig(cfg); err != nil {
+		return err
+	}
+	// 写入 config
+	if s.Config != nil {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		s.Config.Network.Interface = iface
+		s.Config.Network.IPMode = "dhcp"
+		if cfg.DNS != "" {
+			s.Config.Network.DNS = cfg.DNS
+		}
+		_ = s.Config.Save()
+	}
+	return nil
 }
 
 func (s *AppServices) ApplyStaticIP(iface, ip, netmask, gateway, dns string) error {
@@ -174,5 +240,3 @@ func (s *AppServices) UpdateTunnel(oldName string, t *frp.Tunnel) error {
 	}
 	return s.FRP.UpdateTunnel(oldName, t)
 }
-
-

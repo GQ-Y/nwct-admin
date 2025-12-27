@@ -1103,10 +1103,10 @@ func (s *Server) handleWiFiProfilesList(c *gin.Context) {
 	if list == nil {
 		list = []config.WiFiProfile{}
 	}
-	// 出于安全考虑：不返回密码
+	includePassword := strings.EqualFold(c.Query("include_password"), "true") || c.Query("include_password") == "1"
 	out := make([]gin.H, 0, len(list))
 	for _, p := range list {
-		out = append(out, gin.H{
+		h := gin.H{
 			"ssid":            p.SSID,
 			"security":        p.Security,
 			"auto_connect":    p.AutoConnect,
@@ -1114,7 +1114,11 @@ func (s *Server) handleWiFiProfilesList(c *gin.Context) {
 			"last_success_at": p.LastSuccessAt,
 			"last_tried_at":   p.LastTriedAt,
 			"last_error":      p.LastError,
-		})
+		}
+		if includePassword {
+			h["password"] = p.Password
+		}
+		out = append(out, h)
 	}
 	c.JSON(http.StatusOK, models.SuccessResponse(gin.H{"profiles": out}))
 }
@@ -1197,7 +1201,28 @@ func (s *Server) handleWiFiProfilesDelete(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse(500, "保存失败: "+err.Error()))
 		return
 	}
+
+	// 忘记 WiFi：立刻断开 WiFi，并在检测到以太网插线时回落到 eth0 DHCP
+	_ = s.netManager.DisconnectWiFi()
+	if carrierUpSysfs("/sys/class/net/eth0/carrier") {
+		_ = s.netManager.ApplyNetworkConfig(network.ApplyConfig{
+			Interface: "eth0",
+			IPMode:    "dhcp",
+			DNS:       strings.TrimSpace(s.config.Network.DNS),
+		})
+		s.config.Network.Interface = "eth0"
+		s.config.Network.IPMode = "dhcp"
+		_ = s.config.Save()
+	}
 	c.JSON(http.StatusOK, models.SuccessResponse(gin.H{"message": "删除成功"}))
+}
+
+func carrierUpSysfs(path string) bool {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	return strings.TrimSpace(string(b)) == "1"
 }
 
 // handleWiFiScan 处理WiFi扫描请求

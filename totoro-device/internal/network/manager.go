@@ -16,6 +16,7 @@ import (
 type Manager interface {
 	GetInterfaces() ([]Interface, error)
 	ConfigureWiFi(ssid, password string) error
+	DisconnectWiFi() error
 	ScanWiFi(opts ScanWiFiOptions) ([]WiFiNetwork, error)
 	GetNetworkStatus() (*NetworkStatus, error)
 	TestConnection(target string) error
@@ -147,6 +148,74 @@ func (nm *networkManager) ConfigureWiFi(ssid, password string) error {
 	default:
 		return fmt.Errorf("当前系统不支持WiFi配置: %s", runtime.GOOS)
 	}
+}
+
+// DisconnectWiFi 断开当前 WiFi 连接（用于“忘记 WiFi”后立即断开）
+func (nm *networkManager) DisconnectWiFi() error {
+	switch runtime.GOOS {
+	case "linux":
+		ifaces, _ := nm.GetInterfaces()
+		wifiIface := pickWiFiInterfaceFromList(ifaces)
+		if strings.TrimSpace(wifiIface) == "" {
+			return fmt.Errorf("未找到 WiFi 接口")
+		}
+
+		// 优先 nmcli
+		if nm.hasCmd("nmcli") {
+			_, err := nm.runCmd(8*time.Second, "nmcli", "dev", "disconnect", wifiIface)
+			if err == nil {
+				return nil
+			}
+			// best-effort：继续尝试 fallback
+		}
+
+		// Buildroot fallback：wpa_cli
+		if nm.hasCmd("wpa_cli") {
+			_, _ = nm.runCmd(4*time.Second, "wpa_cli", "-i", wifiIface, "disconnect")
+			// terminate 会让 wpa_supplicant 退出（若存在）
+			_, _ = nm.runCmd(4*time.Second, "wpa_cli", "-i", wifiIface, "terminate")
+			return nil
+		}
+
+		// 最后兜底：接口 down
+		if nm.hasCmd("ip") {
+			_, err := nm.runCmd(4*time.Second, "ip", "link", "set", wifiIface, "down")
+			return err
+		}
+		if nm.hasCmd("ifconfig") {
+			_, err := nm.runCmd(4*time.Second, "ifconfig", wifiIface, "down")
+			return err
+		}
+		return fmt.Errorf("WiFi断开失败：系统缺少 nmcli/wpa_cli/ip/ifconfig")
+
+	case "darwin":
+		// macOS：不主动干预系统网络
+		return nil
+	default:
+		return nil
+	}
+}
+
+func pickWiFiInterfaceFromList(ifaces []Interface) string {
+	best := ""
+	for _, it := range ifaces {
+		name := strings.TrimSpace(it.Name)
+		typ := strings.TrimSpace(it.Type)
+		if name == "" {
+			continue
+		}
+		low := strings.ToLower(name)
+		if typ != "wifi" && !strings.HasPrefix(low, "wlan") && !strings.HasPrefix(low, "wl") {
+			continue
+		}
+		if name == "wlan0" {
+			return name
+		}
+		if best == "" {
+			best = name
+		}
+	}
+	return best
 }
 
 // ScanWiFi 扫描WiFi网络
@@ -372,8 +441,8 @@ func (nm *networkManager) applyStaticLinux(device, ip, netmask, gateway, dns str
 	ip = strings.TrimSpace(ip)
 	netmask = strings.TrimSpace(netmask)
 	gateway = strings.TrimSpace(gateway)
-	if ip == "" || netmask == "" || gateway == "" {
-		return fmt.Errorf("静态 IP 配置缺失（ip/netmask/gateway 必填）")
+	if ip == "" || netmask == "" {
+		return fmt.Errorf("静态 IP 配置缺失（ip/netmask 必填）")
 	}
 	prefix, err := netmaskToPrefix(netmask)
 	if err != nil {
@@ -391,8 +460,17 @@ func (nm *networkManager) applyStaticLinux(device, ip, netmask, gateway, dns str
 	if _, err := nm.runCmd(10*time.Second, "nmcli", "con", "mod", con, "ipv4.addresses", addr); err != nil {
 		return err
 	}
-	if _, err := nm.runCmd(10*time.Second, "nmcli", "con", "mod", con, "ipv4.gateway", gateway); err != nil {
-		return err
+	// gateway 可选：为空则尽量清空 gateway，并避免设置默认路由
+	if gateway != "" {
+		if _, err := nm.runCmd(10*time.Second, "nmcli", "con", "mod", con, "ipv4.gateway", gateway); err != nil {
+			return err
+		}
+		// 确保允许默认路由
+		_, _ = nm.runCmd(6*time.Second, "nmcli", "con", "mod", con, "ipv4.never-default", "no")
+	} else {
+		// best-effort：清空旧 gateway，避免残留
+		_, _ = nm.runCmd(6*time.Second, "nmcli", "con", "mod", con, "ipv4.gateway", "")
+		_, _ = nm.runCmd(6*time.Second, "nmcli", "con", "mod", con, "ipv4.never-default", "yes")
 	}
 	servers := nm.splitDNS(dns)
 	if len(servers) > 0 {
@@ -489,8 +567,8 @@ func (nm *networkManager) applyStaticLinuxFallback(device, ip, netmask, gateway,
 	ip = strings.TrimSpace(ip)
 	netmask = strings.TrimSpace(netmask)
 	gateway = strings.TrimSpace(gateway)
-	if ip == "" || netmask == "" || gateway == "" {
-		return fmt.Errorf("静态 IP 配置缺失（ip/netmask/gateway 必填）")
+	if ip == "" || netmask == "" {
+		return fmt.Errorf("静态 IP 配置缺失（ip/netmask 必填）")
 	}
 	prefix, err := netmaskToPrefix(netmask)
 	if err != nil {
@@ -506,8 +584,11 @@ func (nm *networkManager) applyStaticLinuxFallback(device, ip, netmask, gateway,
 		if _, err := nm.runCmd(6*time.Second, "ip", "addr", "add", addr, "dev", device); err != nil {
 			return err
 		}
-		if _, err := nm.runCmd(6*time.Second, "ip", "route", "replace", "default", "via", gateway, "dev", device); err != nil {
-			return err
+		// gateway 可选：为空则不设置默认路由
+		if gateway != "" {
+			if _, err := nm.runCmd(6*time.Second, "ip", "route", "replace", "default", "via", gateway, "dev", device); err != nil {
+				return err
+			}
 		}
 		nm.writeResolvConfBestEffort(dns)
 		return nil
@@ -518,13 +599,16 @@ func (nm *networkManager) applyStaticLinuxFallback(device, ip, netmask, gateway,
 		if _, err := nm.runCmd(6*time.Second, "ifconfig", device, ip, "netmask", netmask, "up"); err != nil {
 			return err
 		}
-		// 先删再加，避免重复 default
-		_, _ = nm.runCmd(3*time.Second, "route", "del", "default")
-		if _, err := nm.runCmd(6*time.Second, "route", "add", "default", "gw", gateway, device); err != nil {
-			// 有些 BusyBox 语法不带 device
-			_, err2 := nm.runCmd(6*time.Second, "route", "add", "default", "gw", gateway)
-			if err2 != nil {
-				return err
+		// gateway 可选：为空则不设置 default route
+		if gateway != "" {
+			// 先删再加，避免重复 default
+			_, _ = nm.runCmd(3*time.Second, "route", "del", "default")
+			if _, err := nm.runCmd(6*time.Second, "route", "add", "default", "gw", gateway, device); err != nil {
+				// 有些 BusyBox 语法不带 device
+				_, err2 := nm.runCmd(6*time.Second, "route", "add", "default", "gw", gateway)
+				if err2 != nil {
+					return err
+				}
 			}
 		}
 		nm.writeResolvConfBestEffort(dns)

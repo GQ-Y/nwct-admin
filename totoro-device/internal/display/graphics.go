@@ -517,6 +517,75 @@ func (g *Graphics) DrawTextTTF(text string, x, y int, c color.Color, size float6
 	return err
 }
 
+// DrawImageFitCenter 将图片按“等比缩放”绘制到以 (cx,cy) 为中心、最大宽高为 (maxW,maxH) 的区域内。
+// 坐标系为 480x480 逻辑坐标。
+func (g *Graphics) DrawImageFitCenter(img image.Image, cx, cy, maxW, maxH int) {
+	if img == nil || maxW <= 0 || maxH <= 0 {
+		return
+	}
+
+	bw := img.Bounds().Dx()
+	bh := img.Bounds().Dy()
+	if bw <= 0 || bh <= 0 {
+		return
+	}
+
+	// 计算等比缩放后的逻辑尺寸
+	sw := float64(maxW) / float64(bw)
+	sh := float64(maxH) / float64(bh)
+	s := sw
+	if sh < s {
+		s = sh
+	}
+	if s <= 0 {
+		return
+	}
+	w := int(math.Round(float64(bw) * s))
+	h := int(math.Round(float64(bh) * s))
+	if w <= 0 || h <= 0 {
+		return
+	}
+
+	x := cx - w/2
+	y := cy - h/2
+	g.drawImageNearest(img, x, y, w, h)
+}
+
+// drawImageNearest 使用最近邻缩放把 img 绘制到 buffer 上（目标区域为逻辑坐标 x,y,w,h）
+func (g *Graphics) drawImageNearest(img image.Image, x, y, w, h int) {
+	if img == nil || w <= 0 || h <= 0 {
+		return
+	}
+
+	// 目标区域转换为像素坐标
+	dx0 := g.sx(x)
+	dy0 := g.sy(y)
+	dw := g.sx(w)
+	dh := g.sy(h)
+	if dw <= 0 || dh <= 0 {
+		return
+	}
+
+	sb := img.Bounds()
+	sw := sb.Dx()
+	sh := sb.Dy()
+	if sw <= 0 || sh <= 0 {
+		return
+	}
+
+	for py := 0; py < dh; py++ {
+		sy := py * sh / dh
+		for px := 0; px < dw; px++ {
+			sx := px * sw / dw
+			c := color.RGBAModel.Convert(img.At(sb.Min.X+sx, sb.Min.Y+sy)).(color.RGBA)
+			if c.A == 0 {
+				continue
+			}
+			g.blendPixelRGBA(dx0+px, dy0+py, c)
+		}
+	}
+}
+
 // MeasureText 测量文本宽度
 func (g *Graphics) MeasureText(text string, size float64, weight FontWeight) int {
 	fm := GetFontManager()

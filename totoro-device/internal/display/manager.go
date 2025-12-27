@@ -42,6 +42,7 @@ func NewManagerWithServices(disp Display, services *AppServices) *Manager {
 	pm := NewPageManager()
 
 	// 创建所有页面
+	splashPage := NewSplashPage(pm)
 	statusPage := NewStatusPage()
 	settingsPage := NewSettingsPage(pm)
 	aboutPage := NewAboutPage(pm)
@@ -62,6 +63,7 @@ func NewManagerWithServices(disp Display, services *AppServices) *Manager {
 	tunnelEditPage.SetServices(services)
 
 	// 注册页面
+	pm.RegisterPage("splash", splashPage)
 	pm.RegisterPage("status", statusPage)
 	pm.RegisterPage("settings", settingsPage)
 	pm.RegisterPage("about", aboutPage)
@@ -77,8 +79,8 @@ func NewManagerWithServices(disp Display, services *AppServices) *Manager {
 		pm.NavigateTo("settings")
 	})
 
-	// 设置默认页面
-	pm.NavigateTo("status")
+	// 设置默认页面：先启动页（不入栈），再自动切到 status
+	_ = pm.SwitchTo("splash")
 
 	return &Manager{
 		display:     disp,

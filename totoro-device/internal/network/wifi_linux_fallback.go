@@ -11,6 +11,20 @@ import (
 	"time"
 )
 
+func decodeEscapedSSID(s string) string {
+	s = strings.TrimSpace(s)
+	// 处理形如 "\xe6\xb8\x85\xe9\x85\x92" 的 SSID（将其解码成 UTF-8）
+	// 只在检测到 \xNN 时触发，避免误处理正常字符串。
+	if !strings.Contains(s, `\x`) {
+		return s
+	}
+	// strconv.Unquote 支持 \xNN；为了兼容用户输入缺少引号，这里手动包一层双引号
+	if out, err := strconv.Unquote(`"` + s + `"`); err == nil && strings.TrimSpace(out) != "" {
+		return out
+	}
+	return s
+}
+
 func (nm *networkManager) pickWiFiInterface() string {
 	ifaces, err := nm.GetInterfaces()
 	if err == nil {
@@ -47,7 +61,7 @@ func (nm *networkManager) scanWiFiLinuxFallback(opts ScanWiFiOptions) ([]WiFiNet
 	)
 
 	flush := func() {
-		s := strings.TrimSpace(curSSID)
+		s := decodeEscapedSSID(curSSID)
 		if s == "" {
 			curSSID = ""
 			curSignal = nil
@@ -127,7 +141,7 @@ func (nm *networkManager) scanWiFiLinuxFallback(opts ScanWiFiOptions) ([]WiFiNet
 				if len(parts) < 5 {
 					continue
 				}
-				s := strings.TrimSpace(parts[4])
+				s := decodeEscapedSSID(parts[4])
 				if s == "" {
 					continue
 				}

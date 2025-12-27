@@ -21,6 +21,7 @@ import (
 	"totoro-device/internal/api"
 	"totoro-device/internal/bridgeclient"
 	"totoro-device/internal/database"
+	"totoro-device/internal/deviceboot"
 	"totoro-device/internal/display"
 	"totoro-device/internal/frp"
 	"totoro-device/internal/logger"
@@ -198,10 +199,16 @@ func autoConnectWiFi(cfg *config.Config, netManager network.Manager) {
 		return
 	}
 
-	// 如果当前已有 IP（有线或无线），就不折腾
-	if st, err := netManager.GetNetworkStatus(); err == nil {
-		if st.IP != "" && st.IP != "0.0.0.0" {
-			return
+	// 是否偏好 WiFi：如果用户选择的主接口是 wlan/wl，则即便有线已获取 IP 也会优先尝试 WiFi。
+	prefer := strings.ToLower(strings.TrimSpace(cfg.Network.Interface))
+	preferWiFi := strings.HasPrefix(prefer, "wlan") || strings.HasPrefix(prefer, "wl")
+
+	// 若不偏好 WiFi：当前已有 IP（有线或无线）就不折腾
+	if !preferWiFi {
+		if st, err := netManager.GetNetworkStatus(); err == nil {
+			if st.IP != "" && st.IP != "0.0.0.0" {
+				return
+			}
 		}
 	}
 
@@ -279,6 +286,9 @@ func main() {
 	}
 	defer logger.Close()
 	logger.Info("启动内网穿透盒子客户端...")
+
+	// 开机语音（不阻塞启动）
+	deviceboot.TryPlayBootAudio()
 
 	// 加载配置
 	cfg, err := config.LoadConfig()

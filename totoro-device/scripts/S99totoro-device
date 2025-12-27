@@ -19,6 +19,12 @@ export NWCT_CONFIG_PATH=/etc/nwct/config.json
 export NWCT_DB_PATH=/var/nwct/devices.db
 export NWCT_LOG_DIR=/var/log/nwct
 
+# 品牌与开机语音（设备侧可替换，无需重编译）
+# - /etc/nwct/branding.png：启动页 LOGO
+# - /etc/nwct/boot.mp3 或 /etc/nwct/boot.wav：开机语音（程序会自动探测可用播放器）
+export NWCT_BRANDING_PATH=${NWCT_BRANDING_PATH:-/etc/nwct/branding.png}
+export NWCT_BOOT_AUDIO_PATH=${NWCT_BOOT_AUDIO_PATH:-/etc/nwct/boot.mp3}
+
 start() {
   echo "Starting ${NAME}..."
   mkdir -p /var/run /var/log/nwct /var/nwct
