@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+  <!-- Tray icon: single 'T' mark. Keep it simple for macOS template rendering. -->
+  <path fill="#FFFFFF" d="M14 16c0-1.1.9-2 2-2h32c1.1 0 2 .9 2 2v6c0 1.1-.9 2-2 2h-11v26c0 1.1-.9 2-2 2h-6c-1.1 0-2-.9-2-2V26H16c-1.1 0-2-.9-2-2v-6zm8 2v4h20v-4H22z"/>
+</svg>
+

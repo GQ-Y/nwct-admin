@@ -10,6 +10,17 @@ class MainFlutterWindow: NSWindow {
 
     RegisterGeneratedPlugins(registry: flutterViewController)
 
+    // System metrics channel (network bytes)
+    let sysChannel = FlutterMethodChannel(name: "totoro/system", binaryMessenger: flutterViewController.engine.binaryMessenger)
+    sysChannel.setMethodCallHandler({ (call: FlutterMethodCall, result: @escaping FlutterResult) -> Void in
+      if call.method == "getNetworkBytes" {
+        let v = getNetworkBytes()
+        result(["rx": v.rx, "tx": v.tx])
+        return
+      }
+      result(FlutterMethodNotImplemented)
+    })
+
     // 更像“一个整体”的窗口：隐藏标题、标题栏透明，让 Flutter 背景延伸到顶部
     self.titleVisibility = .hidden
     self.titlebarAppearsTransparent = true
@@ -21,4 +32,36 @@ class MainFlutterWindow: NSWindow {
 
     super.awakeFromNib()
   }
+}
+
+private struct NetworkBytesValue {
+  let rx: Int64
+  let tx: Int64
+}
+
+private func getNetworkBytes() -> NetworkBytesValue {
+  var rx: Int64 = 0
+  var tx: Int64 = 0
+
+  var ifaddr: UnsafeMutablePointer<ifaddrs>? = nil
+  if getifaddrs(&ifaddr) != 0 {
+    return NetworkBytesValue(rx: 0, tx: 0)
+  }
+  defer { freeifaddrs(ifaddr) }
+
+  var ptr = ifaddr
+  while ptr != nil {
+    guard let ifa = ptr?.pointee else { break }
+    let flags = Int32(ifa.ifa_flags)
+    let isUp = (flags & IFF_UP) != 0
+    let isLoopback = (flags & IFF_LOOPBACK) != 0
+    if isUp && !isLoopback, let data = ifa.ifa_data {
+      let ifData = data.assumingMemoryBound(to: if_data.self).pointee
+      rx &+= Int64(ifData.ifi_ibytes)
+      tx &+= Int64(ifData.ifi_obytes)
+    }
+    ptr = ifa.ifa_next
+  }
+
+  return NetworkBytesValue(rx: rx, tx: tx)
 }

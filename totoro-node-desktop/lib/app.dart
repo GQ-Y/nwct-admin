@@ -8,6 +8,7 @@ import 'pages/connection_settings_page.dart';
 import 'pages/invites_page.dart';
 import 'pages/node_config_page.dart';
 import 'state/app_controller.dart';
+import 'state/tray_controller.dart';
 import 'theme/harmony_theme.dart';
 import 'widgets/harmony_widgets.dart';
 
@@ -20,15 +21,18 @@ class TotoroNodeDesktopApp extends StatefulWidget {
 
 class _TotoroNodeDesktopAppState extends State<TotoroNodeDesktopApp> {
   final AppController controller = AppController();
+  final TrayController tray = TrayController();
 
   @override
   void initState() {
     super.initState();
     controller.init();
+    tray.init();
   }
 
   @override
   void dispose() {
+    tray.dispose();
     controller.dispose();
     super.dispose();
   }

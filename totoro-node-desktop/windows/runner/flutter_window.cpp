@@ -2,7 +2,12 @@
 
 #include <optional>
 
+#include <flutter/method_channel.h>
+#include <flutter/standard_method_codec.h>
 #include "flutter/generated_plugin_registrant.h"
+
+#include <iphlpapi.h>
+#pragma comment(lib, "iphlpapi.lib")
 
 FlutterWindow::FlutterWindow(const flutter::DartProject& project)
     : project_(project) {}
@@ -26,6 +31,38 @@ bool FlutterWindow::OnCreate() {
   }
   RegisterPlugins(flutter_controller_->engine());
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
+
+  // System metrics channel (network bytes)
+  auto channel = std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
+      flutter_controller_->engine()->messenger(), "totoro/system",
+      &flutter::StandardMethodCodec::GetInstance());
+  channel->SetMethodCallHandler(
+      [](const flutter::MethodCall<flutter::EncodableValue>& call,
+         std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result) {
+        if (call.method_name() == "getNetworkBytes") {
+          ULONG rx = 0;
+          ULONG tx = 0;
+          MIB_IF_TABLE2* table = nullptr;
+          if (GetIfTable2(&table) == NO_ERROR && table != nullptr) {
+            for (ULONG i = 0; i < table->NumEntries; i++) {
+              const MIB_IF_ROW2& row = table->Table[i];
+              if (row.OperStatus != IfOperStatusUp) continue;
+              if (row.Type == IF_TYPE_SOFTWARE_LOOPBACK) continue;
+              rx += static_cast<ULONG>(row.InOctets);
+              tx += static_cast<ULONG>(row.OutOctets);
+            }
+            FreeMibTable(table);
+          }
+          flutter::EncodableMap m;
+          m[flutter::EncodableValue("rx")] = flutter::EncodableValue(static_cast<int64_t>(rx));
+          m[flutter::EncodableValue("tx")] = flutter::EncodableValue(static_cast<int64_t>(tx));
+          result->Success(flutter::EncodableValue(m));
+          return;
+        }
+        result->NotImplemented();
+      });
+  // Keep channel alive
+  system_channel_ = std::move(channel);
 
   flutter_controller_->engine()->SetNextFrameCallback([&]() {
     this->Show();
