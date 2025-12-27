@@ -28,10 +28,10 @@ func ApplySystemSettings(cfg *config.Config) {
 
 	// 设备名/hostname：让路由器/局域网里更容易识别（DHCP 会带 option 12）
 	// - cfg.Device.Name 允许包含空格，但 hostname 不允许：需要做规范化
-	// - 兼容老配置：若还是默认的 Luckfox，则强制更新为 Totoro S1 Pro
+	// - 兼容老配置：若还是默认的 Luckfox，则强制更新为编译期默认名（config.DefaultDeviceName）
 	name := strings.TrimSpace(cfg.Device.Name)
 	if name == "" || strings.EqualFold(name, "luckfox") {
-		name = "Totoro S1 Pro"
+		name = config.DefaultDeviceName
 		cfg.Device.Name = name
 		_ = cfg.Save() // best-effort
 	}
@@ -112,7 +112,7 @@ func runCmd(timeout time.Duration, name string, args ...string) error {
 func sanitizeHostname(name string) string {
 	name = strings.TrimSpace(name)
 	if name == "" {
-		return "Totoro-S1-Pro"
+		name = config.DefaultDeviceName
 	}
 	var b []rune
 	lastHyphen := false
@@ -136,12 +136,16 @@ func sanitizeHostname(name string) string {
 	}
 	s := strings.Trim(string(b), "-")
 	if s == "" {
-		s = "Totoro-S1-Pro"
+		s = strings.Trim(string(b), "-")
+		if s == "" {
+			// 最终兜底
+			s = "Totoro-S1"
+		}
 	}
 	if len(s) > 63 {
 		s = strings.TrimRight(s[:63], "-")
 		if s == "" {
-			s = "Totoro-S1-Pro"
+			s = "Totoro-S1"
 		}
 	}
 	return s

@@ -12,6 +12,12 @@ import (
 // DefaultBridgeURL 未显式配置（bridge.url / TOTOTO_BRIDGE_URL）时的内置桥梁地址
 const DefaultBridgeURL = "http://192.168.2.32:18090"
 
+// DefaultDeviceName 默认设备名称（会写入 config.json 的 device.name；DHCP/hostname 也会用到）
+// 可在编译时覆盖：
+//
+//	go build -ldflags "-X 'totoro-device/config.DefaultDeviceName=Totoro S1 Ultra'"
+var DefaultDeviceName = "Totoro S1 Pro"
+
 // Config 应用配置
 type Config struct {
 	Initialized bool            `json:"initialized"`
@@ -255,7 +261,7 @@ func DefaultConfig() *Config {
 		Initialized: false,
 		Device: DeviceConfig{
 			ID:   "DEV001",
-			Name: "Totoro S1 Pro",
+			Name: DefaultDeviceName,
 		},
 		Network: NetworkConfig{
 			Interface: "eth0",

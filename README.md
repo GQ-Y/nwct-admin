@@ -1,18 +1,31 @@
-## NWCT（内网穿透盒子）项目说明
+## NWCT（Totoro）项目说明
 
-本仓库包含两部分：
-- **后端/设备端**：`client-nps/`（Go，提供 API + WebSocket + 静态 Web 管理面板托管）
-- **前端 Web**：`client-web/`（React + Vite，构建产物会被 embed 进后端二进制）
+本仓库是 Totoro 内网穿透体系的单仓库实现，包含三类核心组件：
+- **设备端**：`totoro-device/`（Go，运行在 Luckfox 等设备上：API + WebSocket +（可选）屏幕 UI + FRP 客户端）
+- **节点端**：`totoro-node/`（Go，运行在 Linux 服务器/节点上：FRPS + 节点 API + WebUI）
+- **桥梁端**：`totoro-bridge/`（Go，提供设备注册/公开节点/邀请码兑换/票据签发等桥梁 API，并内嵌管理 WebUI）
 
-当前已实现 **单端口（默认 80）一体化部署**：只需要在开发板固件中放入一个 `client-nps` 可执行文件，即可通过 `http://设备IP/` 进入管理面板并完成初始化，同时同域访问 `/api/v1/*` 与 `/ws`。
+另外还有两个 Web 管理面板工程：
+- `totoro-device-web/`：设备端 WebUI（由 `totoro-device` embed 或独立部署）
+- `totoro-bridge-web/`：桥梁端 WebUI（由 `totoro-bridge` embed 或独立部署）
+
+桌面端仅用于“本机一键拉起 node”的便捷控制：
+- `totoro-node-desktop/`：Flutter 桌面端（保持现有 GitHub Actions 构建；Linux 节点部署不依赖 desktop）
 
 ---
 
-## 架构与访问入口
+## 架构与访问入口（默认）
 
-- **Web 管理面板**：`http://设备IP/`
-- **API Base**：`http://设备IP/api/v1`
-- **WebSocket**：`ws://设备IP/ws?token=...`
+- **totoro-device（设备端）**：
+  - 面板：`http://设备IP:18080/`（Luckfox 固件上建议用 18080 避免占用系统 80）
+  - API：`http://设备IP:18080/api/v1/*`
+  - WebSocket：`ws://设备IP:18080/ws`
+- **totoro-node（节点端）**：
+  - 节点 WebUI：`http://节点IP:18080/`
+  - 节点 API：`http://节点IP:18080/api/v1/*`
+- **totoro-bridge（桥梁端）**：
+  - 管理 WebUI：`http://桥梁IP:18090/`
+  - 桥梁 API：`http://桥梁IP:18090/api/v1/*`
 
 后端路由约定：
 - `/api/v1/*`：REST API（未命中返回 JSON 404，不会被前端 SPA “吞掉”）
@@ -21,85 +34,99 @@
 
 ---
 
-## 前端构建（会被 embed 到后端）
+## 设备端（totoro-device）构建与部署
 
-### 依赖安装
+### 两种编译产物（按硬件区分）
+- **Luckfox Pico Ultra（带屏）**：编译 **带屏版本**（build tag：`device_display`）
+- **Luckfox Pico Plus/Pro（无屏，仅网口）**：编译 **无屏版本**（默认，不带 tag）
 
-在 `client-web/`：
+### 一键部署到 Luckfox（脚本）
 
-```bash
-pnpm install
-```
-
-### 生产构建（必须执行，才能 embed 最新前端）
+在 `totoro-device/`：
 
 ```bash
-cd client-web
-pnpm build
+# 非交互式（推荐用于自动化/复制粘贴）：通过环境变量提供连接信息
+TARGET_HOST=192.168.2.174 TARGET_USER=root TARGET_PASS=luckfox DEVICE_MODEL=ultra bash ./deploy_luckfox.sh
 ```
 
-说明：
-- `pnpm build` 会把产物输出到 `client-nps/internal/webui/dist/`
-- 后端使用 `go:embed` 将该目录内的文件打进二进制
-
----
-
-## 后端构建（Go）
-
-在 `client-nps/`：
+或使用 **交互式输入**（脚本会提示输入 IP/账号/密码等；如果你已提前通过环境变量传入，则不会重复提问）：
 
 ```bash
-go build -o nwct-client .
+INTERACTIVE=1 bash ./deploy_luckfox.sh
 ```
 
-提示：
-- 默认监听 **80 端口**，需要具备绑定 80 的权限（例如 root / capabilities）
-- 如果你先 `go build`、后 `pnpm build`，前端变更不会进二进制；应先构建前端再构建后端
+- **Ultra**：`DEVICE_MODEL=ultra`（默认会带 `device_display` tag，并默认 `-display=true`）
+- **Plus/Pro**：`DEVICE_MODEL=plus` 或 `DEVICE_MODEL=pro`（默认无 tag、无 `-display` 参数）
 
----
+脚本的两种形式通过 `INTERACTIVE` 控制：
+- `INTERACTIVE=0`（默认）：非交互式，仅使用环境变量/脚本默认值
+- `INTERACTIVE=1`：交互式输入（stdin 不是 TTY 时会自动降级为非交互，避免卡住）
 
-## 运行/启动方式
+### 手动交叉编译（示例）
 
-### 本机运行（开发调试）
+- **带屏版本（Ultra）**：
 
 ```bash
-cd client-nps
-./nwct-client
+cd totoro-device
+GOOS=linux GOARCH=arm GOARM=7 CGO_ENABLED=0 go build -tags device_display -o bin/totoro-device_linux_armv7_display .
 ```
 
-访问：
-- 管理面板：`http://127.0.0.1/`
-- 初始化状态：`http://127.0.0.1/api/v1/config/init/status`
-
-### 开发板运行（固件内启动）
-
-将后端二进制写入固件并启动（示例）：
+- **无屏版本（Plus/Pro）**：
 
 ```bash
-./nwct-client
+cd totoro-device
+GOOS=linux GOARCH=arm GOARM=7 CGO_ENABLED=0 go build -o bin/totoro-device_linux_armv7 .
 ```
 
-然后在局域网浏览器打开：`http://设备IP/`
+### 运行（设备上）
+- 带屏版本：建议 `-display=true`（无屏版本不需要/也不会启用 UI）
 
----
+## 节点端（totoro-node）构建与部署（Linux）
 
-## 配置文件与关键参数
+Linux 节点不需要 `totoro-node-desktop`，只需要运行 `totoro-node` 并通过其 WebUI 管理。
+
+### 编译
+
+```bash
+cd totoro-node
+./build.sh linux amd64
+```
+
+产物在 `totoro-node/bin/`。
+
+### 运行（最小）
+首次运行会在可执行文件同目录生成 `.env`，按需修改即可：
+
+```bash
+./totoro-node
+```
+
+### 桥梁地址配置（节点侧）
+编辑同目录 `.env`：
+- `TOTOTO_BRIDGE_URL=http://192.168.2.32:18090`
+
+## 桥梁端（totoro-bridge）配置（仅 .env）
+
+桥梁端会在首次运行自动生成 `.env`（同目录），只需编辑 `.env` 即可完成配置：
+- `TOTOTO_BRIDGE_ADDR`（默认 `:18090`）
+- `TOTOTO_BRIDGE_DB`（默认 `./bridge.db`）
+- `TOTOTO_BRIDGE_ADMIN_KEY`（生产必填）
+- `TOTOTO_TICKET_TTL_DAYS`（默认 `30`）
+
+## 配置文件与关键参数（设备端）
 
 ### 配置文件路径
 
-后端启动时会加载配置（若不存在会写入默认配置）：
+`totoro-device` 启动时会加载配置（若不存在会写入默认配置）：
 - **Linux/开发板**：默认 `/etc/nwct/config.json`
-- **macOS/Windows 本地开发**：默认写到仓库根目录 `config.json`
+- **macOS 本地开发**：默认写到仓库根目录 `config.json`
 
 可通过环境变量覆盖：
 - **`NWCT_CONFIG_PATH`**：指定配置文件路径
 
-### 端口（统一前后端同端口）
-
-- 配置项：`config.json` → `server.port`
-- 当前仓库默认值：`80`
-
-> 若你修改了端口，请确保前端访问同源：生产环境会使用 `window.location.origin` 自动同源；开发环境可用 `VITE_API_BASE` 覆盖。
+### 端口
+- 设备端（Luckfox 固件）：推荐 `18080`（避免占用系统服务）
+- 配置项：`/etc/nwct/config.json` → `server.port`
 
 ### 日志目录
 
@@ -143,10 +170,8 @@ MQTT 配置：
 ---
 
 ## 常见操作（快速自检）
-
-- 检查服务是否启动：
-  - `curl http://127.0.0.1/api/v1/config/init/status`
-- 浏览器打开面板：
-  - `http://127.0.0.1/`
+- 设备端（本机/设备上）：`curl http://127.0.0.1:18080/api/v1/network/status`
+- 节点端：浏览器打开 `http://127.0.0.1:18080/`
+- 桥梁端：浏览器打开 `http://127.0.0.1:18090/`
 
 

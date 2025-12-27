@@ -1,5 +1,7 @@
 package display
 
+import "totoro-device/config"
+
 // AboutPage 关于设备详情页（鸿蒙浅色风格）
 type AboutPage struct {
 	BasePage
@@ -27,7 +29,7 @@ func (p *AboutPage) Render(g *Graphics) error {
 	p.navBar.Render(g)
 
 	// 设备主标题（品牌）
-	brand := "Totoro S1 Pro"
+	brand := config.DefaultDeviceName
 	brandSize := 30.0
 	brandTop := textTopForCenter(80, 48, brandSize)
 	_ = g.DrawTextTTF(brand, 24, brandTop, ColorTextPrimary, brandSize, FontWeightMedium)
@@ -41,7 +43,7 @@ func (p *AboutPage) Render(g *Graphics) error {
 		v string
 	}
 	items := []kv{
-		{"设备品牌", "Totoro S1 Pro"},
+		{"设备品牌", config.DefaultDeviceName},
 		{"作者", "Hook"},
 		{"邮箱", "1959595510@qq.com"},
 		{"固件版本", "20251225231"},
@@ -73,5 +75,3 @@ func (p *AboutPage) Render(g *Graphics) error {
 func (p *AboutPage) HandleTouch(x, y int, touchType TouchType) bool {
 	return p.navBar.HandleTouch(x, y, touchType)
 }
-
-
