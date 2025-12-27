@@ -41,7 +41,7 @@ class _ConnectionSettingsPageState extends State<ConnectionSettingsPage> {
                 style: TextStyle(fontWeight: FontWeight.w700),
               ),
               const SizedBox(height: 6),
-              const Text('http://127.0.0.1:18081'),
+              Text(c.baseUrl),
               const SizedBox(height: 14),
               HarmonyButton(
                 variant: HarmonyButtonVariant.outline,

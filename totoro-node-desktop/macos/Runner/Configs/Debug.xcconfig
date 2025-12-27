@@ -1,2 +1,5 @@
 #include "../../Flutter/Flutter-Debug.xcconfig"
 #include "Warnings.xcconfig"
+
+// See Release.xcconfig note
+CODE_SIGN_ALLOW_ENTITLEMENTS_MODIFICATION = YES

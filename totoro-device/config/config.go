@@ -255,15 +255,15 @@ func DefaultConfig() *Config {
 		Initialized: false,
 		Device: DeviceConfig{
 			ID:   "DEV001",
-			Name: "内网穿透盒子",
+			Name: "Totoro S1 Pro",
 		},
 		Network: NetworkConfig{
 			Interface: "eth0",
 			IPMode:    "dhcp",
 		},
 		System: SystemConfig{
-			Volume:          &defVol,
-			Brightness:      nil,
+			Volume:           &defVol,
+			Brightness:       nil,
 			ScreenOffSeconds: &defOff,
 		},
 		Bridge: BridgeConfig{

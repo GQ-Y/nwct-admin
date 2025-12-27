@@ -331,9 +331,16 @@ func (nm *networkManager) connectWiFiLinuxFallback(ssid, password string) error 
 	}
 
 	// DHCP 获取地址（-n：失败退出）
-	if _, err := nm.runCmd(20*time.Second, "udhcpc", "-i", iface, "-n", "-q", "-T", "3", "-t", "3"); err != nil {
+	args := []string{"-i", iface, "-n", "-q", "-T", "3", "-t", "3"}
+	if hn := strings.TrimSpace(nm.systemHostnameBestEffort()); hn != "" {
+		args = append(args, "-x", "hostname:"+hn)
+		args = append(args, "-F", hn)
+	}
+	if _, err := nm.runCmd(20*time.Second, "udhcpc", args...); err != nil {
 		return err
 	}
+	// 双网策略路由：有线优先 + WiFi 仍可达（避免双默认路由导致回包走错）
+	nm.ensureLinuxDualNetworkWiredPreferred()
 	return nil
 }
 

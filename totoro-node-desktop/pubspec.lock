@@ -192,14 +192,6 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "0.11.1"
-  menu_base:
-    dependency: transitive
-    description:
-      name: menu_base
-      sha256: "820368014a171bd1241030278e6c2617354f492f5c703d7b7d4570a6b8b84405"
-      url: "https://pub.dev"
-    source: hosted
-    version: "0.1.1"
   meta:
     dependency: transitive
     description:
@@ -216,6 +208,30 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "1.9.1"
+  path_provider:
+    dependency: "direct main"
+    description:
+      name: path_provider
+      sha256: "50c5dd5b6e1aaf6fb3a78b33f6aa3afca52bf903a8a5298f53101fdaee55bbcd"
+      url: "https://pub.dev"
+    source: hosted
+    version: "2.1.5"
+  path_provider_android:
+    dependency: transitive
+    description:
+      name: path_provider_android
+      sha256: f2c65e21139ce2c3dad46922be8272bb5963516045659e71bb16e151c93b580e
+      url: "https://pub.dev"
+    source: hosted
+    version: "2.2.22"
+  path_provider_foundation:
+    dependency: transitive
+    description:
+      name: path_provider_foundation
+      sha256: "6d13aece7b3f5c5a9731eaf553ff9dcbc2eff41087fd2df587fd0fed9a3eb0c4"
+      url: "https://pub.dev"
+    source: hosted
+    version: "2.5.1"
   path_provider_linux:
     dependency: transitive
     description:
@@ -312,14 +328,6 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "2.4.1"
-  shortid:
-    dependency: transitive
-    description:
-      name: shortid
-      sha256: d0b40e3dbb50497dad107e19c54ca7de0d1a274eb9b4404991e443dadb9ebedb
-      url: "https://pub.dev"
-    source: hosted
-    version: "0.1.2"
   sky_engine:
     dependency: transitive
     description: flutter
@@ -373,14 +381,6 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "0.7.7"
-  tray_manager:
-    dependency: "direct main"
-    description:
-      name: tray_manager
-      sha256: "80be6c508159a6f3c57983de795209ac13453e9832fd574143b06dceee188ed2"
-      url: "https://pub.dev"
-    source: hosted
-    version: "0.3.2"
   typed_data:
     dependency: transitive
     description:

@@ -78,6 +78,8 @@ popd >/dev/null
 echo "编译产物: ${OUT}"
 
 echo "[3/4] 上传到开发板: ${TARGET_USER}@${TARGET_HOST}:${TARGET_PATH}"
+# 直接覆盖：删除旧的，不保留备份
+ssh_cmd "rm -f '${TARGET_PATH}'"
 scp_cmd "${OUT}" "${TARGET_USER}@${TARGET_HOST}:${TARGET_PATH}"
 ssh_cmd "chmod +x '${TARGET_PATH}'"
 

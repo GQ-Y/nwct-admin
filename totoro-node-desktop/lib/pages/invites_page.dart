@@ -89,10 +89,9 @@ class _InvitesPageState extends State<InvitesPage> {
                         await c.persist();
                         try {
                           await c.createInvite();
-                        } catch (_) {
-                          // AppController 内部已把错误写入 output；这里不再强行提示成功
+                        } catch (e) {
                           if (!context.mounted) return;
-                          showToast(context, '生成失败');
+                          showToast(context, _errMsg(e));
                           return;
                         }
                         if (!context.mounted) return;
@@ -109,14 +108,29 @@ class _InvitesPageState extends State<InvitesPage> {
           title: const Text('邀请码列表'),
           extra: HarmonyButton(
             variant: HarmonyButtonVariant.ghost,
-            onPressed: c.loading ? null : c.refreshInvites,
+            onPressed: c.loading
+                ? null
+                : () async {
+                    try {
+                      await c.refreshInvites();
+                    } catch (e) {
+                      if (!context.mounted) return;
+                      showToast(context, _errMsg(e));
+                    }
+                  },
             child: const Text('刷新'),
           ),
           child: _InviteList(
             loading: c.loading,
             items: c.invites,
             onRevoke: (id) async {
-              await c.revokeInvite(id);
+              try {
+                await c.revokeInvite(id);
+              } catch (e) {
+                if (!context.mounted) return;
+                showToast(context, _errMsg(e));
+                return;
+              }
               if (!context.mounted) return;
               showToast(context, '已删除');
             },
@@ -129,6 +143,11 @@ class _InvitesPageState extends State<InvitesPage> {
         ),
       ],
     );
+  }
+
+  static String _errMsg(Object e) {
+    if (e is ApiException) return e.message;
+    return e.toString();
   }
 }
 

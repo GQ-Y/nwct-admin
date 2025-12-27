@@ -510,16 +510,8 @@ func (a *Router) handleNodeHeartbeat(c *gin.Context) {
 		return
 	}
 	if !ok {
-		exists, eerr := a.store.HasNodeAuth(nodeID)
-		if eerr != nil {
-			apiresp.Fail(c, http.StatusInternalServerError, 500, eerr.Error())
-			return
-		}
-		if exists {
-			apiresp.Fail(c, http.StatusUnauthorized, 401, "invalid node auth")
-			return
-		}
-		// 首次注册：绑定 node_id -> node_key
+		// 设计调整：开放节点自助上报。
+		// 若 bridge 已存在同名 node_id 但 key 不一致，允许以本次上报为准覆盖（例如节点重装/重置后）。
 		if err := a.store.UpsertNodeAuth(nodeID, nodeKey); err != nil {
 			apiresp.Fail(c, http.StatusInternalServerError, 500, err.Error())
 			return
@@ -654,8 +646,11 @@ func (a *Router) handleNodeInviteCreate(c *gin.Context) {
 		return
 	}
 	if !ok {
-		apiresp.Fail(c, http.StatusUnauthorized, 401, "invalid node auth")
-		return
+		// 与 heartbeat 一致：允许覆盖 node_key（节点重装/重置后）。
+		if uerr := a.store.UpsertNodeAuth(nodeID, nodeKey); uerr != nil {
+			apiresp.Fail(c, http.StatusInternalServerError, 500, uerr.Error())
+			return
+		}
 	}
 	var req nodeInviteCreateReq
 	_ = c.ShouldBindJSON(&req)
@@ -689,8 +684,11 @@ func (a *Router) handleNodeInviteRevoke(c *gin.Context) {
 		return
 	}
 	if !ok {
-		apiresp.Fail(c, http.StatusUnauthorized, 401, "invalid node auth")
-		return
+		// 与 heartbeat/create 保持一致：允许覆盖 node_key（节点重装/重置后）。
+		if uerr := a.store.UpsertNodeAuth(nodeID, nodeKey); uerr != nil {
+			apiresp.Fail(c, http.StatusInternalServerError, 500, uerr.Error())
+			return
+		}
 	}
 	var req nodeInviteRevokeReq
 	if err := c.ShouldBindJSON(&req); err != nil {

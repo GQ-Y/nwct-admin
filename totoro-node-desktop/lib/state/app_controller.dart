@@ -6,9 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../api/node_api.dart';
 
 class AppController extends ChangeNotifier {
-  static const _kBaseUrl = 'node_base_url';
-  static const _kAdminKey = 'node_admin_key';
-  static const _kNodeKey = 'node_node_key';
+  // 连接参数已内置（本机 Node API: 18081），不再持久化 baseUrl/adminKey/nodeKey
   static const _kInviteTtl = 'invite_ttl_seconds'; // legacy
   static const _kInviteTtlDays = 'invite_ttl_days';
   static const _kInviteMaxUses = 'invite_max_uses';
@@ -40,9 +38,10 @@ class AppController extends ChangeNotifier {
 
   Future<void> init() async {
     final p = await SharedPreferences.getInstance();
-    baseUrl = (p.getString(_kBaseUrl) ?? baseUrl).trim();
-    adminKey = (p.getString(_kAdminKey) ?? '').trim();
-    nodeKey = (p.getString(_kNodeKey) ?? '').trim();
+    // 强制使用内置地址，避免旧版本残留配置导致“看起来没连上”
+    baseUrl = 'http://127.0.0.1:18081';
+    adminKey = '';
+    nodeKey = '';
     // prefer days; fallback from legacy seconds
     inviteTtlDays = p.getInt(_kInviteTtlDays) ?? inviteTtlDays;
     final legacySeconds = p.getInt(_kInviteTtl);
@@ -70,9 +69,6 @@ class AppController extends ChangeNotifier {
 
   Future<void> persist() async {
     final p = await SharedPreferences.getInstance();
-    await p.setString(_kBaseUrl, baseUrl.trim());
-    await p.setString(_kAdminKey, adminKey.trim());
-    await p.setString(_kNodeKey, nodeKey.trim());
     await p.setInt(_kInviteTtlDays, inviteTtlDays);
     await p.setInt(_kInviteMaxUses, inviteMaxUses);
   }
@@ -109,11 +105,7 @@ class AppController extends ChangeNotifier {
     required String adminKey,
     required String nodeKey,
   }) async {
-    this.baseUrl = baseUrl.trim();
-    this.adminKey = adminKey.trim();
-    this.nodeKey = nodeKey.trim();
-    await persist();
-    notifyListeners();
+    // no-op：连接设置已移除，避免外部修改连接参数
   }
 
   NodeApiClient _api() {
@@ -191,6 +183,7 @@ class AppController extends ChangeNotifier {
       _setOutput({'code': 0, 'data': out});
     } catch (e) {
       _setOutput(_errToOut(e));
+      rethrow;
     } finally {
       loading = false;
       notifyListeners();
@@ -220,6 +213,7 @@ class AppController extends ChangeNotifier {
       });
     } catch (e) {
       _setOutput(_errToOut(e));
+      rethrow;
     } finally {
       loading = false;
       notifyListeners();
@@ -235,6 +229,7 @@ class AppController extends ChangeNotifier {
       _setOutput({'code': 0, 'data': out});
     } catch (e) {
       _setOutput(_errToOut(e));
+      rethrow;
     } finally {
       loading = false;
       notifyListeners();
@@ -248,6 +243,7 @@ class AppController extends ChangeNotifier {
       invites = await _api().listInvites(limit: 200, includeRevoked: false);
     } catch (e) {
       _setOutput(_errToOut(e));
+      rethrow;
     } finally {
       loading = false;
       notifyListeners();

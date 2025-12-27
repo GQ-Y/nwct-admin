@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"os"
 	"os/exec"
 	"runtime"
 	"strconv"
@@ -78,6 +79,20 @@ func NewManager() Manager {
 	return &networkManager{}
 }
 
+// EnsureDualNetworkWiredPreferred 在 Linux 下启用“有线优先(A) + 双网可达”的策略路由。
+// 设计：
+// - eth0/wlan0 都可同时在线
+// - 默认出口优先走 eth0（若插线且有网关）；否则走 wlan0
+// - 按源 IP 建立 policy routing，确保访问各自 IP 的回包走正确网卡
+// - best-effort：失败不影响主流程
+func EnsureDualNetworkWiredPreferred(m Manager) {
+	nm, ok := m.(*networkManager)
+	if !ok {
+		return
+	}
+	nm.ensureLinuxDualNetworkWiredPreferred()
+}
+
 // GetInterfaces 获取网络接口列表
 func (nm *networkManager) GetInterfaces() ([]Interface, error) {
 	// 使用标准库获取网络接口
@@ -127,10 +142,181 @@ func (nm *networkManager) GetInterfaces() ([]Interface, error) {
 			}
 		}
 
+		// Linux：以太网需要 carrier=1 才视为“物理已连接”，否则 UI 会误报“拔线仍已连接”
+		if runtime.GOOS == "linux" && netInterface.Type == "ethernet" {
+			if !nm.linuxCarrierUp(netInterface.Name) {
+				netInterface.Status = "down"
+				// 保留 IP 字段用于排障，但 GetNetworkStatus 会以 carrier 为准判断 connected/disconnected
+			}
+		}
+
 		result = append(result, netInterface)
 	}
 
 	return result, nil
+}
+
+func (nm *networkManager) linuxCarrierUp(iface string) bool {
+	iface = strings.TrimSpace(iface)
+	if iface == "" {
+		return false
+	}
+	// /sys/class/net/<iface>/carrier: 1=link up, 0=link down
+	b, err := os.ReadFile("/sys/class/net/" + iface + "/carrier")
+	if err != nil {
+		return true // 没有 carrier 文件时，保守认为可用（避免误判）
+	}
+	return strings.TrimSpace(string(b)) == "1"
+}
+
+func (nm *networkManager) linuxWiFiAssociated(iface string) bool {
+	iface = strings.TrimSpace(iface)
+	if iface == "" {
+		return false
+	}
+	// 优先 wpa_cli status
+	if nm.hasCmd("wpa_cli") {
+		if out, err := nm.runCmd(2*time.Second, "wpa_cli", "-i", iface, "status"); err == nil {
+			return strings.Contains(out, "wpa_state=COMPLETED")
+		}
+	}
+	// 次优先 iw link
+	if nm.hasCmd("iw") {
+		if out, err := nm.runCmd(2*time.Second, "sh", "-lc", "iw dev "+iface+" link 2>/dev/null || true"); err == nil {
+			low := strings.ToLower(out)
+			return strings.Contains(low, "connected") && !strings.Contains(low, "not connected")
+		}
+	}
+	// 兜底 operstate
+	if b, err := os.ReadFile("/sys/class/net/" + iface + "/operstate"); err == nil {
+		return strings.TrimSpace(string(b)) == "up"
+	}
+	return false
+}
+
+func (nm *networkManager) linuxIPv4OfIface(iface string) string {
+	iface = strings.TrimSpace(iface)
+	if iface == "" || !nm.hasCmd("ip") {
+		return ""
+	}
+	out, err := nm.runCmd(2*time.Second, "ip", "-4", "-o", "addr", "show", "dev", iface)
+	if err != nil {
+		return ""
+	}
+	// 形如：3: wlan0    inet 192.168.2.127/24 brd ...
+	fields := strings.Fields(out)
+	for i := 0; i < len(fields)-1; i++ {
+		if fields[i] == "inet" {
+			ipCidr := fields[i+1]
+			ip, _, _ := strings.Cut(ipCidr, "/")
+			return strings.TrimSpace(ip)
+		}
+	}
+	return ""
+}
+
+func (nm *networkManager) linuxSubnetCIDROfIface(iface string) string {
+	iface = strings.TrimSpace(iface)
+	if iface == "" || !nm.hasCmd("ip") {
+		return ""
+	}
+	out, err := nm.runCmd(2*time.Second, "ip", "-4", "route", "show", "dev", iface)
+	if err != nil {
+		return ""
+	}
+	for _, ln := range strings.Split(out, "\n") {
+		ln = strings.TrimSpace(ln)
+		// 典型：192.168.2.0/24 proto kernel scope link src 192.168.2.xxx
+		if strings.Contains(ln, "scope link") && strings.Contains(ln, "proto kernel") {
+			f := strings.Fields(ln)
+			if len(f) > 0 && strings.Contains(f[0], "/") {
+				return f[0]
+			}
+		}
+	}
+	return ""
+}
+
+func (nm *networkManager) linuxDefaultGatewayOfIface(iface string) string {
+	iface = strings.TrimSpace(iface)
+	if iface == "" || !nm.hasCmd("ip") {
+		return ""
+	}
+	out, err := nm.runCmd(2*time.Second, "ip", "-4", "route", "show", "default", "dev", iface)
+	if err != nil {
+		return ""
+	}
+	// default via 192.168.2.1 dev wlan0 ...
+	fields := strings.Fields(out)
+	for i := 0; i < len(fields)-1; i++ {
+		if fields[i] == "via" {
+			return strings.TrimSpace(fields[i+1])
+		}
+	}
+	return ""
+}
+
+func (nm *networkManager) ensureLinuxDualNetworkWiredPreferred() {
+	if runtime.GOOS != "linux" {
+		return
+	}
+	if !nm.hasCmd("ip") {
+		return
+	}
+	// 注意：当前板子内核不支持 policy routing（ip rule 会报 Operation not supported），
+	// 因此无法做到“eth0 + wlan0 同网段同时可达且回包不串口”的完美双网。
+	// 这里采取稳定策略（A 有线优先）：
+	// - eth0 插线可用：仅保留 eth0 的 IPv4/默认路由，wlan0 只保持关联但不保留 IP（避免回包走错导致 ping/ssh 超时）
+	// - eth0 不可用：清理 eth0 残留 IP/路由，启用 wlan0 作为默认出口
+
+	ethIP := strings.TrimSpace(nm.linuxIPv4OfIface("eth0"))
+	wlanIP := strings.TrimSpace(nm.linuxIPv4OfIface("wlan0"))
+	ethGW := strings.TrimSpace(nm.linuxDefaultGatewayOfIface("eth0"))
+	wlanGW := strings.TrimSpace(nm.linuxDefaultGatewayOfIface("wlan0"))
+
+	ethCarrier := nm.linuxCarrierUp("eth0")
+	wlanAssoc := nm.linuxWiFiAssociated("wlan0")
+
+	// 兜底网关：通常两网卡在同一 LAN，网关一致；如果某网卡没有 default，借用另一张
+	gw := ""
+	if ethGW != "" {
+		gw = ethGW
+	} else if wlanGW != "" {
+		gw = wlanGW
+	} else {
+		if out, err := nm.runCmd(2*time.Second, "ip", "-4", "route", "show", "default"); err == nil {
+			fields := strings.Fields(out)
+			for i := 0; i < len(fields)-1; i++ {
+				if fields[i] == "via" {
+					gw = strings.TrimSpace(fields[i+1])
+					break
+				}
+			}
+		}
+	}
+
+	preferEth := ethCarrier && ethIP != "" && gw != ""
+	preferWlan := !preferEth && wlanAssoc && wlanIP != "" && gw != ""
+
+	// 先把所有默认路由清干净（BusyBox ip 的 route del 匹配较严格，循环删除更稳）
+	_, _ = nm.runCmd(2*time.Second, "sh", "-lc", "while ip route del default >/dev/null 2>&1; do :; done")
+
+	if preferEth {
+		// 有线优先：默认出口走 eth0
+		_, _ = nm.runCmd(2*time.Second, "ip", "route", "add", "default", "via", gw, "dev", "eth0")
+		// 清理 wlan0 IP（保留关联，让需要时能快速 udhcpc 再拿 IP）
+		_, _ = nm.runCmd(2*time.Second, "ip", "addr", "flush", "dev", "wlan0")
+		return
+	}
+
+	if preferWlan {
+		// WiFi 可用：默认出口走 wlan0
+		_, _ = nm.runCmd(2*time.Second, "ip", "route", "add", "default", "via", gw, "dev", "wlan0")
+		// 如果 eth0 已经拔线但还残留 IP，会导致回包走错：清掉 eth0 地址
+		if !ethCarrier {
+			_, _ = nm.runCmd(2*time.Second, "ip", "addr", "flush", "dev", "eth0")
+		}
+	}
 }
 
 // ConfigureWiFi 配置WiFi连接
@@ -174,17 +360,21 @@ func (nm *networkManager) DisconnectWiFi() error {
 			_, _ = nm.runCmd(4*time.Second, "wpa_cli", "-i", wifiIface, "disconnect")
 			// terminate 会让 wpa_supplicant 退出（若存在）
 			_, _ = nm.runCmd(4*time.Second, "wpa_cli", "-i", wifiIface, "terminate")
-			return nil
 		}
 
-		// 最后兜底：接口 down
+		// 强制兜底：flush IP/路由 + 接口 down（确保“忘记 WiFi”后真正断开，允许离线）
 		if nm.hasCmd("ip") {
-			_, err := nm.runCmd(4*time.Second, "ip", "link", "set", wifiIface, "down")
-			return err
+			_, _ = nm.runCmd(3*time.Second, "ip", "addr", "flush", "dev", wifiIface)
+			_, _ = nm.runCmd(3*time.Second, "ip", "route", "flush", "dev", wifiIface)
+			_, _ = nm.runCmd(4*time.Second, "ip", "link", "set", wifiIface, "down")
+			nm.ensureLinuxDualNetworkWiredPreferred()
+			return nil
 		}
 		if nm.hasCmd("ifconfig") {
-			_, err := nm.runCmd(4*time.Second, "ifconfig", wifiIface, "down")
-			return err
+			_, _ = nm.runCmd(3*time.Second, "ifconfig", wifiIface, "0.0.0.0")
+			_, _ = nm.runCmd(4*time.Second, "ifconfig", wifiIface, "down")
+			nm.ensureLinuxDualNetworkWiredPreferred()
+			return nil
 		}
 		return fmt.Errorf("WiFi断开失败：系统缺少 nmcli/wpa_cli/ip/ifconfig")
 
@@ -194,6 +384,26 @@ func (nm *networkManager) DisconnectWiFi() error {
 	default:
 		return nil
 	}
+}
+
+func (nm *networkManager) systemHostnameBestEffort() string {
+	// 优先 hostname 命令
+	if nm.hasCmd("hostname") {
+		if out, err := nm.runCmd(1*time.Second, "hostname"); err == nil {
+			out = strings.TrimSpace(out)
+			if out != "" {
+				return out
+			}
+		}
+	}
+	// 兜底 /etc/hostname
+	if b, err := os.ReadFile("/etc/hostname"); err == nil {
+		s := strings.TrimSpace(string(b))
+		if s != "" {
+			return s
+		}
+	}
+	return ""
 }
 
 func pickWiFiInterfaceFromList(ifaces []Interface) string {
@@ -288,14 +498,30 @@ func (nm *networkManager) ApplyNetworkConfig(cfg ApplyConfig) error {
 		if mode == "dhcp" {
 			// 优先 nmcli（NetworkManager），无 nmcli 则降级到 Buildroot 常见的 udhcpc/ip/ifconfig
 			if nm.hasCmd("nmcli") {
-				return nm.applyDHCPLinux(iface, cfg.DNS)
+				if err := nm.applyDHCPLinux(iface, cfg.DNS); err != nil {
+					return err
+				}
+				nm.ensureLinuxDualNetworkWiredPreferred()
+				return nil
 			}
-			return nm.applyDHCPLinuxFallback(iface, cfg.DNS)
+			if err := nm.applyDHCPLinuxFallback(iface, cfg.DNS); err != nil {
+				return err
+			}
+			nm.ensureLinuxDualNetworkWiredPreferred()
+			return nil
 		}
 		if nm.hasCmd("nmcli") {
-			return nm.applyStaticLinux(iface, cfg.IP, cfg.Netmask, cfg.Gateway, cfg.DNS)
+			if err := nm.applyStaticLinux(iface, cfg.IP, cfg.Netmask, cfg.Gateway, cfg.DNS); err != nil {
+				return err
+			}
+			nm.ensureLinuxDualNetworkWiredPreferred()
+			return nil
 		}
-		return nm.applyStaticLinuxFallback(iface, cfg.IP, cfg.Netmask, cfg.Gateway, cfg.DNS)
+		if err := nm.applyStaticLinuxFallback(iface, cfg.IP, cfg.Netmask, cfg.Gateway, cfg.DNS); err != nil {
+			return err
+		}
+		nm.ensureLinuxDualNetworkWiredPreferred()
+		return nil
 	default:
 		return fmt.Errorf("当前系统不支持 IP 配置下发: %s", runtime.GOOS)
 	}
@@ -544,7 +770,14 @@ func (nm *networkManager) applyDHCPLinuxFallback(device, dns string) error {
 	// BusyBox/Buildroot 常见 DHCP 客户端：udhcpc
 	if nm.hasCmd("udhcpc") {
 		// -n：失败直接退出；-q：安静；-T/-t：超时/次数
-		if _, err := nm.runCmd(20*time.Second, "udhcpc", "-i", device, "-n", "-q", "-T", "3", "-t", "3"); err != nil {
+		args := []string{"-i", device, "-n", "-q", "-T", "3", "-t", "3"}
+		if hn := strings.TrimSpace(nm.systemHostnameBestEffort()); hn != "" {
+			// DHCP option 12：hostname，让路由器里显示设备名
+			args = append(args, "-x", "hostname:"+hn)
+			// 一些路由器更偏好 -F（请求更新 DNS 映射），这里也顺带加上（best-effort）
+			args = append(args, "-F", hn)
+		}
+		if _, err := nm.runCmd(20*time.Second, "udhcpc", args...); err != nil {
 			return err
 		}
 		nm.writeResolvConfBestEffort(dns)
@@ -633,6 +866,15 @@ func (nm *networkManager) GetNetworkStatus() (*NetworkStatus, error) {
 	if defDev, gw, err := nm.getDefaultRouteDeviceAndGateway(); err == nil && defDev != "" {
 		for _, iface := range interfaces {
 			if iface.Name == defDev && iface.Status == "up" && iface.IP != "" {
+				// Linux：物理链路/关联状态校验
+				if runtime.GOOS == "linux" {
+					if iface.Type == "ethernet" && !nm.linuxCarrierUp(iface.Name) {
+						continue
+					}
+					if iface.Type == "wifi" && !nm.linuxWiFiAssociated(iface.Name) {
+						continue
+					}
+				}
 				status.CurrentInterface = iface.Name
 				status.IP = iface.IP
 				status.Status = "connected"
@@ -650,6 +892,14 @@ func (nm *networkManager) GetNetworkStatus() (*NetworkStatus, error) {
 			}
 			if isVirtualInterfaceName(iface.Name) {
 				continue
+			}
+			if runtime.GOOS == "linux" {
+				if iface.Type == "ethernet" && !nm.linuxCarrierUp(iface.Name) {
+					continue
+				}
+				if iface.Type == "wifi" && !nm.linuxWiFiAssociated(iface.Name) {
+					continue
+				}
 			}
 			status.CurrentInterface = iface.Name
 			status.IP = iface.IP

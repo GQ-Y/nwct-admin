@@ -1,17 +1,19 @@
 import 'dart:async';
-import 'dart:convert';
 import 'dart:io';
-import 'dart:math';
 
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:http/http.dart' as http;
+import 'package:path_provider/path_provider.dart';
+import 'dart:convert' show utf8;
 
 import '../state/app_controller.dart';
 
 class NodeService {
   // 默认与当前后台节点保持一致（你现在用的是 18081）
   static const String _defaultBaseUrl = 'http://127.0.0.1:18081';
-  static const String _defaultBridgeUrl = 'http://192.168.2.32:18090';
+  // 桌面端通常与桥梁同机开发调试：优先 localhost，避免局域网 IP 不存在导致超时。
+  // 需要部署到内网其它主机时，可通过环境变量覆盖（TOTOTO_BRIDGE_URL）。
+  static const String _defaultBridgeUrl = 'http://127.0.0.1:18090';
 
   static Process? _proc;
   static bool _startedByUs = false;
@@ -24,35 +26,18 @@ class NodeService {
         b.startsWith('https://localhost');
   }
 
-  static String _randKey() {
-    final r = Random.secure();
-    final b = List<int>.generate(18, (_) => r.nextInt(256));
-    return base64UrlEncode(b).replaceAll('=', '');
-  }
-
   static Future<Directory> _appDataDir() async {
-    if (Platform.isMacOS) {
-      final home = Platform.environment['HOME'] ?? '';
-      if (home.isNotEmpty) {
-        return Directory('$home/Library/Application Support/totoro-node-desktop');
-      }
-    }
-    if (Platform.isWindows) {
-      final appData = Platform.environment['APPDATA'] ?? '';
-      if (appData.isNotEmpty) {
-        return Directory('$appData\\totoro-node-desktop');
-      }
-    }
-    // fallback
-    return Directory('${Directory.current.path}${Platform.pathSeparator}totoro-node-desktop-data');
+    // 兼容 macOS 沙盒/GUI 启动环境：不要依赖 HOME
+    final d = await getApplicationSupportDirectory();
+    return Directory('${d.path}${Platform.pathSeparator}totoro-node-desktop');
   }
 
-  static Future<bool> _ping(String baseUrl, {required String adminKey}) async {
-    final u = Uri.parse('${baseUrl.replaceAll(RegExp(r'/*$'), '')}/api/v1/node/config');
+  static Future<bool> _ping(String baseUrl) async {
+    final u = Uri.parse(
+      '${baseUrl.replaceAll(RegExp(r'/*$'), '')}/api/v1/node/config',
+    );
     try {
-      final res = await http
-          .get(u, headers: adminKey.isEmpty ? {} : {'X-Admin-Key': adminKey})
-          .timeout(const Duration(milliseconds: 700));
+      final res = await http.get(u).timeout(const Duration(milliseconds: 700));
       return res.statusCode >= 200 && res.statusCode < 300;
     } catch (_) {
       return false;
@@ -78,16 +63,17 @@ class NodeService {
 
   static Future<void> ensureStarted(AppController c) async {
     // 只对“本机 node”启用自动拉起；如果用户配置了远程 baseUrl，就不干预。
-    if (!_looksLikeLocal(c.baseUrl)) return;
+    // 注意：连接设置页已移除，baseUrl 可能为空；这里按默认 18081 处理。
+    final desiredBaseUrl = c.baseUrl.trim().isNotEmpty
+        ? c.baseUrl.trim()
+        : _defaultBaseUrl;
+    if (!_looksLikeLocal(desiredBaseUrl)) return;
 
     // 如果已经通了（可能是用户手动启动的 node），直接复用。
-    final ak = c.adminKey.trim();
-    final desiredBaseUrl = c.baseUrl.trim().isNotEmpty ? c.baseUrl.trim() : _defaultBaseUrl;
-    if (await _ping(desiredBaseUrl, adminKey: ak)) {
+    if (await _ping(desiredBaseUrl)) {
       return;
     }
 
-    final adminKey = ak.isNotEmpty ? ak : _randKey();
     final baseUrl = desiredBaseUrl;
     final uri = Uri.tryParse(baseUrl);
     final port = (uri != null && uri.hasPort) ? uri.port : 18081;
@@ -118,7 +104,10 @@ class NodeService {
       return;
     }
     if (!await frpsFile.exists()) {
-      await _materializeAsset(assetPath: 'assets/node/frps.toml', target: frpsFile);
+      await _materializeAsset(
+        assetPath: 'assets/node/frps.toml',
+        target: frpsFile,
+      );
     }
 
     // 端口占用：如果 baseUrl 端口已被占用，但 ping 不通，说明不是我们的 node；避免硬拉起冲突
@@ -128,8 +117,11 @@ class NodeService {
       'TOTOTO_NODE_API_ADDR': ':$port',
       'TOTOTO_FRPS_CONFIG': frpsFile.path,
       'TOTOTO_NODE_DB': dbFile.path,
-      'TOTOTO_NODE_ADMIN_KEY': adminKey,
-      'TOTOTO_BRIDGE_URL': _defaultBridgeUrl,
+      // 允许用户/外部启动器覆盖；否则走桌面端默认值
+      'TOTOTO_BRIDGE_URL':
+          (Platform.environment['TOTOTO_BRIDGE_URL'] ?? '').trim().isNotEmpty
+          ? Platform.environment['TOTOTO_BRIDGE_URL']!.trim()
+          : _defaultBridgeUrl,
     };
 
     final logFile = File('${dir.path}${Platform.pathSeparator}totoro-node.log');
@@ -146,7 +138,9 @@ class NodeService {
       _startedByUs = true;
       _proc!.stdout.transform(utf8.decoder).listen((s) => logSink.write(s));
       _proc!.stderr.transform(utf8.decoder).listen((s) => logSink.write(s));
-      _proc!.exitCode.whenComplete(() => logSink.flush().whenComplete(() => logSink.close()));
+      _proc!.exitCode.whenComplete(
+        () => logSink.flush().whenComplete(() => logSink.close()),
+      );
     } catch (_) {
       await logSink.flush();
       await logSink.close();
@@ -156,8 +150,7 @@ class NodeService {
     // 等待 node API 就绪
     final deadline = DateTime.now().add(const Duration(seconds: 8));
     while (DateTime.now().isBefore(deadline)) {
-      if (await _ping(baseUrl, adminKey: adminKey)) {
-        await c.updateConnection(baseUrl: baseUrl, adminKey: adminKey, nodeKey: '');
+      if (await _ping(baseUrl)) {
         return;
       }
       await Future<void>.delayed(const Duration(milliseconds: 250));
@@ -173,5 +166,3 @@ class NodeService {
     _proc = null;
   }
 }
-
-

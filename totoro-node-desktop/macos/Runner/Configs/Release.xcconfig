@@ -1,2 +1,7 @@
 #include "../../Flutter/Flutter-Release.xcconfig"
 #include "Warnings.xcconfig"
+
+// flutter build (Xcode 16+) may fail with:
+// "Entitlements file ... was modified during the build"
+// Allow Xcode to adjust entitlements during codesign for local builds.
+CODE_SIGN_ALLOW_ENTITLEMENTS_MODIFICATION = YES

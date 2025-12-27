@@ -43,7 +43,10 @@ func (p *ScreenSettingsPage) getBrightness() int {
 	}
 	v := *p.services.Config.System.Brightness
 	if v < 0 {
-		return 0
+		return 10
+	}
+	if v < 10 {
+		return 10
 	}
 	if v > 100 {
 		return 100
@@ -98,7 +101,7 @@ func (p *ScreenSettingsPage) Render(g *Graphics) error {
 		w := g.MeasureText(label, 16, FontWeightMedium)
 		_ = g.DrawTextTTF(label, x+(136-w)/2, qY+16, ColorTextPrimary, 16, FontWeightMedium)
 	}
-	drawQ(24, "0%")
+	drawQ(24, "10%")
 	drawQ(172, "50%")
 	drawQ(320, "100%")
 
@@ -142,7 +145,7 @@ func (p *ScreenSettingsPage) HandleTouch(x, y int, touchType TouchType) bool {
 	// 亮度 quick
 	if y >= 220 && y <= 270 {
 		if x >= 24 && x <= 160 {
-			p.setBrightness(0)
+			p.setBrightness(10)
 			return true
 		}
 		if x >= 172 && x <= 308 {
@@ -171,5 +174,3 @@ func (p *ScreenSettingsPage) HandleTouch(x, y int, touchType TouchType) bool {
 	}
 	return false
 }
-
-

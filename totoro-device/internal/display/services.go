@@ -74,9 +74,7 @@ func (s *AppServices) ConnectWiFi(ssid, password string) error {
 		s.mu.Lock()
 		defer s.mu.Unlock()
 
-		// 选择 WiFi 作为主网络接口（重启后依旧优先 WiFi）
-		s.Config.Network.Interface = "wlan0"
-		s.Config.Network.IPMode = "dhcp"
+		// 双网模式（A 有线优先）：不强制把“主接口”切到 WiFi，只保存 WiFi Profile 供自动连接
 
 		// 更新/追加 profile
 		found := false
@@ -99,6 +97,9 @@ func (s *AppServices) ConnectWiFi(ssid, password string) error {
 		}
 		_ = s.Config.Save()
 	}
+
+	// 双网策略路由：有线优先 + WiFi 仍可达
+	network.EnsureDualNetworkWiredPreferred(s.Network)
 
 	return nil
 }
@@ -126,6 +127,11 @@ func (s *AppServices) ForgetWiFi(ssid string) error {
 		s.Config.Network.WiFi.SSID = ""
 		s.Config.Network.WiFi.Password = ""
 		s.Config.Network.WiFi.Security = ""
+	}
+	// 忘记当前 WiFi 后，网络偏好回落到以太网（即使未插网线也允许离线）
+	if strings.TrimSpace(s.Config.Network.Interface) == "wlan0" {
+		s.Config.Network.Interface = "eth0"
+		s.Config.Network.IPMode = "dhcp"
 	}
 	_ = s.Config.Save()
 	s.mu.Unlock()
@@ -300,8 +306,9 @@ func (s *AppServices) SetSystemBrightness(percent int) error {
 	if s.Config == nil {
 		return fmt.Errorf("config 未初始化")
 	}
-	if percent < 0 {
-		percent = 0
+	// 限制：亮度最低 10%，避免用户设为 0 后彻底黑屏无法操作
+	if percent < 10 {
+		percent = 10
 	}
 	if percent > 100 {
 		percent = 100

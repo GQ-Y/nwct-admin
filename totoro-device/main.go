@@ -200,14 +200,11 @@ func autoConnectWiFi(cfg *config.Config, netManager network.Manager) {
 		return
 	}
 
-	// 是否偏好 WiFi：如果用户选择的主接口是 wlan/wl，则即便有线已获取 IP 也会优先尝试 WiFi。
-	prefer := strings.ToLower(strings.TrimSpace(cfg.Network.Interface))
-	preferWiFi := strings.HasPrefix(prefer, "wlan") || strings.HasPrefix(prefer, "wl")
-
-	// 若不偏好 WiFi：当前已有 IP（有线或无线）就不折腾
-	if !preferWiFi {
-		if st, err := netManager.GetNetworkStatus(); err == nil {
-			if st.IP != "" && st.IP != "0.0.0.0" {
+	// A 有线优先：如果 eth0 物理在线且已有 IP，则不主动拉起 WiFi（避免同网段双网卡回包走错）
+	if ifaces, err := netManager.GetInterfaces(); err == nil {
+		for _, it := range ifaces {
+			if strings.TrimSpace(it.Name) == "eth0" && strings.TrimSpace(it.Status) == "up" && strings.TrimSpace(it.IP) != "" {
+				network.EnsureDualNetworkWiredPreferred(netManager)
 				return
 			}
 		}
@@ -264,6 +261,7 @@ func autoConnectWiFi(cfg *config.Config, netManager network.Manager) {
 		}
 		if ok {
 			logger.Info("自动连接WiFi成功: ssid=%s", p.SSID)
+			network.EnsureDualNetworkWiredPreferred(netManager)
 			return
 		}
 		logger.Error("WiFi已配置但未获取到IP，继续尝试下一个: ssid=%s", p.SSID)
@@ -318,6 +316,8 @@ func main() {
 	netManager := network.NewManager()
 	// 启动时自动连接已保存WiFi（类似电脑记忆网络）
 	autoConnectWiFi(cfg, netManager)
+	// 启动时也收敛一次双网策略路由（A：有线优先，但 WiFi 依然可达）
+	network.EnsureDualNetworkWiredPreferred(netManager)
 	// 启动时向桥梁注册（白名单校验），获取 device_token 后用于拉官方/公开节点列表
 	bridgeRegisterIfConfigured(cfg, netManager)
 

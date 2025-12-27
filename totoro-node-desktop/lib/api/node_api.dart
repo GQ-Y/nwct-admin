@@ -132,6 +132,21 @@ class NodeApiClient {
     return h;
   }
 
+  bool _isLoopbackBaseUrl() {
+    try {
+      final u = Uri.parse(baseUrl.trim());
+      final host = (u.host.isNotEmpty ? u.host : '').trim().toLowerCase();
+      if (host == 'localhost' || host == '127.0.0.1' || host == '::1') {
+        return true;
+      }
+      // IPv6 bracket form is normalized by Uri.host, but keep a safe fallback.
+      if (host == '[::1]') return true;
+    } catch (_) {
+      // ignore
+    }
+    return false;
+  }
+
   dynamic _decodeBody(http.Response res) {
     final txt = res.body;
     dynamic j;
@@ -206,10 +221,11 @@ class NodeApiClient {
   }
 
   void _requireNodeKeyIfNeeded() {
-    // 后端规则：
-    // - 若节点启用了 X-Admin-Key（桌面端会携带），则 updateConfig/createInvite/revokeInvite 可不带 X-Node-Key
-    // - 若未启用 AdminKey，则仍需要 X-Node-Key
+    // 后端规则（nodeapi）：
+    // - 若启用了 X-Admin-Key（桌面端会携带），敏感操作可不带 X-Node-Key
+    // - 若未启用 AdminKey：本机回环（127.0.0.1/::1）可不带 X-Node-Key；非回环需要 X-Node-Key
     if (adminKey.trim().isNotEmpty) return;
+    if (_isLoopbackBaseUrl()) return;
     if (nodeKey.trim().isEmpty) {
       throw ApiException(message: '缺少 X-Node-Key（未设置 AdminKey 时敏感操作需要）');
     }

@@ -7,6 +7,7 @@ import 'package:bitsdojo_window/bitsdojo_window.dart';
 import 'pages/connection_settings_page.dart';
 import 'pages/invites_page.dart';
 import 'pages/node_config_page.dart';
+import 'platform/node_service.dart';
 import 'state/app_controller.dart';
 import 'state/tray_controller.dart';
 import 'theme/harmony_theme.dart';
@@ -26,8 +27,24 @@ class _TotoroNodeDesktopAppState extends State<TotoroNodeDesktopApp> {
   @override
   void initState() {
     super.initState();
-    controller.init();
-    tray.init();
+    // 启动时自动探活本机 18081；未启动则拉起 node 进程（失败降级，不影响 UI）
+    Future<void>(() async {
+      try {
+        await controller.init();
+      } catch (_) {}
+      try {
+        await NodeService.ensureStarted(controller);
+      } catch (_) {}
+      try {
+        await controller.refreshConfig();
+      } catch (_) {}
+    });
+    // tray 初始化必须 catch，避免 release 因托盘初始化异常闪退
+    Future<void>(() async {
+      try {
+        await tray.init();
+      } catch (_) {}
+    });
   }
 
   @override

@@ -1,6 +1,61 @@
 import Cocoa
 import FlutterMacOS
 
+final class StatusItemController: NSObject {
+  static let shared = StatusItemController()
+
+  private var statusItem: NSStatusItem?
+  private var inited = false
+
+  func ensureSetup() {
+    if inited { return }
+    inited = true
+
+    let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+    statusItem = item
+
+    if let button = item.button {
+      button.image = loadTrayImage()
+      button.image?.isTemplate = true
+      button.toolTip = "Totoro"
+    }
+
+    let menu = NSMenu()
+    let openItem = NSMenuItem(title: "打开", action: #selector(showMainWindow), keyEquivalent: "")
+    openItem.target = self
+    menu.addItem(openItem)
+    menu.addItem(NSMenuItem.separator())
+    let quitItem = NSMenuItem(title: "退出", action: #selector(quitApp), keyEquivalent: "q")
+    quitItem.target = self
+    menu.addItem(quitItem)
+    item.menu = menu
+  }
+
+  private func loadTrayImage() -> NSImage? {
+    // Flutter assets 位于 Resources/flutter_assets 下
+    if let res = Bundle.main.resourceURL {
+      let url = res.appendingPathComponent("flutter_assets/assets/tray/tray.png")
+      if let img = NSImage(contentsOf: url) {
+        return img
+      }
+    }
+    // fallback
+    return NSImage(named: NSImage.statusAvailableName)
+  }
+
+  @objc private func showMainWindow() {
+    // 找到 Flutter 主窗口并前置
+    if let w = NSApp.windows.first(where: { $0 is MainFlutterWindow }) ?? NSApp.windows.first {
+      w.makeKeyAndOrderFront(nil)
+      NSApp.activate(ignoringOtherApps: true)
+    }
+  }
+
+  @objc private func quitApp() {
+    NSApp.terminate(nil)
+  }
+}
+
 class MainFlutterWindow: NSWindow {
   override func awakeFromNib() {
     let flutterViewController = FlutterViewController()
@@ -20,6 +75,9 @@ class MainFlutterWindow: NSWindow {
       }
       result(FlutterMethodNotImplemented)
     })
+
+    // 初始化原生托盘（仅图标 + 打开/退出）
+    StatusItemController.shared.ensureSetup()
 
     // 更像“一个整体”的窗口：隐藏标题、标题栏透明，让 Flutter 背景延伸到顶部
     self.titleVisibility = .hidden

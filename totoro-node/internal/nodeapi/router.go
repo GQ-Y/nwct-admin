@@ -210,6 +210,9 @@ func (a *API) listInvites(c *gin.Context) {
 		apiresp.Fail(c, http.StatusInternalServerError, 500, err.Error())
 		return
 	}
+	if items == nil {
+		items = make([]store.Invite, 0)
+	}
 	apiresp.OK(c, gin.H{"invites": items})
 }
 
