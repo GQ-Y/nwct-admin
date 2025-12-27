@@ -86,6 +86,7 @@ func (s *Server) initRouter() {
 		// Totoro 云服务状态（桥梁连通性/官方节点数量/设备号/固件版本）
 		api.GET("/cloud/status", s.authMiddleware(), s.handleCloudStatus)
 		api.POST("/system/restart", s.authMiddleware(), s.handleSystemRestart)
+		api.POST("/system/factory_reset", s.authMiddleware(), s.handleSystemFactoryReset)
 		api.GET("/system/logs", s.authMiddleware(), s.handleSystemLogs)
 		api.POST("/system/logs/clear", s.authMiddleware(), s.handleSystemLogsClear)
 

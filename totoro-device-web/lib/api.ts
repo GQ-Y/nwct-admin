@@ -115,6 +115,8 @@ export const api = {
   systemLogsClear: () => request<any>("/api/v1/system/logs/clear", { method: "POST", body: "{}" }),
   systemRestart: (type: "soft" | "hard" = "soft") =>
     request<any>("/api/v1/system/restart", { method: "POST", body: JSON.stringify({ type }) }),
+  systemFactoryReset: (reboot: "hard" | "soft" | "none" = "hard") =>
+    request<any>("/api/v1/system/factory_reset", { method: "POST", body: JSON.stringify({ reboot }) }),
 
   devices: (params?: { status?: string; type?: string; page?: number; page_size?: number }) => {
     const q = new URLSearchParams();

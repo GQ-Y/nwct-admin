@@ -30,10 +30,17 @@ export const System: React.FC = () => {
     return `${m} min`;
   }, [uptimeSec]);
 
-  const handleFactoryReset = () => {
-    // In a real app, this would trigger the reset process
-    alert('Factory reset triggered');
-    setShowResetConfirm(false);
+  const handleFactoryReset = async () => {
+    setLoading(true);
+    try {
+      await api.systemFactoryReset("hard");
+      alert("已发送恢复出厂设置请求，设备将重启。请稍等 10~30 秒后刷新页面。");
+    } catch (e: any) {
+      alert(e?.message || String(e));
+    } finally {
+      setLoading(false);
+      setShowResetConfirm(false);
+    }
   };
 
   const refreshLogs = async () => {
@@ -93,10 +100,11 @@ export const System: React.FC = () => {
   }, []);
 
   const reboot = async () => {
+    if (!confirm("确认重启设备？")) return;
     setLoading(true);
     try {
-      await api.systemRestart("soft");
-      alert("已发送重启请求（soft）");
+      await api.systemRestart("hard");
+      alert("已发送重启请求（hard），设备将重启。请稍等 10~30 秒后刷新页面。");
     } catch (e: any) {
       alert(e?.message || String(e));
     } finally {

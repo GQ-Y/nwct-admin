@@ -11,8 +11,9 @@ export const Login: React.FC = () => {
   const { login } = useAuth();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [username, setUsername] = useState('admin');
-  const [password, setPassword] = useState('admin');
+  // 默认账号密码依旧是 admin/admin，但不要在页面上直接呈现
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -98,7 +99,7 @@ export const Login: React.FC = () => {
             <label style={{ display: 'block', marginBottom: '10px', fontWeight: 600, color: 'var(--text-primary)' }}>{t('login.username')}</label>
             <Input
               type="text"
-              placeholder="admin"
+              placeholder={t('login.username')}
               required
               style={{ padding: '16px 20px' }}
               value={username}
@@ -109,7 +110,7 @@ export const Login: React.FC = () => {
             <label style={{ display: 'block', marginBottom: '10px', fontWeight: 600, color: 'var(--text-primary)' }}>{t('login.password')}</label>
             <Input
               type="password"
-              placeholder="••••••"
+              placeholder={t('login.password')}
               required
               style={{ padding: '16px 20px' }}
               value={password}

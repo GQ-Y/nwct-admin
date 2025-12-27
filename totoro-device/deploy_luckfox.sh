@@ -240,6 +240,10 @@ echo "[3/4] 上传到开发板: ${TARGET_USER}@${TARGET_HOST}:${RESOLVED_TARGET_
 # 同时尽量停掉旧进程、清理 staging，避免占满 /tmp（尤其是 Pro/Plus 的 tmpfs 较小）
 ssh_cmd "sh -lc '
 set -e
+# 如果已安装自启脚本，先 stop（避免旧进程占用端口/资源）
+if [ -x /etc/init.d/S99totoro-device ]; then
+  /etc/init.d/S99totoro-device stop >/dev/null 2>&1 || true
+fi
 if [ -f /tmp/nwct.pid ]; then
   oldpid=\$(cat /tmp/nwct.pid 2>/dev/null || true)
   if [ -n \"\$oldpid\" ] && kill -0 \"\$oldpid\" 2>/dev/null; then
@@ -254,6 +258,117 @@ rm -f '${RESOLVED_TARGET_PATH}'
 '"
 scp_cmd "${OUT}" "${TARGET_USER}@${TARGET_HOST}:${RESOLVED_TARGET_PATH}"
 ssh_cmd "chmod +x '${RESOLVED_TARGET_PATH}'"
+
+# 安装开机自启动脚本（部署时一并写入），保证“重启设备/恢复出厂”后服务会自动起来
+INSTALL_AUTOSTART="${INSTALL_AUTOSTART:-1}"
+if [[ "${INSTALL_AUTOSTART}" == "1" ]]; then
+  echo "安装开机自启脚本: /etc/init.d/S99totoro-device"
+  ssh_cmd "sh -lc '
+set -e
+mkdir -p /etc/init.d /var/run /var/log/nwct /var/nwct /etc/nwct
+cat >/etc/init.d/S99totoro-device <<\"EOF\"
+#!/bin/sh
+
+### BEGIN INIT INFO
+# Provides:          totoro-device
+# Required-Start:    \$local_fs \$network
+# Required-Stop:     \$local_fs \$network
+# Default-Start:     S
+# Default-Stop:      0 6
+# Short-Description: Totoro Device service
+### END INIT INFO
+
+NAME=totoro-device
+DAEMON=\"${RESOLVED_TARGET_PATH}\"
+PIDFILE=/var/run/\${NAME}.pid
+LOGFILE=/var/log/\${NAME}.log
+
+export NWCT_CONFIG_PATH=/etc/nwct/config.json
+export NWCT_DB_PATH=/var/nwct/devices.db
+export NWCT_LOG_DIR=/var/log/nwct
+
+# 可选品牌资源
+export NWCT_BRANDING_PATH=\${NWCT_BRANDING_PATH:-/etc/nwct/branding.png}
+export NWCT_BOOT_AUDIO_PATH=\${NWCT_BOOT_AUDIO_PATH:-/etc/nwct/boot.mp3}
+
+start() {
+  echo \"Starting \${NAME}...\"
+  mkdir -p /var/run /var/log/nwct /var/nwct /etc/nwct
+
+  if [ ! -x \"\${DAEMON}\" ]; then
+    echo \"Missing executable: \${DAEMON}\"
+    return 1
+  fi
+
+  if [ -f \"\${PIDFILE}\" ]; then
+    pid=\$(cat \"\${PIDFILE}\" 2>/dev/null)
+    if [ -n \"\${pid}\" ] && kill -0 \"\${pid}\" 2>/dev/null; then
+      echo \"\${NAME} already running (pid=\${pid})\"
+      return 0
+    fi
+  fi
+
+  nohup \"\${DAEMON}\" ${RUN_ARGS} >>\"\${LOGFILE}\" 2>&1 &
+  echo \$! >\"\${PIDFILE}\"
+  sleep 1
+  pid=\$(cat \"\${PIDFILE}\" 2>/dev/null)
+  if [ -n \"\${pid}\" ] && kill -0 \"\${pid}\" 2>/dev/null; then
+    echo \"\${NAME} started (pid=\${pid})\"
+    return 0
+  fi
+  echo \"\${NAME} failed to start, see \${LOGFILE}\"
+  return 1
+}
+
+stop() {
+  echo \"Stopping \${NAME}...\"
+  if [ ! -f \"\${PIDFILE}\" ]; then
+    echo \"\${NAME} not running (no pidfile)\"
+    return 0
+  fi
+  pid=\$(cat \"\${PIDFILE}\" 2>/dev/null)
+  if [ -z \"\${pid}\" ]; then
+    rm -f \"\${PIDFILE}\"
+    return 0
+  fi
+  kill \"\${pid}\" 2>/dev/null || true
+  for i in 1 2 3 4 5 6 7 8 9 10; do
+    if kill -0 \"\${pid}\" 2>/dev/null; then
+      sleep 1
+    else
+      break
+    fi
+  done
+  if kill -0 \"\${pid}\" 2>/dev/null; then
+    kill -9 \"\${pid}\" 2>/dev/null || true
+  fi
+  rm -f \"\${PIDFILE}\"
+  echo \"\${NAME} stopped\"
+}
+
+status() {
+  if [ -f \"\${PIDFILE}\" ]; then
+    pid=\$(cat \"\${PIDFILE}\" 2>/dev/null)
+    if [ -n \"\${pid}\" ] && kill -0 \"\${pid}\" 2>/dev/null; then
+      echo \"\${NAME} running (pid=\${pid})\"
+      return 0
+    fi
+  fi
+  echo \"\${NAME} not running\"
+  return 3
+}
+
+case \"\$1\" in
+  start) start ;;
+  stop) stop ;;
+  restart) stop; start ;;
+  status) status ;;
+  *) echo \"Usage: \$0 {start|stop|restart|status}\"; exit 1 ;;
+esac
+EOF
+chmod +x /etc/init.d/S99totoro-device
+'"
+fi
 
 echo "[4/4] 远程运行测试（前台运行，Ctrl+C 可中断；或你也可以改用 nohup 后台）..."
 DAEMON_SRC="${RESOLVED_TARGET_PATH}"

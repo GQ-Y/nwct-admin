@@ -257,6 +257,11 @@ type AuthConfig struct {
 func DefaultConfig() *Config {
 	defVol := 15
 	defOff := 0
+	defPort := 80
+	if runtime.GOOS == "linux" {
+		// Luckfox/Buildroot 上建议避开系统 80 端口服务
+		defPort = 18080
+	}
 	return &Config{
 		Initialized: false,
 		Device: DeviceConfig{
@@ -295,7 +300,7 @@ func DefaultConfig() *Config {
 			Concurrency:  5, // 从 10 降到 5，减少并发连接数，节省内存
 		},
 		Server: ServerConfig{
-			Port: 80,
+			Port: defPort,
 			Host: "0.0.0.0",
 		},
 		Database: DatabaseConfig{

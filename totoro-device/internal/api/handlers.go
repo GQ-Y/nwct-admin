@@ -896,7 +896,6 @@ func (s *Server) handleSystemRestart(c *gin.Context) {
 
 	// 为了让 API 立即返回，重启命令放到 goroutine
 	go func(t string) {
-		var cmd *exec.Cmd
 		if t == "soft" {
 			// soft：重启本进程（由外部守护进程拉起），此处先退出
 			time.Sleep(500 * time.Millisecond)
@@ -904,21 +903,146 @@ func (s *Server) handleSystemRestart(c *gin.Context) {
 			return
 		}
 
-		// hard：调用系统重启命令（可能需要 root 权限）
-		switch runtime.GOOS {
-		case "linux":
-			cmd = exec.Command("shutdown", "-r", "now")
-		case "darwin":
-			cmd = exec.Command("shutdown", "-r", "now")
-		default:
-			logger.Error("不支持的系统重启平台: %s", runtime.GOOS)
-			return
+		// hard：直接重启开发板（尽量用 reboot，避免某些 Buildroot 镜像缺少 shutdown）
+		if err := hardRebootBestEffort(); err != nil {
+			logger.Error("系统重启失败: %v", err)
 		}
-		_ = cmd.Run()
 	}(req.Type)
 
 	c.JSON(http.StatusOK, models.SuccessResponse(gin.H{
 		"message": "重启命令已发送",
+	}))
+}
+
+func hardRebootBestEffort() error {
+	switch runtime.GOOS {
+	case "linux":
+		_ = exec.Command("sync").Run()
+
+		// 1) reboot（BusyBox 常见）
+		if p, err := exec.LookPath("reboot"); err == nil && strings.TrimSpace(p) != "" {
+			_ = exec.Command(p, "-f").Run()
+			_ = exec.Command(p).Run()
+		}
+		// 2) busybox reboot
+		if p, err := exec.LookPath("busybox"); err == nil && strings.TrimSpace(p) != "" {
+			_ = exec.Command(p, "reboot", "-f").Run()
+			_ = exec.Command(p, "reboot").Run()
+		}
+		// 3) shutdown -r now（兜底）
+		if p, err := exec.LookPath("shutdown"); err == nil && strings.TrimSpace(p) != "" {
+			_ = exec.Command(p, "-r", "now").Run()
+		}
+		return nil
+	case "darwin":
+		return exec.Command("shutdown", "-r", "now").Run()
+	default:
+		return fmt.Errorf("不支持的系统重启平台: %s", runtime.GOOS)
+	}
+}
+
+// handleSystemFactoryReset 恢复出厂设置（仅清理 totoro-device 相关数据），并可选择直接重启开发板
+func (s *Server) handleSystemFactoryReset(c *gin.Context) {
+	var req struct {
+		Reboot string `json:"reboot"` // hard|soft|none（默认 hard）
+	}
+	_ = c.ShouldBindJSON(&req)
+	rb := strings.ToLower(strings.TrimSpace(req.Reboot))
+	if rb == "" {
+		rb = "hard"
+	}
+
+	logger.Warn("收到恢复出厂设置请求：reboot=%s", rb)
+
+	go func(rebootMode string) {
+		// 1) 先断开 frpc（best-effort）
+		func() {
+			defer func() { _ = recover() }()
+			if s != nil && s.frpClient != nil && s.frpClient.IsConnected() {
+				_ = s.frpClient.Disconnect()
+			}
+		}()
+
+		// 2) 关闭 DB（best-effort）
+		if s != nil && s.db != nil {
+			_ = s.db.Close()
+		}
+
+		// 3) 清理文件（仅清理本项目相关路径）
+		paths := make([]string, 0, 32)
+
+		// config
+		cfgPath := config.GetConfigPath()
+		if strings.TrimSpace(cfgPath) != "" {
+			paths = append(paths, cfgPath)
+		}
+
+		// db：优先 env，否则 cfg.Database.Path，否则默认 linux 路径
+		dbPath := strings.TrimSpace(os.Getenv("NWCT_DB_PATH"))
+		if dbPath == "" && s != nil && s.config != nil {
+			dbPath = strings.TrimSpace(s.config.Database.Path)
+		}
+		if dbPath == "" && runtime.GOOS == "linux" {
+			dbPath = "/var/nwct/devices.db"
+		}
+		if dbPath != "" {
+			paths = append(paths, dbPath, dbPath+"-wal", dbPath+"-shm")
+		}
+
+		// log dir
+		logDir := strings.TrimSpace(os.Getenv("NWCT_LOG_DIR"))
+		if logDir == "" {
+			logDir = "/var/log/nwct"
+		}
+		paths = append(paths,
+			filepath.Join(logDir, "system.log"),
+			filepath.Join(logDir, "error.log"),
+			filepath.Join(logDir, "info.log"),
+		)
+
+		// /tmp runtime files
+		paths = append(paths,
+			"/tmp/nwct",
+			"/tmp/nwct.pid",
+			"/tmp/nwct.out",
+			"/run/nwct",
+		)
+
+		// caches
+		if d := strings.TrimSpace(os.Getenv("NWCT_CACHE_DIR")); d != "" {
+			paths = append(paths, d)
+		}
+		paths = append(paths,
+			"/root/.cache/nwct",
+			"/oem/.cache/nwct",
+			"/userdata/.cache/nwct",
+			"/mnt/sdcard/.cache/nwct",
+		)
+
+		for _, p := range paths {
+			p = strings.TrimSpace(p)
+			if p == "" {
+				continue
+			}
+			_ = os.RemoveAll(p) // best-effort
+		}
+		_ = exec.Command("sync").Run()
+
+		// 4) 重启策略
+		switch rebootMode {
+		case "none":
+			return
+		case "soft":
+			time.Sleep(500 * time.Millisecond)
+			os.Exit(0)
+		default: // hard
+			_ = hardRebootBestEffort()
+		}
+	}(rb)
+
+	c.JSON(http.StatusOK, models.SuccessResponse(gin.H{
+		"message": "已开始恢复出厂设置（清理 totoro-device 数据）",
+		"reboot":  rb,
 	}))
 }
 
