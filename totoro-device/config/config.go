@@ -9,6 +9,10 @@ import (
 	"strings"
 )
 
+// EmbeddedBridgeURL 编译时注入的桥梁 API 地址（用户不可修改，优先级最高）
+// 可通过 -ldflags "-X 'totoro-device/config.EmbeddedBridgeURL=http://example.com:18090'" 注入
+var EmbeddedBridgeURL = ""
+
 // DefaultBridgeURL 未显式配置（bridge.url / TOTOTO_BRIDGE_URL）时的内置桥梁地址
 const DefaultBridgeURL = "http://192.168.2.32:18090"
 
@@ -17,6 +21,14 @@ const DefaultBridgeURL = "http://192.168.2.32:18090"
 //
 //	go build -ldflags "-X 'totoro-device/config.DefaultDeviceName=Totoro S1 Ultra'"
 var DefaultDeviceName = "Totoro S1 Pro"
+
+// DefaultDeviceID 编译时注入的设备号（每次编译随机生成）
+// 可通过 -ldflags "-X 'totoro-device/config.DefaultDeviceID=DEV123456'" 注入
+var DefaultDeviceID = ""
+
+// DefaultDeviceModel 编译时注入的设备型号（ultra/pro/plus）
+// 可通过 -ldflags "-X 'totoro-device/config.DefaultDeviceModel=ultra'" 注入
+var DefaultDeviceModel = ""
 
 // Config 应用配置
 type Config struct {
@@ -379,20 +391,38 @@ func defaultDBPath() string {
 
 // ResolveBridgeBase 返回设备端应使用的桥梁 BaseURL（带 scheme，且无尾部 /）
 // 优先级：
-// 1) 配置文件 bridge.url
-// 2) 环境变量 TOTOTO_BRIDGE_URL
-// 3) DefaultBridgeURL
+// 1) 编译时注入的 EmbeddedBridgeURL（用户不可修改，优先级最高）
+// 2) 配置文件 bridge.url
+// 3) 环境变量 TOTOTO_BRIDGE_URL
+// 4) DefaultBridgeURL
 func ResolveBridgeBase(cfg *Config) string {
-	base := ""
+	// 优先级 1：编译时注入的桥梁地址（用户不可修改）
+	base := strings.TrimSpace(EmbeddedBridgeURL)
+	if base != "" {
+		base = strings.TrimSpace(base)
+		if base != "" {
+			if !strings.HasPrefix(base, "http://") && !strings.HasPrefix(base, "https://") {
+				base = "http://" + base
+			}
+			return strings.TrimRight(base, "/")
+		}
+	}
+
+	// 优先级 2：配置文件
 	if cfg != nil {
 		base = strings.TrimSpace(cfg.Bridge.URL)
 	}
+
+	// 优先级 3：环境变量
 	if base == "" {
 		base = strings.TrimSpace(os.Getenv("TOTOTO_BRIDGE_URL"))
 	}
+
+	// 优先级 4：默认值
 	if base == "" {
 		base = DefaultBridgeURL
 	}
+
 	base = strings.TrimSpace(base)
 	if base == "" {
 		return ""

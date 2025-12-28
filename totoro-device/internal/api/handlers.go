@@ -51,7 +51,7 @@ func pickDeviceMAC(netManager network.Manager) string {
 // handlePublicNodes 透传官方桥梁的公开节点列表
 func (s *Server) handlePublicNodes(c *gin.Context) {
 	bridge := config.ResolveBridgeBase(s.config)
-	deviceID := strings.TrimSpace(s.config.Device.ID)
+	deviceID := s.getDeviceID()
 	mac := strings.TrimSpace(s.config.Bridge.LastMAC)
 	if mac == "" {
 		// 兜底：即便 bridge 不可达，也应允许前端继续工作（实时取一次 MAC）
@@ -784,9 +784,20 @@ func (s *Server) handleSystemInfo(c *gin.Context) {
 		_ = conn.Close()
 	}
 
+	// 从数据库读取设备信息（设备号和型号）
+	deviceID := s.config.Device.ID
+	deviceModel := ""
+	if s.db != nil {
+		if info, err := database.GetDeviceInfo(s.db); err == nil && info != nil {
+			deviceID = info.DeviceID
+			deviceModel = info.DeviceModel
+		}
+	}
+
 	info := gin.H{
 		"hostname":         hostname,
-		"device_id":        s.config.Device.ID,
+		"device_id":        deviceID,
+		"device_model":     deviceModel,
 		"firmware_version": version.Version,
 		"build_time":       version.BuildTime,
 		"commit":           version.Commit,
@@ -813,11 +824,9 @@ func (s *Server) handleSystemInfo(c *gin.Context) {
 func (s *Server) handleCloudStatus(c *gin.Context) {
 	bridge := config.ResolveBridgeBase(s.config)
 
+	// 从数据库读取设备信息（设备号和型号）
 	deviceID := strings.TrimSpace(s.config.Device.ID)
-	mac := strings.TrimSpace(s.config.Bridge.LastMAC)
-	if mac == "" {
-		mac = pickDeviceMAC(s.netManager)
-	}
+	deviceModel := ""
 	db := database.GetDB()
 	if db == nil {
 		c.JSON(http.StatusOK, models.SuccessResponse(gin.H{
@@ -825,10 +834,22 @@ func (s *Server) handleCloudStatus(c *gin.Context) {
 			"bridge_url":       bridge,
 			"error":            "数据库未初始化",
 			"device_id":        deviceID,
+			"device_model":     deviceModel,
 			"firmware_version": version.Version,
 			"official_nodes":   0,
 		}))
 		return
+	}
+
+	// 从数据库读取设备信息
+	if info, err := database.GetDeviceInfo(db); err == nil && info != nil {
+		deviceID = info.DeviceID
+		deviceModel = info.DeviceModel
+	}
+
+	mac := strings.TrimSpace(s.config.Bridge.LastMAC)
+	if mac == "" {
+		mac = pickDeviceMAC(s.netManager)
 	}
 	dc, err := database.GetOrCreateDeviceCrypto(db)
 	if err != nil || dc == nil {
@@ -837,6 +858,7 @@ func (s *Server) handleCloudStatus(c *gin.Context) {
 			"bridge_url":       bridge,
 			"error":            "设备密钥不可用",
 			"device_id":        deviceID,
+			"device_model":     deviceModel,
 			"firmware_version": version.Version,
 			"official_nodes":   0,
 		}))
@@ -862,6 +884,7 @@ func (s *Server) handleCloudStatus(c *gin.Context) {
 				"bridge_url":       bridge,
 				"error":            "桥梁注册失败",
 				"device_id":        deviceID,
+				"device_model":     deviceModel,
 				"firmware_version": version.Version,
 				"official_nodes":   0,
 			}))
@@ -884,6 +907,7 @@ func (s *Server) handleCloudStatus(c *gin.Context) {
 			"bridge_url":       bridge,
 			"error":            err.Error(),
 			"device_id":        deviceID,
+			"device_model":     deviceModel,
 			"firmware_version": version.Version,
 			"official_nodes":   0,
 		}))
@@ -893,6 +917,7 @@ func (s *Server) handleCloudStatus(c *gin.Context) {
 		"ok":               true,
 		"bridge_url":       bridge,
 		"device_id":        deviceID,
+		"device_model":     deviceModel,
 		"firmware_version": version.Version,
 		"official_nodes":   len(nodes),
 	}))
@@ -1915,9 +1940,10 @@ func (s *Server) handleFRPConnect(c *gin.Context) {
 						c.JSON(http.StatusBadGateway, models.ErrorResponse(502, "桥梁注册失败"))
 						return
 					}
+					deviceID := s.getDeviceID()
 					_ = database.UpsertBridgeSession(db, database.BridgeSession{
 						BridgeURL:   bridgeBase,
-						DeviceID:    strings.TrimSpace(s.config.Device.ID),
+						DeviceID:    deviceID,
 						MAC:         strings.TrimSpace(s.config.Bridge.LastMAC),
 						DeviceToken: strings.TrimSpace(reg.DeviceToken),
 						ExpiresAt:   bridgeclient.ParseExpiresAt(reg.ExpiresAt),
@@ -1928,10 +1954,11 @@ func (s *Server) handleFRPConnect(c *gin.Context) {
 					c.JSON(http.StatusBadGateway, models.ErrorResponse(502, "缺少 device_token"))
 					return
 				}
+				deviceID := s.getDeviceID()
 				bc := &bridgeclient.Client{
 					BaseURL:          bridgeBase,
 					DeviceToken:      strings.TrimSpace(sess.DeviceToken),
-					DeviceID:         strings.TrimSpace(s.config.Device.ID),
+					DeviceID:         deviceID,
 					DevicePrivKeyB64: strings.TrimSpace(dc.PrivKeyB64),
 				}
 				res, err := bc.RedeemInvite(code)
@@ -1994,21 +2021,22 @@ func (s *Server) handleInviteConnect(c *gin.Context) {
 		return
 	}
 	bridgeBase := config.ResolveBridgeBase(s.config)
+	deviceID := s.getDeviceID()
 	sess, _ := database.GetBridgeSession(db)
 	if sess == nil || database.BridgeSessionExpired(sess, 30*time.Second) {
 		bc0 := &bridgeclient.Client{
 			BaseURL:          bridgeBase,
-			DeviceID:         strings.TrimSpace(s.config.Device.ID),
+			DeviceID:         deviceID,
 			DevicePrivKeyB64: strings.TrimSpace(dc.PrivKeyB64),
 		}
-		reg, rerr := bc0.Register(strings.TrimSpace(s.config.Device.ID), strings.TrimSpace(s.config.Bridge.LastMAC), strings.TrimSpace(dc.PubKeyB64))
+		reg, rerr := bc0.Register(deviceID, strings.TrimSpace(s.config.Bridge.LastMAC), strings.TrimSpace(dc.PubKeyB64))
 		if rerr != nil || reg == nil || strings.TrimSpace(reg.DeviceToken) == "" {
 			c.JSON(http.StatusBadGateway, models.ErrorResponse(502, "桥梁注册失败"))
 			return
 		}
 		_ = database.UpsertBridgeSession(db, database.BridgeSession{
 			BridgeURL:   bridgeBase,
-			DeviceID:    strings.TrimSpace(s.config.Device.ID),
+			DeviceID:    deviceID,
 			MAC:         strings.TrimSpace(s.config.Bridge.LastMAC),
 			DeviceToken: strings.TrimSpace(reg.DeviceToken),
 			ExpiresAt:   bridgeclient.ParseExpiresAt(reg.ExpiresAt),
@@ -2022,7 +2050,7 @@ func (s *Server) handleInviteConnect(c *gin.Context) {
 	bc := &bridgeclient.Client{
 		BaseURL:          bridgeBase,
 		DeviceToken:      strings.TrimSpace(sess.DeviceToken),
-		DeviceID:         strings.TrimSpace(s.config.Device.ID),
+		DeviceID:         deviceID,
 		DevicePrivKeyB64: strings.TrimSpace(dc.PrivKeyB64),
 	}
 	res, err := bc.RedeemInvite(code)
@@ -2080,21 +2108,22 @@ func (s *Server) handleInviteResolve(c *gin.Context) {
 		return
 	}
 	bridgeBase := config.ResolveBridgeBase(s.config)
+	deviceID := s.getDeviceID()
 	sess, _ := database.GetBridgeSession(db)
 	if sess == nil || database.BridgeSessionExpired(sess, 30*time.Second) {
 		bc0 := &bridgeclient.Client{
 			BaseURL:          bridgeBase,
-			DeviceID:         strings.TrimSpace(s.config.Device.ID),
+			DeviceID:         deviceID,
 			DevicePrivKeyB64: strings.TrimSpace(dc.PrivKeyB64),
 		}
-		reg, rerr := bc0.Register(strings.TrimSpace(s.config.Device.ID), strings.TrimSpace(s.config.Bridge.LastMAC), strings.TrimSpace(dc.PubKeyB64))
+		reg, rerr := bc0.Register(deviceID, strings.TrimSpace(s.config.Bridge.LastMAC), strings.TrimSpace(dc.PubKeyB64))
 		if rerr != nil || reg == nil || strings.TrimSpace(reg.DeviceToken) == "" {
 			c.JSON(http.StatusBadGateway, models.ErrorResponse(502, "桥梁注册失败"))
 			return
 		}
 		_ = database.UpsertBridgeSession(db, database.BridgeSession{
 			BridgeURL:   bridgeBase,
-			DeviceID:    strings.TrimSpace(s.config.Device.ID),
+			DeviceID:    deviceID,
 			MAC:         strings.TrimSpace(s.config.Bridge.LastMAC),
 			DeviceToken: strings.TrimSpace(reg.DeviceToken),
 			ExpiresAt:   bridgeclient.ParseExpiresAt(reg.ExpiresAt),
@@ -2108,7 +2137,7 @@ func (s *Server) handleInviteResolve(c *gin.Context) {
 	bc := &bridgeclient.Client{
 		BaseURL:          bridgeBase,
 		DeviceToken:      strings.TrimSpace(sess.DeviceToken),
-		DeviceID:         strings.TrimSpace(s.config.Device.ID),
+		DeviceID:         deviceID,
 		DevicePrivKeyB64: strings.TrimSpace(dc.PrivKeyB64),
 	}
 	res, err := bc.PreviewInvite(code)
@@ -2297,10 +2326,15 @@ func (s *Server) handleConfigGet(c *gin.Context) {
 		},
 	}
 
+	// 从数据库读取设备信息
+	deviceID := s.getDeviceID()
+	deviceModel := s.getDeviceModel()
+
 	config := gin.H{
 		"device": gin.H{
-			"device_id": s.config.Device.ID,
-			"name":      s.config.Device.Name,
+			"device_id":    deviceID,
+			"device_model": deviceModel,
+			"name":         s.config.Device.Name,
 		},
 		"network": net,
 		"frp_server": gin.H{

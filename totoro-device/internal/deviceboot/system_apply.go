@@ -28,10 +28,12 @@ func ApplySystemSettings(cfg *config.Config) {
 
 	// 设备名/hostname：让路由器/局域网里更容易识别（DHCP 会带 option 12）
 	// - cfg.Device.Name 允许包含空格，但 hostname 不允许：需要做规范化
-	// - 兼容老配置：若还是默认的 Luckfox，则强制更新为编译期默认名（config.DefaultDeviceName）
+	// - 强制使用编译期默认名（config.DefaultDeviceName），确保不同设备型号有正确的主机名
 	name := strings.TrimSpace(cfg.Device.Name)
-	if name == "" || strings.EqualFold(name, "luckfox") {
-		name = config.DefaultDeviceName
+	expectedName := config.DefaultDeviceName
+	// 如果配置中的名称与编译期默认名不一致，强制更新（避免旧配置导致主机名错误）
+	if name == "" || strings.EqualFold(name, "luckfox") || name != expectedName {
+		name = expectedName
 		cfg.Device.Name = name
 		_ = cfg.Save() // best-effort
 	}

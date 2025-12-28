@@ -164,6 +164,15 @@ func createTables() error {
 		updated_at INTEGER NOT NULL DEFAULT 0
 	);`
 
+	// 设备信息表（设备号和型号，编译时注入，用户不可修改）
+	deviceInfoTable := `
+	CREATE TABLE IF NOT EXISTS device_info (
+		id INTEGER PRIMARY KEY CHECK (id = 1),
+		device_id TEXT NOT NULL DEFAULT '',
+		device_model TEXT NOT NULL DEFAULT '',
+		updated_at INTEGER NOT NULL DEFAULT 0
+	);`
+
 	tables := []string{
 		devicesTable,
 		devicePortsTable,
@@ -172,6 +181,7 @@ func createTables() error {
 		bridgeSessionTable,
 		deviceCryptoTable,
 		publicInviteTable,
+		deviceInfoTable,
 	}
 
 	for _, table := range tables {

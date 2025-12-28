@@ -61,6 +61,10 @@ DEVICE_MODEL="${DEVICE_MODEL:-ultra}"
 DEVICE_NAME="${DEVICE_NAME:-}"
 # 设备上测试端口：避免占用固件自带的 80 端口服务导致异常/重启
 NWCT_HTTP_PORT="${NWCT_HTTP_PORT:-18080}"
+# 桥梁 API 地址（编译时注入，用户不可修改）
+BRIDGE_API_URL="${BRIDGE_API_URL:-}"
+# 设备号（编译时随机生成，每次编译都不同）
+DEVICE_ID="${DEVICE_ID:-}"
 
 # 交互式补全关键参数（仅在未提供时提示）
 prompt_if_empty TARGET_HOST "请输入设备 IP（TARGET_HOST）[默认: ${TARGET_HOST}]: " "${TARGET_HOST}"
@@ -69,7 +73,50 @@ prompt_if_empty TARGET_PORT "请输入 SSH 端口（TARGET_PORT）[默认: ${TAR
 prompt_if_empty TARGET_PASS "请输入 SSH 密码（TARGET_PASS，留空表示不使用密码/依赖 key）: " "" 1
 prompt_if_empty DEVICE_MODEL "请输入设备型号（DEVICE_MODEL：ultra/plus/pro）[默认: ${DEVICE_MODEL}]: " "${DEVICE_MODEL}"
 prompt_if_empty NWCT_HTTP_PORT "请输入设备端测试端口（NWCT_HTTP_PORT）[默认: ${NWCT_HTTP_PORT}]: " "${NWCT_HTTP_PORT}"
+prompt_if_empty BRIDGE_API_URL "请输入桥梁 API 地址（BRIDGE_API_URL，留空则使用默认值）: " ""
+prompt_if_empty DEVICE_ID "请输入设备号（DEVICE_ID，留空则自动生成随机设备号）: " ""
 prompt_if_empty TARGET_PATH "请输入上传路径（TARGET_PATH）[默认: ${TARGET_PATH}]: " "${TARGET_PATH}"
+
+# 根据设备型号设置设备名称（如果未指定）
+if [[ -z "${DEVICE_NAME}" ]]; then
+  case "${DEVICE_MODEL}" in
+    ultra|ultra-w|ultra_b|ultra_w)
+      DEVICE_NAME="Totoro S1 Ultra"
+      ;;
+    plus)
+      DEVICE_NAME="Totoro S1 Plus"
+      ;;
+    pro)
+      DEVICE_NAME="Totoro S1 Pro"
+      ;;
+    *)
+      DEVICE_NAME="Totoro S1 Pro"
+      ;;
+  esac
+fi
+
+# 生成随机设备号（如果未指定）：格式 DEV + 6位随机数字
+if [[ -z "${DEVICE_ID}" ]]; then
+  # 使用 /dev/urandom 生成随机数（兼容 macOS 和 Linux）
+  if command -v shuf >/dev/null 2>&1; then
+    # Linux: 使用 shuf
+    RAND_NUM=$(shuf -i 100000-999999 -n 1)
+  elif command -v jot >/dev/null 2>&1; then
+    # macOS: 使用 jot
+    RAND_NUM=$(jot -r 1 100000 999999)
+  else
+    # 兜底：使用 $RANDOM（bash 内置）
+    RAND_NUM=$((100000 + RANDOM % 900000))
+  fi
+  DEVICE_ID="DEV${RAND_NUM}"
+  echo "设备号: ${DEVICE_ID}（自动生成，编译时注入）"
+else
+  # 验证设备号格式（可选：DEV + 数字）
+  if [[ ! "${DEVICE_ID}" =~ ^DEV[0-9]+$ ]]; then
+    echo "警告: 设备号格式建议为 DEV + 数字（如 DEV123456），当前值: ${DEVICE_ID}" >&2
+  fi
+  echo "设备号: ${DEVICE_ID}（手动指定，编译时注入）"
+fi
 
 # 编译 tags：ultra 默认带屏；plus/pro 默认无屏
 BUILD_TAGS="${BUILD_TAGS:-}"
@@ -241,13 +288,32 @@ OUT="${PROJECT_DIR}/bin/totoro-device_${GOOS}_${GOARCH}${GOARM:+v${GOARM}}_${DEV
 mkdir -p "${PROJECT_DIR}/bin"
 
 pushd "${PROJECT_DIR}" >/dev/null
+  # 构建 ldflags：注入设备名称、设备号、设备型号、桥梁API地址
+  LDFLAGS="-s -w"
+  LDFLAGS="${LDFLAGS} -X 'totoro-device/config.DefaultDeviceName=${DEVICE_NAME}'"
+  LDFLAGS="${LDFLAGS} -X 'totoro-device/config.DefaultDeviceID=${DEVICE_ID}'"
+  LDFLAGS="${LDFLAGS} -X 'totoro-device/config.DefaultDeviceModel=${DEVICE_MODEL}'"
+  if [[ -n "${BRIDGE_API_URL}" ]]; then
+    LDFLAGS="${LDFLAGS} -X 'totoro-device/config.EmbeddedBridgeURL=${BRIDGE_API_URL}'"
+  fi
+  
   env \
     CGO_ENABLED=0 \
     GOOS="${GOOS}" \
     GOARCH="${GOARCH}" \
     ${GOARM:+GOARM="${GOARM}"} \
-    go build ${BUILD_TAGS:+-tags "${BUILD_TAGS}"} -trimpath -ldflags "-s -w -X 'totoro-device/config.DefaultDeviceName=${DEVICE_NAME}'" -o "${OUT}" .
+    go build ${BUILD_TAGS:+-tags "${BUILD_TAGS}"} -trimpath -ldflags "${LDFLAGS}" -o "${OUT}" .
 popd >/dev/null
+
+echo "编译完成，设备信息："
+echo "  设备号: ${DEVICE_ID}"
+echo "  设备型号: ${DEVICE_MODEL}"
+echo "  设备名称: ${DEVICE_NAME}"
+if [[ -n "${BRIDGE_API_URL}" ]]; then
+  echo "  桥梁API: ${BRIDGE_API_URL}"
+else
+  echo "  桥梁API: 使用默认值"
+fi
 
 echo "编译产物: ${OUT}"
 

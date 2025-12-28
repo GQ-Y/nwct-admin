@@ -337,6 +337,41 @@ func (nm *networkManager) ConfigureWiFi(ssid, password string) error {
 }
 
 // DisconnectWiFi 断开当前 WiFi 连接（用于“忘记 WiFi”后立即断开）
+// CleanupSystemWiFiConfig 清理系统级别的 WiFi 配置，确保应用完全控制 WiFi 连接
+// 在应用启动时调用，避免系统级别的 wpa_supplicant 自动连接 WiFi
+func CleanupSystemWiFiConfig() {
+	if runtime.GOOS != "linux" {
+		return
+	}
+	nm := &networkManager{}
+	// 获取 WiFi 接口
+	iface := "wlan0"
+	if nm.hasCmd("ip") {
+		if out, err := nm.runCmd(2*time.Second, "ip", "link", "show"); err == nil {
+			for _, line := range strings.Split(out, "\n") {
+				if strings.Contains(line, "wlan") {
+					parts := strings.Fields(line)
+					if len(parts) > 1 {
+						iface = strings.TrimSuffix(parts[1], ":")
+						break
+					}
+				}
+			}
+		}
+	}
+	// 断开并终止系统级别的 wpa_supplicant
+	if nm.hasCmd("wpa_cli") {
+		_, _ = nm.runCmd(2*time.Second, "sh", "-lc", fmt.Sprintf("wpa_cli -i %s disconnect >/dev/null 2>&1 || true", iface))
+		_, _ = nm.runCmd(2*time.Second, "sh", "-lc", fmt.Sprintf("wpa_cli -i %s terminate >/dev/null 2>&1 || true", iface))
+	}
+	// 杀掉可能残留的 wpa_supplicant 进程（系统级别启动的）
+	_, _ = nm.runCmd(2*time.Second, "sh", "-lc", "killall -9 wpa_supplicant >/dev/null 2>&1 || true")
+	// 清理系统级别的 WiFi 配置目录
+	_, _ = nm.runCmd(1*time.Second, "sh", "-lc", fmt.Sprintf("rm -rf /var/run/wpa_supplicant/%s >/dev/null 2>&1 || true", iface))
+	// 注意：不删除 /etc/wpa_supplicant.conf（可能被系统其他服务使用），但确保应用启动时不会使用它
+	logger.Info("已清理系统级别的 WiFi 配置")
+}
+
 func (nm *networkManager) DisconnectWiFi() error {
 	switch runtime.GOOS {
 	case "linux":

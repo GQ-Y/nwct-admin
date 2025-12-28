@@ -308,9 +308,16 @@ func (nm *networkManager) connectWiFiLinuxFallback(ssid, password string) error 
 	}
 
 	// 尽量停掉旧的 wpa_supplicant（不强依赖 pkill）
+	// 注意：需要先 disconnect，再 terminate，确保完全断开系统级别的 WiFi 连接
+	_, _ = nm.runCmd(2*time.Second, "sh", "-lc", fmt.Sprintf("wpa_cli -i %s disconnect >/dev/null 2>&1 || true", iface))
 	_, _ = nm.runCmd(2*time.Second, "sh", "-lc", fmt.Sprintf("wpa_cli -i %s terminate >/dev/null 2>&1 || true", iface))
+	// 额外清理：杀掉可能残留的 wpa_supplicant 进程（系统级别启动的）
+	_, _ = nm.runCmd(2*time.Second, "sh", "-lc", fmt.Sprintf("killall -9 wpa_supplicant >/dev/null 2>&1 || true"))
+	// 清理系统级别的 WiFi 配置（如果存在），避免自动连接
+	// 注意：不删除 /etc/wpa_supplicant.conf（可能被系统其他服务使用），只清理 /var/run/wpa_supplicant
+	_, _ = nm.runCmd(1*time.Second, "sh", "-lc", fmt.Sprintf("rm -rf /var/run/wpa_supplicant/%s >/dev/null 2>&1 || true", iface))
 
-	// 启动 wpa_supplicant
+	// 启动 wpa_supplicant（使用应用控制的临时配置）
 	if _, err := nm.runCmd(6*time.Second, "wpa_supplicant", "-B", "-i", iface, "-c", conf); err != nil {
 		return fmt.Errorf("wpa_supplicant 启动失败: %w", err)
 	}

@@ -304,8 +304,23 @@ func runCore(enableDisplay bool) {
 		}
 	}()
 
+	// 初始化设备信息（从编译时注入的值，如果数据库中没有则插入）
+	deviceInfo, err := database.GetOrInitDeviceInfo(db, config.DefaultDeviceID, config.DefaultDeviceModel)
+	if err != nil {
+		logger.Warn("初始化设备信息失败: %v，使用默认值", err)
+	} else {
+		logger.Info("设备信息: ID=%s Model=%s", deviceInfo.DeviceID, deviceInfo.DeviceModel)
+		// 更新 config 中的设备 ID（用于向后兼容）
+		if deviceInfo.DeviceID != "" && cfg.Device.ID != deviceInfo.DeviceID {
+			cfg.Device.ID = deviceInfo.DeviceID
+			_ = cfg.Save() // best-effort
+		}
+	}
+
 	// 初始化网络管理器
 	netManager := network.NewManager()
+	// 清理系统级别的 WiFi 配置，确保应用完全控制 WiFi 连接
+	network.CleanupSystemWiFiConfig()
 	// 启动时自动连接已保存WiFi（类似电脑记忆网络）
 	autoConnectWiFi(cfg, netManager)
 	// 启动时也收敛一次双网策略路由（A：有线优先，但 WiFi 依然可达）
@@ -339,10 +354,21 @@ func runCore(enableDisplay bool) {
 				_ = conn.Close()
 			}
 
+			// 从数据库读取设备信息（设备号和型号）
+			deviceID := cfg.Device.ID
+			deviceModel := ""
+			if db != nil {
+				if info, err := database.GetDeviceInfo(db); err == nil && info != nil {
+					deviceID = info.DeviceID
+					deviceModel = info.DeviceModel
+				}
+			}
+
 			realtime.Default().Broadcast("system_status", map[string]interface{}{
 				"hostname":         hostname,
 				"firmware_version": version.Version,
-				"device_id":        cfg.Device.ID,
+				"device_id":        deviceID,
+				"device_model":     deviceModel,
 				"uptime":           uptimeSec,
 				"cpu_usage":        cpuUsage,
 				"memory_usage":     memUsage,
@@ -409,6 +435,73 @@ func runCore(enableDisplay bool) {
 		cfg.FRPServer.SyncActiveFromMode()
 
 		switch cfg.FRPServer.Mode {
+		case config.FRPModeBuiltin:
+			// builtin 模式：优先从桥梁平台同步官方节点，而不是使用硬编码配置
+			// 如果 builtin.Server 为空，或者桥梁注册成功，应该从桥梁同步
+			db := database.GetDB()
+			if db == nil {
+				logger.Warn("FRP(builtin) 数据库未初始化，跳过自动连接")
+				return
+			}
+			// 确保 bridge session 可用（过期则重新注册）
+			if sess, _ := database.GetBridgeSession(db); sess == nil || database.BridgeSessionExpired(sess, 30*time.Second) {
+				bridgeRegisterIfConfigured(cfg, netManager)
+			}
+			sess, _ := database.GetBridgeSession(db)
+			if sess == nil || strings.TrimSpace(sess.DeviceToken) == "" {
+				// builtin 模式必须从桥梁同步，不能使用硬编码配置
+				logger.Warn("FRP(builtin) 缺少 bridge session，跳过自动连接（builtin 模式必须从桥梁同步）")
+				return
+			} else {
+				// 有 bridge session，尝试从桥梁同步官方节点
+				bridgeBase := config.ResolveBridgeBase(cfg)
+				if bridgeBase == "" {
+					logger.Warn("FRP(builtin) 未配置 bridge URL，使用现有配置")
+					cfg.FRPServer.SyncActiveFromMode()
+				} else {
+					dc, err := database.GetOrCreateDeviceCrypto(db)
+					if err != nil || dc == nil || strings.TrimSpace(dc.PrivKeyB64) == "" {
+						logger.Warn("FRP(builtin) 设备密钥不可用，使用现有配置")
+						cfg.FRPServer.SyncActiveFromMode()
+					} else {
+						bc := &bridgeclient.Client{
+							BaseURL:          bridgeBase,
+							DeviceToken:      strings.TrimSpace(sess.DeviceToken),
+							DeviceID:         strings.TrimSpace(cfg.Device.ID),
+							DevicePrivKeyB64: strings.TrimSpace(dc.PrivKeyB64),
+						}
+						official, err := bc.GetOfficialNodes()
+						if err != nil {
+							logger.Warn("FRP(builtin) 从桥梁同步官方节点失败: %v，跳过自动连接（builtin 模式必须从桥梁同步）", err)
+							return
+						} else if len(official) == 0 {
+							logger.Warn("FRP(builtin) 桥梁未配置官方节点，跳过自动连接")
+							return
+						} else {
+							// 从桥梁同步成功，覆盖现有配置
+							off := official[0]
+							cfg.FRPServer.Builtin = config.FRPProfile{
+								Server:       strings.TrimSpace(off.Server),
+								Token:        strings.TrimSpace(off.Token),
+								AdminAddr:    strings.TrimSpace(off.AdminAddr),
+								AdminUser:    strings.TrimSpace(off.AdminUser),
+								AdminPwd:     strings.TrimSpace(off.AdminPwd),
+								DomainSuffix: strings.TrimPrefix(strings.TrimSpace(off.DomainSuffix), "."),
+								HTTPEnabled:  off.HTTPEnabled,
+								HTTPSEnabled: off.HTTPSEnabled,
+							}
+							cfg.FRPServer.SyncActiveFromMode()
+							_ = cfg.Save()
+							logger.Info("FRP(builtin) 已从桥梁同步官方节点: %s", cfg.FRPServer.Builtin.Server)
+						}
+					}
+				}
+			}
+			// 最终检查：如果 server 仍为空，则跳过连接
+			if strings.TrimSpace(cfg.FRPServer.Server) == "" {
+				logger.Warn("FRP(builtin) 未配置 server，跳过自动连接")
+				return
+			}
 		case config.FRPModePublic:
 			// public：
 			// - 若配置了邀请码：bridge 兑换邀请码 -> 下发短期 ticket
@@ -443,10 +536,15 @@ func runCore(enableDisplay bool) {
 				logger.Warn("FRP(public) 未配置 bridge URL，跳过自动连接")
 				return
 			}
+			// 从数据库读取设备ID
+			deviceID := strings.TrimSpace(cfg.Device.ID)
+			if info, err := database.GetDeviceInfo(db); err == nil && info != nil && strings.TrimSpace(info.DeviceID) != "" {
+				deviceID = info.DeviceID
+			}
 			bc := &bridgeclient.Client{
 				BaseURL:          bridgeBase,
 				DeviceToken:      strings.TrimSpace(sess.DeviceToken),
-				DeviceID:         strings.TrimSpace(cfg.Device.ID),
+				DeviceID:         deviceID,
 				DevicePrivKeyB64: strings.TrimSpace(dc.PrivKeyB64),
 			}
 			// 如果本地已有 ticket 且尚未临近过期，则不必每次启动都换票（避免频繁请求桥梁）
@@ -493,7 +591,7 @@ func runCore(enableDisplay bool) {
 			cfg.FRPServer.Mode = config.FRPModePublic
 			cfg.FRPServer.SyncActiveFromMode()
 		default:
-			// builtin/manual：直接用当前 Active 配置连接
+			// manual：直接用当前 Active 配置连接
 			if strings.TrimSpace(cfg.FRPServer.Server) == "" {
 				logger.Warn("FRP(%s) 未配置 server，跳过自动连接", cfg.FRPServer.Mode)
 				return

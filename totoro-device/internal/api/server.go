@@ -7,6 +7,7 @@ import (
 	"path"
 	"strings"
 	"totoro-device/config"
+	"totoro-device/internal/database"
 	"totoro-device/internal/frp"
 	"totoro-device/internal/network"
 	"totoro-device/internal/scanner"
@@ -51,6 +52,26 @@ func NewServer(cfg *config.Config, db *sql.DB, netManager network.Manager, frpCl
 // Router 获取路由
 func (s *Server) Router() *gin.Engine {
 	return s.router
+}
+
+// getDeviceID 从数据库获取设备ID（如果数据库中没有则返回 config 中的值）
+func (s *Server) getDeviceID() string {
+	if s.db != nil {
+		if info, err := database.GetDeviceInfo(s.db); err == nil && info != nil && strings.TrimSpace(info.DeviceID) != "" {
+			return info.DeviceID
+		}
+	}
+	return strings.TrimSpace(s.config.Device.ID)
+}
+
+// getDeviceModel 从数据库获取设备型号（如果数据库中没有则返回空字符串）
+func (s *Server) getDeviceModel() string {
+	if s.db != nil {
+		if info, err := database.GetDeviceInfo(s.db); err == nil && info != nil {
+			return info.DeviceModel
+		}
+	}
+	return ""
 }
 
 // initRouter 初始化路由
