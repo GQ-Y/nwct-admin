@@ -1,4 +1,4 @@
-## NWCT（Totoro）项目说明
+## Totoro 项目说明
 
 本仓库是 Totoro 内网穿透体系的单仓库实现，包含三类核心组件：
 - **设备端**：`totoro-device/`（Go，运行在 Luckfox 等设备上：API + WebSocket +（可选）屏幕 UI + FRP 客户端）
@@ -42,44 +42,143 @@
 
 ### 一键部署到 Luckfox（脚本）
 
-在 `totoro-device/`：
+在 `totoro-device/` 目录下使用 `deploy_luckfox.sh` 脚本进行一键部署。
+
+#### 部署方式
+
+脚本支持两种模式：
+
+1. **非交互式模式**（推荐用于自动化/CI/CD）：
+   - 通过环境变量提供所有参数
+   - 适合脚本调用和批量部署
+
+2. **交互式模式**：
+   - 脚本会提示输入缺失的参数
+   - 适合手动部署和测试
+
+#### 环境变量说明
+
+| 变量名 | 说明 | 默认值 | 是否必需 |
+|--------|------|--------|----------|
+| `TARGET_HOST` | 开发板 IP 地址 | `192.168.2.221` | 是 |
+| `TARGET_USER` | SSH 登录用户名 | `root` | 是 |
+| `TARGET_PASS` | SSH 登录密码 | - | 是（或使用 SSH key） |
+| `TARGET_PORT` | SSH 端口 | `22` | 否 |
+| `DEVICE_MODEL` | 设备型号 | `ultra` | 是（ultra/plus/pro） |
+| `BRIDGE_API_URL` | 桥梁 API 地址 | - | 否（留空使用默认值） |
+| `DEVICE_ID` | 设备号 | - | 否（留空自动生成随机设备号） |
+| `NWCT_HTTP_PORT` | 设备端 HTTP 端口 | `18080` | 否 |
+| `TARGET_PATH` | 上传路径 | `/root/totoro-device` | 否（脚本会智能选择） |
+| `INTERACTIVE` | 是否交互式 | `0` | 否 |
+
+#### 完整部署命令示例
+
+**Ultra 开发板（带屏版本）：**
 
 ```bash
-# 非交互式（推荐用于自动化/复制粘贴）：通过环境变量提供连接信息
-TARGET_HOST=192.168.2.174 TARGET_USER=root TARGET_PASS=luckfox DEVICE_MODEL=ultra bash ./deploy_luckfox.sh
+cd totoro-device
+BRIDGE_API_URL="http://192.168.2.32:18090" \
+TARGET_HOST=192.168.2.127 \
+TARGET_USER=root \
+TARGET_PASS=luckfox \
+DEVICE_MODEL=ultra \
+INTERACTIVE=0 \
+./deploy_luckfox.sh
 ```
 
-或使用 **交互式输入**（脚本会提示输入 IP/账号/密码等；如果你已提前通过环境变量传入，则不会重复提问）：
+**Pro 开发板（无屏版本）：**
 
 ```bash
-INTERACTIVE=1 bash ./deploy_luckfox.sh
+cd totoro-device
+BRIDGE_API_URL="http://192.168.2.32:18090" \
+TARGET_HOST=192.168.2.182 \
+TARGET_USER=root \
+TARGET_PASS=luckfox \
+DEVICE_MODEL=pro \
+INTERACTIVE=0 \
+./deploy_luckfox.sh
 ```
 
-- **Ultra**：`DEVICE_MODEL=ultra`（默认会带 `device_display` tag，并默认 `-display=true`）
-- **Plus/Pro**：`DEVICE_MODEL=plus` 或 `DEVICE_MODEL=pro`（默认无 tag、无 `-display` 参数）
+**交互式部署：**
 
-脚本的两种形式通过 `INTERACTIVE` 控制：
-- `INTERACTIVE=0`（默认）：非交互式，仅使用环境变量/脚本默认值
-- `INTERACTIVE=1`：交互式输入（stdin 不是 TTY 时会自动降级为非交互，避免卡住）
+```bash
+cd totoro-device
+INTERACTIVE=1 ./deploy_luckfox.sh
+```
+
+脚本会依次提示输入：
+- 设备 IP（TARGET_HOST）
+- 登录账号（TARGET_USER）
+- SSH 端口（TARGET_PORT）
+- SSH 密码（TARGET_PASS）
+- 设备型号（DEVICE_MODEL：ultra/plus/pro）
+- 设备端测试端口（NWCT_HTTP_PORT）
+- 桥梁 API 地址（BRIDGE_API_URL，留空则使用默认值）
+- 设备号（DEVICE_ID，留空则自动生成随机设备号）
+- 上传路径（TARGET_PATH）
+
+#### 脚本功能
+
+部署脚本会自动完成以下操作：
+
+1. **检测开发板架构**：自动识别 ARMv7/ARM64
+2. **构建前端**：自动构建 `totoro-device-web` 并嵌入到二进制
+3. **交叉编译后端**：
+   - 根据 `DEVICE_MODEL` 自动选择编译标签（ultra 带 `device_display`）
+   - 自动生成随机设备号（如果未指定）
+   - 注入设备名称、设备号、设备型号、桥梁 API 地址到二进制
+4. **智能路径选择**：根据可用空间自动选择最佳上传路径
+5. **上传并设置权限**：上传二进制文件并设置可执行权限
+6. **安装开机自启**：自动安装 `/etc/init.d/S99totoro-device` 脚本
+7. **启动服务**：后台启动服务并验证运行状态
+
+#### 设备信息注入
+
+编译时会自动注入以下信息到二进制文件：
+
+- **设备号**：每次编译自动生成随机设备号（格式：`DEV` + 6位随机数字），或通过 `DEVICE_ID` 手动指定
+- **设备型号**：根据 `DEVICE_MODEL` 自动设置（ultra/pro/plus）
+- **设备名称**：根据设备型号自动设置（Totoro S1 Ultra / Totoro S1 Pro / Totoro S1 Plus）
+- **桥梁 API 地址**：通过 `BRIDGE_API_URL` 环境变量注入（用户不可修改，优先级最高）
+
+这些信息会在应用启动时写入数据库，WebUI 会从数据库读取并显示。
 
 ### 手动交叉编译（示例）
+
+如果需要手动编译（不推荐，建议使用部署脚本）：
 
 - **带屏版本（Ultra）**：
 
 ```bash
 cd totoro-device
-GOOS=linux GOARCH=arm GOARM=7 CGO_ENABLED=0 go build -tags device_display -o bin/totoro-device_linux_armv7_display .
+GOOS=linux GOARCH=arm GOARM=7 CGO_ENABLED=0 \
+go build -tags device_display \
+  -ldflags "-s -w \
+    -X 'totoro-device/config.DefaultDeviceName=Totoro S1 Ultra' \
+    -X 'totoro-device/config.DefaultDeviceID=DEV123456' \
+    -X 'totoro-device/config.DefaultDeviceModel=ultra' \
+    -X 'totoro-device/config.EmbeddedBridgeURL=http://192.168.2.32:18090'" \
+  -o bin/totoro-device_linux_armv7_ultra_display .
 ```
 
 - **无屏版本（Plus/Pro）**：
 
 ```bash
 cd totoro-device
-GOOS=linux GOARCH=arm GOARM=7 CGO_ENABLED=0 go build -o bin/totoro-device_linux_armv7 .
+GOOS=linux GOARCH=arm GOARM=7 CGO_ENABLED=0 \
+go build \
+  -ldflags "-s -w \
+    -X 'totoro-device/config.DefaultDeviceName=Totoro S1 Pro' \
+    -X 'totoro-device/config.DefaultDeviceID=DEV123456' \
+    -X 'totoro-device/config.DefaultDeviceModel=pro' \
+    -X 'totoro-device/config.EmbeddedBridgeURL=http://192.168.2.32:18090'" \
+  -o bin/totoro-device_linux_armv7_pro .
 ```
 
 ### 运行（设备上）
-- 带屏版本：建议 `-display=true`（无屏版本不需要/也不会启用 UI）
+
+- **带屏版本（Ultra）**：建议 `-display=true`
+- **无屏版本（Plus/Pro）**：不需要/也不会启用 UI
 
 ## 节点端（totoro-node）构建与部署（Linux）
 
