@@ -131,11 +131,11 @@ func (s *Server) initRouter() {
 		api.GET("/devices/scan/status", s.authMiddleware(), s.handleScanStatus)
 
 		// 网络工具箱
-		api.POST("/tools/ping", s.authMiddleware(), s.handlePing)
-		api.POST("/tools/traceroute", s.authMiddleware(), s.handleTraceroute)
-		api.POST("/tools/speedtest", s.authMiddleware(), s.handleSpeedTest)
+		// 端口扫描和 DNS 查询保留（设备扫描核心功能）
 		api.POST("/tools/portscan", s.authMiddleware(), s.handlePortScan)
 		api.POST("/tools/dns", s.authMiddleware(), s.handleDNS)
+		// Ping、Traceroute、SpeedTest 仅在非 minimal 版本中可用
+		s.registerToolRoutes(api)
 
 		// FRP管理
 		api.GET("/frp/status", s.authMiddleware(), s.handleFRPStatus)
