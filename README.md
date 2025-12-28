@@ -143,6 +143,55 @@ INTERACTIVE=1 ./deploy_luckfox.sh
 
 这些信息会在应用启动时写入数据库，WebUI 会从数据库读取并显示。
 
+#### Plus 开发板特殊说明
+
+Plus 开发板由于内存和存储限制（总内存约 33MB，根文件系统约 67MB），需要将系统运行在 SD 卡上。
+
+**步骤一：烧录 MicroSD 镜像到 SD 卡（推荐：通过 SSH 在开发板上烧录）**
+
+```bash
+# 确保 SD 卡已插入 Plus 开发板，开发板可以 SSH 连接
+cd totoro-device/scripts
+TARGET_HOST=192.168.2.226 \
+TARGET_USER=root \
+TARGET_PASS=luckfox \
+FORCE=1 \
+./flash_plus_sdcard_remote.sh
+```
+
+脚本会自动：
+- 检测开发板上的 SD 卡设备
+- 解压镜像文件
+- 按分区烧录（解析 `sd_update.txt` 获取分区偏移，按正确偏移烧录各个分区镜像）
+- 流式传输各个分区镜像到开发板并烧录
+
+**步骤二：重启开发板，确认从 SD 卡启动**
+
+重启后，检查是否从 SD 卡启动：
+```bash
+ssh root@<开发板IP> 'cat /proc/cmdline | grep storagemedia'
+```
+
+如果显示 `storagemedia=sd` 或 `root=/dev/mmcblk1p7`，说明已从 SD 卡启动。
+
+**步骤三：部署 totoro-device**
+
+```bash
+cd totoro-device
+BRIDGE_API_URL="http://192.168.2.32:18090" \
+TARGET_HOST=<开发板IP> \
+TARGET_USER=root \
+TARGET_PASS=luckfox \
+DEVICE_MODEL=plus \
+INTERACTIVE=0 \
+./deploy_luckfox.sh
+```
+
+> **注意**：
+> - Plus 版本会自动使用 `device_minimal` build tag，移除了 Ping、Traceroute、SpeedTest 等非必要工具，但保留了设备扫描和端口扫描等核心功能
+> - 如果开发板重启后仍从内置存储启动，请尝试按住 BOOT 键的同时重启开发板
+> - 从 SD 卡启动后，根文件系统会有更大的存储空间（约 5.8GB），可以正常运行 totoro-device
+
 ### 手动交叉编译（示例）
 
 如果需要手动编译（不推荐，建议使用部署脚本）：

@@ -118,14 +118,18 @@ else
   echo "设备号: ${DEVICE_ID}（手动指定，编译时注入）"
 fi
 
-# 编译 tags：ultra 默认带屏；plus/pro 默认无屏
+# 编译 tags：ultra 默认带屏；plus 使用 minimal（移除非必要工具）；pro 默认无屏
 BUILD_TAGS="${BUILD_TAGS:-}"
 if [[ -z "${BUILD_TAGS}" ]]; then
   case "${DEVICE_MODEL}" in
     ultra|ultra-w|ultra_b|ultra_w)
       BUILD_TAGS="device_display"
       ;;
-    plus|pro)
+    plus)
+      # Plus 使用 minimal 版本：移除 Ping、Traceroute、SpeedTest 等非必要工具
+      BUILD_TAGS="device_minimal"
+      ;;
+    pro)
       BUILD_TAGS=""
       ;;
     *)
@@ -284,7 +288,15 @@ fi
 echo "[3/5] 本机交叉编译后端（Buildroot 友好：CGO=0）..."
 # 输出文件名格式：totoro-device_linux_armv7_ultra_display
 # 或：totoro-device_linux_armv7_pro
-OUT="${PROJECT_DIR}/bin/totoro-device_${GOOS}_${GOARCH}${GOARM:+v${GOARM}}_${DEVICE_MODEL}${BUILD_TAGS:+_display}"
+# 或：totoro-device_linux_armv7_plus（minimal 版本）
+if [[ "${BUILD_TAGS}" == *"device_display"* ]]; then
+  OUT_SUFFIX="_display"
+elif [[ "${BUILD_TAGS}" == *"device_minimal"* ]]; then
+  OUT_SUFFIX="_minimal"
+else
+  OUT_SUFFIX=""
+fi
+OUT="${PROJECT_DIR}/bin/totoro-device_${GOOS}_${GOARCH}${GOARM:+v${GOARM}}_${DEVICE_MODEL}${OUT_SUFFIX}"
 mkdir -p "${PROJECT_DIR}/bin"
 
 pushd "${PROJECT_DIR}" >/dev/null
