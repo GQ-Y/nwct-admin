@@ -95,7 +95,7 @@ type CloudStatusPage struct {
 	pm       *PageManager
 	services *AppServices
 
-	lastLatency int
+	lastLatency   int
 	lastLatencyAt time.Time
 }
 
@@ -110,6 +110,11 @@ func NewCloudStatusPage(pm *PageManager) *CloudStatusPage {
 }
 
 func (p *CloudStatusPage) SetServices(s *AppServices) { p.services = s }
+
+func (p *CloudStatusPage) OnEnter() {
+	// 进入页面时重置延迟计时，确保立即刷新
+	p.lastLatencyAt = time.Time{}
+}
 
 func (p *CloudStatusPage) Render(g *Graphics) error {
 	g.DrawRect(0, 0, 480, 480, ColorBackgroundStart)
@@ -214,5 +219,3 @@ func (p *CloudStatusPage) latencyText() string {
 	}
 	return fmt.Sprintf("%d ms", p.lastLatency)
 }
-
-

@@ -133,27 +133,51 @@ if [[ -n "${TARGET_PASS}" ]]; then
 fi
 
 ssh_cmd() {
-  "${SSHPASS_PREFIX[@]}" ssh -p "${TARGET_PORT}" \
-    -o ConnectTimeout=8 \
-    -o StrictHostKeyChecking=accept-new \
-    -o PubkeyAuthentication=no \
-    -o PasswordAuthentication=yes \
-    -o KbdInteractiveAuthentication=yes \
-    -o PreferredAuthentications=password,keyboard-interactive \
-    -o NumberOfPasswordPrompts=1 \
-    "${TARGET_USER}@${TARGET_HOST}" "$@"
+  if [[ ${#SSHPASS_PREFIX[@]} -gt 0 ]]; then
+    "${SSHPASS_PREFIX[@]}" ssh -p "${TARGET_PORT}" \
+      -o ConnectTimeout=8 \
+      -o StrictHostKeyChecking=accept-new \
+      -o PubkeyAuthentication=no \
+      -o PasswordAuthentication=yes \
+      -o KbdInteractiveAuthentication=yes \
+      -o PreferredAuthentications=password,keyboard-interactive \
+      -o NumberOfPasswordPrompts=1 \
+      "${TARGET_USER}@${TARGET_HOST}" "$@"
+  else
+    ssh -p "${TARGET_PORT}" \
+      -o ConnectTimeout=8 \
+      -o StrictHostKeyChecking=accept-new \
+      -o PubkeyAuthentication=no \
+      -o PasswordAuthentication=yes \
+      -o KbdInteractiveAuthentication=yes \
+      -o PreferredAuthentications=password,keyboard-interactive \
+      -o NumberOfPasswordPrompts=1 \
+      "${TARGET_USER}@${TARGET_HOST}" "$@"
+  fi
 }
 
 scp_cmd() {
-  "${SSHPASS_PREFIX[@]}" scp -P "${TARGET_PORT}" \
-    -o ConnectTimeout=8 \
-    -o StrictHostKeyChecking=accept-new \
-    -o PubkeyAuthentication=no \
-    -o PasswordAuthentication=yes \
-    -o KbdInteractiveAuthentication=yes \
-    -o PreferredAuthentications=password,keyboard-interactive \
-    -o NumberOfPasswordPrompts=1 \
-    "$@"
+  if [[ ${#SSHPASS_PREFIX[@]} -gt 0 ]]; then
+    "${SSHPASS_PREFIX[@]}" scp -P "${TARGET_PORT}" \
+      -o ConnectTimeout=8 \
+      -o StrictHostKeyChecking=accept-new \
+      -o PubkeyAuthentication=no \
+      -o PasswordAuthentication=yes \
+      -o KbdInteractiveAuthentication=yes \
+      -o PreferredAuthentications=password,keyboard-interactive \
+      -o NumberOfPasswordPrompts=1 \
+      "$@"
+  else
+    scp -P "${TARGET_PORT}" \
+      -o ConnectTimeout=8 \
+      -o StrictHostKeyChecking=accept-new \
+      -o PubkeyAuthentication=no \
+      -o PasswordAuthentication=yes \
+      -o KbdInteractiveAuthentication=yes \
+      -o PreferredAuthentications=password,keyboard-interactive \
+      -o NumberOfPasswordPrompts=1 \
+      "$@"
+  fi
 }
 
 echo "[1/4] 检测开发板架构..."

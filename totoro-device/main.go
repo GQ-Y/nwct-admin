@@ -286,6 +286,10 @@ func runCore(enableDisplay bool) {
 		logger.Fatal("加载配置失败: %v", err)
 	}
 
+	// RESET 键通常是硬复位，系统无法收到“长按事件”。
+	// 这里用“短时间内多次重启”作为恢复出厂触发方式（类似路由器的连按复位）。
+	deviceboot.MaybeTriggerFactoryResetByMultiReboot(cfg)
+
 	// 应用系统设置（音量/亮度等）——best-effort，不阻塞启动
 	deviceboot.ApplySystemSettings(cfg)
 

@@ -23,3 +23,4 @@ totoro-node/node.db-shm
 .gitignore
 totoro-node/node.db
 totoro-node/node.db-wal
+totoro-device/bin/totoro-device_linux_armv7_display
