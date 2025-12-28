@@ -149,6 +149,9 @@ func (s *Server) handleFRPConfigSave(c *gin.Context) {
 		AdminUser    string `json:"admin_user"`
 		AdminPwd     string `json:"admin_pwd"`
 		DomainSuffix string `json:"domain_suffix"`
+		// 使用指针，nil 表示未设置（使用默认值），非 nil 表示用户显式设置
+		HTTPEnabled  *bool `json:"http_enabled,omitempty"`
+		HTTPSEnabled *bool `json:"https_enabled,omitempty"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, models.ErrorResponse(400, "参数错误: "+err.Error()))
@@ -171,8 +174,22 @@ func (s *Server) handleFRPConfigSave(c *gin.Context) {
 	if strings.TrimSpace(req.AdminPwd) != "" || req.AdminPwd == "" {
 		p.AdminPwd = strings.TrimSpace(req.AdminPwd)
 	}
+	// 手动模式：域名支持自由填写，不做格式限制（用户自己部署的 frps，不做限制）
 	if strings.TrimSpace(req.DomainSuffix) != "" || req.DomainSuffix == "" {
-		p.DomainSuffix = strings.TrimPrefix(strings.TrimSpace(req.DomainSuffix), ".")
+		p.DomainSuffix = strings.TrimSpace(req.DomainSuffix)
+	}
+
+	// 手动模式：默认全协议开放（HTTP 和 HTTPS），用户自己部署的 frps 不做限制
+	// 如果用户没有显式设置（nil），则默认开启；如果用户显式设置了，则使用用户的值
+	if req.HTTPEnabled == nil {
+		p.HTTPEnabled = true
+	} else {
+		p.HTTPEnabled = *req.HTTPEnabled
+	}
+	if req.HTTPSEnabled == nil {
+		p.HTTPSEnabled = true
+	} else {
+		p.HTTPSEnabled = *req.HTTPSEnabled
 	}
 
 	s.config.FRPServer.Mode = config.FRPModeManual
@@ -1851,6 +1868,12 @@ func (s *Server) handleFRPConnect(c *gin.Context) {
 			p.AdminPwd = strings.TrimSpace(req.AdminPwd)
 		}
 		// domain_suffix 仍通过 /config 更新（这里不改动）
+		// 手动模式：如果 HTTPEnabled/HTTPSEnabled 未设置，默认开启（全协议开放）
+		if !p.HTTPEnabled && !p.HTTPSEnabled {
+			// 如果两个都是 false，可能是新配置，默认开启
+			p.HTTPEnabled = true
+			p.HTTPSEnabled = true
+		}
 		s.config.FRPServer.Manual = p
 		s.config.FRPServer.SyncActiveFromMode()
 		_ = s.config.Save()
@@ -2163,18 +2186,22 @@ func (s *Server) handleFRPAddTunnel(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, models.ErrorResponse(400, "参数错误: "+err.Error()))
 		return
 	}
-	// HTTP/HTTPS 隧道能力由桥梁节点配置下发决定：未开启或缺少 domain_suffix 时禁止创建
+	// HTTP/HTTPS 隧道能力检查
+	// 手动模式：不做限制，允许创建 HTTP/HTTPS 隧道（用户自己部署的 frps，不做限制）
+	// builtin/public 模式：由桥梁节点配置下发决定，未开启或缺少 domain_suffix 时禁止创建
 	t := strings.ToLower(strings.TrimSpace(req.Type))
-	if t == "http" {
-		if !s.config.FRPServer.HTTPEnabled || strings.TrimSpace(s.config.FRPServer.DomainSuffix) == "" {
-			c.JSON(http.StatusBadRequest, models.ErrorResponse(400, "当前节点未开启 HTTP 隧道或缺少 domain_suffix"))
-			return
+	if s.config.FRPServer.Mode != config.FRPModeManual {
+		if t == "http" {
+			if !s.config.FRPServer.HTTPEnabled || strings.TrimSpace(s.config.FRPServer.DomainSuffix) == "" {
+				c.JSON(http.StatusBadRequest, models.ErrorResponse(400, "当前节点未开启 HTTP 隧道或缺少 domain_suffix"))
+				return
+			}
 		}
-	}
-	if t == "https" {
-		if !s.config.FRPServer.HTTPSEnabled || strings.TrimSpace(s.config.FRPServer.DomainSuffix) == "" {
-			c.JSON(http.StatusBadRequest, models.ErrorResponse(400, "当前节点未开启 HTTPS 隧道或缺少 domain_suffix"))
-			return
+		if t == "https" {
+			if !s.config.FRPServer.HTTPSEnabled || strings.TrimSpace(s.config.FRPServer.DomainSuffix) == "" {
+				c.JSON(http.StatusBadRequest, models.ErrorResponse(400, "当前节点未开启 HTTPS 隧道或缺少 domain_suffix"))
+				return
+			}
 		}
 	}
 
@@ -2215,18 +2242,22 @@ func (s *Server) handleFRPUpdateTunnel(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, models.ErrorResponse(400, "参数错误: "+err.Error()))
 		return
 	}
-	// 同上：禁止绕过前端创建 HTTP/HTTPS 隧道
+	// HTTP/HTTPS 隧道能力检查
+	// 手动模式：不做限制，允许创建 HTTP/HTTPS 隧道（用户自己部署的 frps，不做限制）
+	// builtin/public 模式：由桥梁节点配置下发决定，未开启或缺少 domain_suffix 时禁止创建
 	t := strings.ToLower(strings.TrimSpace(req.Type))
-	if t == "http" {
-		if !s.config.FRPServer.HTTPEnabled || strings.TrimSpace(s.config.FRPServer.DomainSuffix) == "" {
-			c.JSON(http.StatusBadRequest, models.ErrorResponse(400, "当前节点未开启 HTTP 隧道或缺少 domain_suffix"))
-			return
+	if s.config.FRPServer.Mode != config.FRPModeManual {
+		if t == "http" {
+			if !s.config.FRPServer.HTTPEnabled || strings.TrimSpace(s.config.FRPServer.DomainSuffix) == "" {
+				c.JSON(http.StatusBadRequest, models.ErrorResponse(400, "当前节点未开启 HTTP 隧道或缺少 domain_suffix"))
+				return
+			}
 		}
-	}
-	if t == "https" {
-		if !s.config.FRPServer.HTTPSEnabled || strings.TrimSpace(s.config.FRPServer.DomainSuffix) == "" {
-			c.JSON(http.StatusBadRequest, models.ErrorResponse(400, "当前节点未开启 HTTPS 隧道或缺少 domain_suffix"))
-			return
+		if t == "https" {
+			if !s.config.FRPServer.HTTPSEnabled || strings.TrimSpace(s.config.FRPServer.DomainSuffix) == "" {
+				c.JSON(http.StatusBadRequest, models.ErrorResponse(400, "当前节点未开启 HTTPS 隧道或缺少 domain_suffix"))
+				return
+			}
 		}
 	}
 

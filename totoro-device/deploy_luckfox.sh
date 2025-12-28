@@ -211,8 +211,33 @@ case "${ARCH_RAW}" in
     ;;
 esac
 
-echo "[2/4] 本机交叉编译（Buildroot 友好：CGO=0）..."
-OUT="${PROJECT_DIR}/bin/totoro-device_${GOOS}_${GOARCH}${GOARM:+v${GOARM}}${BUILD_TAGS:+_display}"
+echo "[2/5] 构建前端（totoro-device-web）..."
+WEBUI_DIR="${PROJECT_DIR}/../totoro-device-web"
+if [[ ! -d "${WEBUI_DIR}" ]]; then
+  echo "警告：未找到前端目录 ${WEBUI_DIR}，跳过前端构建" >&2
+else
+  pushd "${WEBUI_DIR}" >/dev/null
+    # 检查包管理器：优先 pnpm，其次 npm
+    if command -v pnpm >/dev/null 2>&1; then
+      echo "使用 pnpm 构建前端..."
+      pnpm install --frozen-lockfile 2>&1 | grep -v "WARN" || true
+      pnpm build
+    elif command -v npm >/dev/null 2>&1; then
+      echo "使用 npm 构建前端..."
+      npm ci 2>&1 | grep -v "WARN" || true
+      npm run build
+    else
+      echo "错误：未找到 pnpm 或 npm，无法构建前端" >&2
+      exit 1
+    fi
+  popd >/dev/null
+  echo "前端构建完成，产物已输出到 ${PROJECT_DIR}/internal/webui/dist/"
+fi
+
+echo "[3/5] 本机交叉编译后端（Buildroot 友好：CGO=0）..."
+# 输出文件名格式：totoro-device_linux_armv7_ultra_display
+# 或：totoro-device_linux_armv7_pro
+OUT="${PROJECT_DIR}/bin/totoro-device_${GOOS}_${GOARCH}${GOARM:+v${GOARM}}_${DEVICE_MODEL}${BUILD_TAGS:+_display}"
 mkdir -p "${PROJECT_DIR}/bin"
 
 pushd "${PROJECT_DIR}" >/dev/null
@@ -259,7 +284,7 @@ echo /root
   fi
 fi
 
-echo "[3/4] 上传到开发板: ${TARGET_USER}@${TARGET_HOST}:${RESOLVED_TARGET_PATH}"
+echo "[4/5] 上传到开发板: ${TARGET_USER}@${TARGET_HOST}:${RESOLVED_TARGET_PATH}"
 # 直接覆盖：删除旧的，不保留备份
 # 同时尽量停掉旧进程、清理 staging，避免占满 /tmp（尤其是 Pro/Plus 的 tmpfs 较小）
 ssh_cmd "sh -lc '
@@ -394,15 +419,15 @@ chmod +x /etc/init.d/S99totoro-device
 '"
 fi
 
-echo "[4/4] 远程运行测试（前台运行，Ctrl+C 可中断；或你也可以改用 nohup 后台）..."
+echo "[5/5] 远程运行测试（前台运行，Ctrl+C 可中断；或你也可以改用 nohup 后台）..."
 DAEMON_SRC="${RESOLVED_TARGET_PATH}"
 DAEMON_RUN="${RESOLVED_TARGET_PATH}"
 echo "执行（后台）：${DAEMON_RUN} ${RUN_ARGS}"
 ssh_cmd "sh -lc '
 set -e
 
-# 使用 /tmp 下的“测试配置”，避免改动系统 /etc 配置、避免占用 80 端口
-mkdir -p /tmp/nwct /tmp/nwct/log /tmp/nwct/bin
+# 使用持久化配置路径（与开机自启脚本一致），确保配置在重启后不丢失
+mkdir -p /etc/nwct /tmp/nwct/log /tmp/nwct/bin
 
 # 智能选择 NWCT_CACHE_DIR（给 frpc 落盘用）：必须可写 + 可执行 + 空间足够
 # - frpc 大约 15MB，这里按 20MB 预留（含余量）
@@ -465,21 +490,25 @@ if [ \"\$DAEMON_SRC\" != \"\$DAEMON_RUN\" ]; then
   cp -f \"\$DAEMON_SRC\" \"\$DAEMON_RUN\"
   chmod +x \"\$DAEMON_RUN\"
 fi
-cat >/tmp/nwct/config.json <<EOF
+# 如果 /etc/nwct/config.json 不存在，创建默认配置（避免覆盖用户已有配置）
+if [ ! -f /etc/nwct/config.json ]; then
+  cat >/etc/nwct/config.json <<EOF
 {
   \"initialized\": false,
   \"device\": {\"id\": \"DEV001\", \"name\": \"${DEVICE_NAME}\"},
   \"network\": {\"interface\": \"eth0\", \"ip_mode\": \"dhcp\"},
   \"scanner\": {\"auto_scan\": false, \"scan_interval\": 300, \"timeout\": 30, \"concurrency\": 2},
   \"server\": {\"port\": ${NWCT_HTTP_PORT}, \"host\": \"0.0.0.0\"},
-  \"database\": {\"path\": \"/tmp/nwct/devices.db\"},
+  \"database\": {\"path\": \"/var/nwct/devices.db\"},
   \"auth\": {\"password_hash\": \"\"}
 }
 EOF
+fi
 
-export NWCT_CONFIG_PATH=/tmp/nwct/config.json
-export NWCT_DB_PATH=/tmp/nwct/devices.db
-export NWCT_LOG_DIR=/tmp/nwct/log
+# 使用持久化配置路径（与开机自启脚本一致），确保配置在重启后不丢失
+export NWCT_CONFIG_PATH=/etc/nwct/config.json
+export NWCT_DB_PATH=/var/nwct/devices.db
+export NWCT_LOG_DIR=/var/log/nwct
 
 # 尝试停止上一次运行（如果有）
 if [ -f /tmp/nwct.pid ]; then

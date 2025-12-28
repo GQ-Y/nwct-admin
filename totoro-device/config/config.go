@@ -224,7 +224,13 @@ func (c *FRPServerConfig) SyncActiveFromMode() {
 	c.AdminUser = strings.TrimSpace(p.AdminUser)
 	c.AdminPwd = strings.TrimSpace(p.AdminPwd)
 	c.TotoroTicket = strings.TrimSpace(p.TotoroTicket)
-	c.DomainSuffix = strings.TrimPrefix(strings.TrimSpace(p.DomainSuffix), ".")
+	// 手动模式：域名不做格式限制，直接使用用户填写的值
+	// builtin/public 模式：移除前导点（兼容旧格式）
+	if c.Mode == FRPModeManual {
+		c.DomainSuffix = strings.TrimSpace(p.DomainSuffix)
+	} else {
+		c.DomainSuffix = strings.TrimPrefix(strings.TrimSpace(p.DomainSuffix), ".")
+	}
 	c.HTTPEnabled = p.HTTPEnabled
 	c.HTTPSEnabled = p.HTTPSEnabled
 }
@@ -448,11 +454,13 @@ func LoadConfig() (*Config, error) {
 
 	// FRP defaults：三种模式 + Active 展开
 	modeBefore := cfg.FRPServer.Mode
-	serverBefore := strings.TrimSpace(cfg.FRPServer.Server)
-	domainBefore := strings.TrimSpace(cfg.FRPServer.DomainSuffix)
+	// 先同步 Active 字段（从 mode 对应的 profile 展开）
 	cfg.FRPServer.SyncActiveFromMode()
-	// 如果之前没有 mode 或 server/域名为空，说明我们补齐过默认值
-	if modeBefore == "" || serverBefore == "" || domainBefore == "" {
+	// 只有在 mode 为空时才补齐默认值（不要因为 server/domain 为空就覆盖用户已设置的 mode）
+	if modeBefore == "" {
+		// mode 为空，说明是旧配置或新安装，使用默认 builtin 模式
+		cfg.FRPServer.Mode = FRPModeBuiltin
+		cfg.FRPServer.SyncActiveFromMode()
 		changed = true
 	}
 

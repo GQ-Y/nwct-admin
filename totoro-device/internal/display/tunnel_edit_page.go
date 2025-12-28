@@ -4,6 +4,7 @@ import (
 	"strconv"
 	"strings"
 
+	appcfg "totoro-device/config"
 	"totoro-device/internal/frp"
 )
 
@@ -18,12 +19,12 @@ type TunnelEditPage struct {
 	originName string
 	tunnel     *frp.Tunnel
 
-	selectedType string
+	selectedType    string
 	fallbackEnabled bool
 
-	nameInput      *InputField
-	localIPInput   *InputField
-	localPortInput *InputField
+	nameInput       *InputField
+	localIPInput    *InputField
+	localPortInput  *InputField
 	remotePortInput *InputField
 	domainInput     *InputField
 
@@ -70,7 +71,8 @@ func NewTunnelEditPage(pm *PageManager) *TunnelEditPage {
 	p.remotePortInput.placeholder = "远程端口（0=自动分配）"
 
 	p.domainInput = NewInputField(24, 338, 432, 46)
-	p.domainInput.placeholder = "域名（custom_domains，留空自动生成）"
+	// placeholder 会在 layout 中根据 FRP 模式动态更新
+	p.domainInput.placeholder = "域名"
 
 	p.keyboard = NewVirtualKeyboard(480-240, 480, 240)
 	p.keyboard.onEnter = func() { p.keyboard.Hide() }
@@ -80,7 +82,7 @@ func NewTunnelEditPage(pm *PageManager) *TunnelEditPage {
 
 func (p *TunnelEditPage) SetServices(s *AppServices) { p.services = s }
 
-func (p *TunnelEditPage) contentTop() int { return 60 }   // NavBar 高度
+func (p *TunnelEditPage) contentTop() int { return 60 } // NavBar 高度
 func (p *TunnelEditPage) visibleBottom() int {
 	// 键盘弹出时，内容区底部受键盘遮挡
 	if p.keyboard != nil && p.keyboard.isVisible {
@@ -122,6 +124,23 @@ func (p *TunnelEditPage) layout() (contentBottom int) {
 	// 下面开始计算“相对 contentTop 的真实内容高度”（与 scrollOffset 无关）
 	relCursorBottom := 286 + 46
 	if p.selectedType == "http" || p.selectedType == "https" {
+		// 根据 FRP 模式动态更新 placeholder
+		if p.services != nil && p.services.Config != nil {
+			mode := p.services.Config.FRPServer.Mode
+			if mode == appcfg.FRPModeManual {
+				p.domainInput.placeholder = "自定义域名（如：example.com）"
+			} else {
+				domainSuffix := strings.TrimSpace(p.services.Config.FRPServer.DomainSuffix)
+				if domainSuffix != "" {
+					domainSuffix = strings.TrimPrefix(domainSuffix, ".")
+					p.domainInput.placeholder = "域名前缀（如：subdomain）"
+				} else {
+					p.domainInput.placeholder = "域名前缀"
+				}
+			}
+		} else {
+			p.domainInput.placeholder = "域名"
+		}
 		// toggle 放在 domain input 下方
 		relToggleLabelTop := 286 + 46 + 16
 		relToggleY := relToggleLabelTop + 22 // pill top
@@ -178,7 +197,43 @@ func (p *TunnelEditPage) SetTunnel(t *frp.Tunnel) {
 		p.localIPInput.SetText(t.LocalIP)
 		p.localPortInput.SetText(strconv.Itoa(t.LocalPort))
 		p.remotePortInput.SetText(strconv.Itoa(t.RemotePort))
-		p.domainInput.SetText(strings.TrimSpace(t.Domain))
+
+		// 根据 FRP 模式处理域名显示：
+		// - 手动模式：直接显示完整域名
+		// - builtin/public 模式：如果是完整域名，提取前缀；否则直接显示
+		rawDomain := strings.TrimSpace(t.Domain)
+		if rawDomain != "" && (t.Type == "http" || t.Type == "https") {
+			if p.services != nil && p.services.Config != nil {
+				mode := p.services.Config.FRPServer.Mode
+				if mode != appcfg.FRPModeManual {
+					// builtin/public 模式：尝试提取前缀
+					domainSuffix := strings.TrimSpace(p.services.Config.FRPServer.DomainSuffix)
+					if domainSuffix != "" {
+						domainSuffix = strings.TrimPrefix(domainSuffix, ".")
+						if strings.HasSuffix(strings.ToLower(rawDomain), "."+strings.ToLower(domainSuffix)) {
+							// 提取前缀
+							prefix := rawDomain[:len(rawDomain)-len(domainSuffix)-1]
+							p.domainInput.SetText(prefix)
+						} else {
+							// 不匹配后缀，可能是完整域名，直接显示
+							p.domainInput.SetText(rawDomain)
+						}
+					} else {
+						// 没有配置后缀，直接显示
+						p.domainInput.SetText(rawDomain)
+					}
+				} else {
+					// 手动模式：直接显示完整域名
+					p.domainInput.SetText(rawDomain)
+				}
+			} else {
+				// 无法获取配置，直接显示
+				p.domainInput.SetText(rawDomain)
+			}
+		} else {
+			p.domainInput.SetText(rawDomain)
+		}
+
 		if strings.TrimSpace(t.Type) != "" {
 			p.selectedType = strings.ToLower(strings.TrimSpace(t.Type))
 		} else {
@@ -485,7 +540,35 @@ func (p *TunnelEditPage) save() {
 	domain := ""
 	fb := false
 	if tt == "http" || tt == "https" {
-		domain = strings.TrimSpace(p.domainInput.GetText())
+		domainInput := strings.TrimSpace(p.domainInput.GetText())
+		// 根据 FRP 模式处理域名：
+		// - 手动模式：直接使用用户输入的完整域名
+		// - builtin/public 模式：如果包含点号，视为完整域名；否则拼接默认后缀
+		if p.services != nil && p.services.Config != nil {
+			mode := p.services.Config.FRPServer.Mode
+			if mode == appcfg.FRPModeManual {
+				// 手动模式：直接使用完整域名
+				domain = domainInput
+			} else {
+				// builtin/public 模式：若包含点号，视为完整域名；否则拼接默认后缀
+				if domainInput != "" {
+					if strings.Contains(domainInput, ".") {
+						domain = domainInput
+					} else {
+						domainSuffix := strings.TrimSpace(p.services.Config.FRPServer.DomainSuffix)
+						if domainSuffix != "" {
+							domainSuffix = strings.TrimPrefix(domainSuffix, ".")
+							domain = domainInput + "." + domainSuffix
+						} else {
+							domain = domainInput
+						}
+					}
+				}
+			}
+		} else {
+			// 无法获取配置，直接使用输入值
+			domain = domainInput
+		}
 		fb = p.fallbackEnabled
 		// http/https 不需要 remote port；强制 0
 		rp = 0
@@ -498,12 +581,12 @@ func (p *TunnelEditPage) save() {
 	}
 
 	t := &frp.Tunnel{
-		Name:       name,
-		Type:       tt,
-		LocalIP:    localIP,
-		LocalPort:  lp,
-		RemotePort: rp,
-		Domain:     domain,
+		Name:            name,
+		Type:            tt,
+		LocalIP:         localIP,
+		LocalPort:       lp,
+		RemotePort:      rp,
+		Domain:          domain,
 		FallbackEnabled: fb,
 	}
 	// 新增 or 更新
@@ -537,4 +620,3 @@ func (p *TunnelEditPage) delete() {
 	}
 	p.pm.Back()
 }
-

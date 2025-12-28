@@ -132,11 +132,18 @@ export const FRPPage: React.FC = () => {
       { label: 'UDP', value: 'udp' },
       { label: 'STCP', value: 'stcp' },
     ];
-    const hasDomain = !!domainSuffix.trim();
-    if (httpEnabled && hasDomain) base.splice(2, 0, { label: 'HTTP', value: 'http' });
-    if (httpsEnabled && hasDomain) base.splice(3, 0, { label: 'HTTPS', value: 'https' });
+    // 手动模式：默认全协议开放，不限制 HTTP/HTTPS
+    if (frpMode === 'manual') {
+      base.splice(2, 0, { label: 'HTTP', value: 'http' });
+      base.splice(3, 0, { label: 'HTTPS', value: 'https' });
+    } else {
+      // builtin/public 模式：根据配置决定是否显示 HTTP/HTTPS
+      const hasDomain = !!domainSuffix.trim();
+      if (httpEnabled && hasDomain) base.splice(2, 0, { label: 'HTTP', value: 'http' });
+      if (httpsEnabled && hasDomain) base.splice(3, 0, { label: 'HTTPS', value: 'https' });
+    }
     return base;
-  }, [httpEnabled, httpsEnabled, domainSuffix]);
+  }, [frpMode, httpEnabled, httpsEnabled, domainSuffix]);
 
   const useBuiltin = async () => {
     setLoading(true);
@@ -163,6 +170,7 @@ export const FRPPage: React.FC = () => {
         server: server.trim(),
         token: token.trim(),
         domain_suffix: domainSuffix.trim(),
+        // 手动模式：不传递 http_enabled/https_enabled，让后端默认设置为 true（全协议开放）
       });
       // 保存即切换到手动配置，并立即使用该配置连接
       await api.frpConnect({});
@@ -222,10 +230,14 @@ export const FRPPage: React.FC = () => {
   const openEditModal = (tunnel: any) => {
     setEditingTunnel(tunnel);
     const rawDomain = String(tunnel.domain || '').trim();
-    const ds = domainSuffix.replace(/^\./, '');
     let domainInput = rawDomain;
-    if (rawDomain && ds && rawDomain.toLowerCase().endsWith(`.${ds.toLowerCase()}`)) {
-      domainInput = rawDomain.slice(0, rawDomain.length - (ds.length + 1)); // 去掉 ".suffix"
+    // 手动模式：直接使用完整域名，不做前缀提取
+    if (frpMode !== 'manual') {
+      // builtin/public 模式：尝试提取前缀
+      const ds = domainSuffix.replace(/^\./, '');
+      if (rawDomain && ds && rawDomain.toLowerCase().endsWith(`.${ds.toLowerCase()}`)) {
+        domainInput = rawDomain.slice(0, rawDomain.length - (ds.length + 1)); // 去掉 ".suffix"
+      }
     }
     setTunnelForm({
       name: tunnel.name || '',
@@ -274,17 +286,22 @@ export const FRPPage: React.FC = () => {
       return;
     }
 
-    // 处理 HTTP/HTTPS 域名：默认只填前缀
+    // 处理 HTTP/HTTPS 域名
     let domain: string | undefined = undefined;
     if (tunnelForm.type === 'http' || tunnelForm.type === 'https') {
       const v = tunnelForm.domain.trim();
       if (v) {
-        // 若包含点号，视为完整域名；否则拼接默认后缀
-        if (v.includes('.')) {
+        // 手动模式：直接使用用户填写的完整域名，不做拼接
+        if (frpMode === 'manual') {
           domain = v;
         } else {
-          const ds = domainSuffix.replace(/^\./, '');
-          domain = ds ? `${v}.${ds}` : v;
+          // builtin/public 模式：若包含点号，视为完整域名；否则拼接默认后缀
+          if (v.includes('.')) {
+            domain = v;
+          } else {
+            const ds = domainSuffix.replace(/^\./, '');
+            domain = ds ? `${v}.${ds}` : v;
+          }
         }
       }
     }
@@ -758,18 +775,26 @@ export const FRPPage: React.FC = () => {
               {(tunnelForm.type === 'http' || tunnelForm.type === 'https') && (
                 <div>
                   <label style={{ display: 'block', marginBottom: 8, fontSize: 14, fontWeight: 500 }}>
-                    域名前缀
+                    {frpMode === 'manual' ? '自定义域名' : '域名前缀'}
                   </label>
-                  <SuffixInput
-                    value={tunnelForm.domain}
-                    onChange={(v) => setTunnelForm({ ...tunnelForm, domain: v })}
-                    suffixText={
-                      domainSuffix.trim()
-                        ? `.${domainSuffix.replace(/^\./, '')}`
-                        : "（未配置根域名）"
-                    }
-                    placeholder="请输入域名前缀"
-                  />
+                  {frpMode === 'manual' ? (
+                    <Input
+                      value={tunnelForm.domain}
+                      onChange={(e) => setTunnelForm({ ...tunnelForm, domain: (e.target as any).value })}
+                      placeholder="例如：example.com 或 subdomain.example.com"
+                    />
+                  ) : (
+                    <SuffixInput
+                      value={tunnelForm.domain}
+                      onChange={(v) => setTunnelForm({ ...tunnelForm, domain: v })}
+                      suffixText={
+                        domainSuffix.trim()
+                          ? `.${domainSuffix.replace(/^\./, '')}`
+                          : "（未配置根域名）"
+                      }
+                      placeholder="请输入域名前缀"
+                    />
+                  )}
                 </div>
               )}
 

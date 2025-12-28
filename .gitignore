@@ -14,13 +14,12 @@ totoro-bridge/bridge.db-shm
 totoro-bridge/bridge.db-wal
 totoro-bridge/totoro-bridge
 luckfox/*
-totoro-device/bin/totoro-device_linux_armv7
 bin/.env
 bin/totoro-bridge.log
 bin/totoro-node.log
 .gitignore
 totoro-node/node.db-shm
-.gitignore
 totoro-node/node.db
 totoro-node/node.db-wal
-totoro-device/bin/totoro-device_linux_armv7_display
+**/bin/**
+totoro-device/backups/*

@@ -35,7 +35,7 @@ if [[ -n "${TARGET_PASS}" ]]; then
 fi
 
 ssh_cmd() {
-  "${SSHPASS_PREFIX[@]}" ssh -p "${TARGET_PORT}" \
+  "${SSHPASS_PREFIX[@]}" ssh -n -p "${TARGET_PORT}" \
     -o ConnectTimeout=12 \
     -o StrictHostKeyChecking=accept-new \
     -o PubkeyAuthentication=no \
@@ -69,25 +69,65 @@ dump_one() {
   local hexsz="$2"    # 00040000
   local name="$3"     # env
 
+  if [[ -z "${name}" ]]; then
+    name="part"
+  fi
   local outfile="${OUT_DIR}/${mtddev}_${name}.bin"
   local final="${outfile}"
+  local mtdnum="${mtddev#mtd}"
 
   if [[ "${COMPRESS}" == "gzip" ]]; then
     final="${outfile}.gz"
     echo "dump ${mtddev}(${name}) -> ${final}"
-    ssh_cmd "sh -lc 'nanddump -f - /dev/${mtddev} 2>/dev/null | gzip -1 -c'" >"${final}"
+    # 优先 dd 读取 /dev/mtdblockN（更通用；nanddump 在某些镜像上会对 UBI/权限失败）
+    ssh_cmd "sh -lc '
+set -e
+src=\"\"
+if [ -b \"/dev/mtdblock${mtdnum}\" ]; then
+  src=\"/dev/mtdblock${mtdnum}\"
+elif [ -c \"/dev/${mtddev}ro\" ]; then
+  src=\"/dev/${mtddev}ro\"
+elif [ -c \"/dev/${mtddev}\" ]; then
+  src=\"/dev/${mtddev}\"
+fi
+if [ -n \"\$src\" ]; then
+  dd if=\"\$src\" bs=1m 2>/dev/null | gzip -1 -c
+  exit 0
+fi
+if command -v nanddump >/dev/null 2>&1; then
+  nanddump -f - \"/dev/${mtddev}\" 2>/dev/null | gzip -1 -c
+  exit 0
+fi
+exit 1
+'" >"${final}"
   else
     echo "dump ${mtddev}(${name}) -> ${final}"
-    ssh_cmd "sh -lc 'nanddump -f - /dev/${mtddev} 2>/dev/null'" >"${final}"
+    ssh_cmd "sh -lc '
+set -e
+src=\"\"
+if [ -b \"/dev/mtdblock${mtdnum}\" ]; then
+  src=\"/dev/mtdblock${mtdnum}\"
+elif [ -c \"/dev/${mtddev}ro\" ]; then
+  src=\"/dev/${mtddev}ro\"
+elif [ -c \"/dev/${mtddev}\" ]; then
+  src=\"/dev/${mtddev}\"
+fi
+if [ -n \"\$src\" ]; then
+  dd if=\"\$src\" bs=1m 2>/dev/null
+  exit 0
+fi
+if command -v nanddump >/dev/null 2>&1; then
+  nanddump -f - \"/dev/${mtddev}\" 2>/dev/null
+  exit 0
+fi
+exit 1
+'" >"${final}"
   fi
 }
 
-export -f dump_one
-export OUT_DIR COMPRESS TARGET_HOST TARGET_USER TARGET_PORT TARGET_PASS
-
 # 解析 /proc/mtd：
 # mtd0: 00040000 00020000 "env"
-lines="$(echo "${mtd}" | tail -n +2 | sed '/^\s*$/d' || true)"
+lines="$(echo "${mtd}" | tail -n +2 | sed '/^[[:space:]]*$/d' || true)"
 if [[ -z "${lines}" ]]; then
   echo "未解析到任何 MTD 分区" >&2
   exit 4
@@ -95,26 +135,36 @@ fi
 
 if [[ "${PARALLEL}" == "1" ]]; then
   # 简单并行：最多 2 路（避免把设备/网络打满）
-  echo "${lines}" | while read -r ln; do
-    dev="$(echo "${ln}" | cut -d: -f1)"
-    rest="$(echo "${ln}" | cut -d: -f2-)"
-    size_hex="$(echo "${rest}" | tr -s ' ' | cut -d' ' -f2)"
-    name="$(echo "${ln}" | sed -n 's/.*\"\\(.*\\)\".*/\\1/p')"
+  while IFS= read -r ln; do
+    dev="${ln%%:*}"
+    rest="${ln#*:}"
+    rest="$(echo "${rest}" | tr -s ' ')"
+    size_hex="$(echo "${rest}" | cut -d' ' -f2)"
+    name=""
+    if [[ "${ln}" == *\"*\"* ]]; then
+      name="${ln#*\"}"
+      name="${name%%\"*}"
+    fi
     dump_one "${dev}" "${size_hex}" "${name}" &
     # 控制并发=2
     while [[ "$(jobs -pr | wc -l | tr -d ' ')" -ge 2 ]]; do
       sleep 0.2
     done
-  done
+  done <<< "${lines}"
   wait
 else
-  echo "${lines}" | while read -r ln; do
-    dev="$(echo "${ln}" | cut -d: -f1)"
-    rest="$(echo "${ln}" | cut -d: -f2-)"
-    size_hex="$(echo "${rest}" | tr -s ' ' | cut -d' ' -f2)"
-    name="$(echo "${ln}" | sed -n 's/.*\"\\(.*\\)\".*/\\1/p')"
+  while IFS= read -r ln; do
+    dev="${ln%%:*}"
+    rest="${ln#*:}"
+    rest="$(echo "${rest}" | tr -s ' ')"
+    size_hex="$(echo "${rest}" | cut -d' ' -f2)"
+    name=""
+    if [[ "${ln}" == *\"*\"* ]]; then
+      name="${ln#*\"}"
+      name="${name%%\"*}"
+    fi
     dump_one "${dev}" "${size_hex}" "${name}"
-  done
+  done <<< "${lines}"
 fi
 
 echo "完成：${OUT_DIR}"
