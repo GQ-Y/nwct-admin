@@ -21,7 +21,7 @@ OUT="${OUT_DIR}/totoro-node_${GOOS}_${GOARCH}"
 echo "Building totoro-node -> ${OUT}"
 pushd "${ROOT_DIR}" >/dev/null
   env \
-    CGO_ENABLED=0 \
+    CGO_ENABLED=1 \
     GOOS="${GOOS}" \
     GOARCH="${GOARCH}" \
     go build -trimpath -ldflags "-s -w" -o "${OUT}" ./cmd/totoro-node

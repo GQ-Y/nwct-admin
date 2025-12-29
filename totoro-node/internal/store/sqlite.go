@@ -86,6 +86,7 @@ CREATE TABLE IF NOT EXISTS node_config (
   http_enabled INTEGER NOT NULL DEFAULT 0,
   https_enabled INTEGER NOT NULL DEFAULT 0,
   endpoints_json TEXT NOT NULL DEFAULT '[]',
+  admin_key TEXT NOT NULL DEFAULT '',
   updated_at INTEGER NOT NULL DEFAULT 0
 );
 
@@ -108,6 +109,7 @@ CREATE INDEX IF NOT EXISTS idx_invites_revoked ON invites(revoked);
 	_, _ = s.db.Exec(`ALTER TABLE node_config ADD COLUMN node_key_plain TEXT NOT NULL DEFAULT ''`)
 	_, _ = s.db.Exec(`ALTER TABLE node_config ADD COLUMN http_enabled INTEGER NOT NULL DEFAULT 0`)
 	_, _ = s.db.Exec(`ALTER TABLE node_config ADD COLUMN https_enabled INTEGER NOT NULL DEFAULT 0`)
+	_, _ = s.db.Exec(`ALTER TABLE node_config ADD COLUMN admin_key TEXT NOT NULL DEFAULT ''`)
 	_, _ = s.db.Exec(`ALTER TABLE invites ADD COLUMN code TEXT NOT NULL DEFAULT ''`)
 	return err
 }
@@ -117,7 +119,7 @@ func hashKey(s string) string {
 	return hex.EncodeToString(h[:])
 }
 
-func (s *Store) InitNodeIfEmpty(cfg NodeConfig) error {
+func (s *Store) InitNodeIfEmpty(cfg NodeConfig, adminKey string) error {
 	if cfg.NodeID == "" || cfg.NodeKey == "" {
 		return fmt.Errorf("node_id/node_key required")
 	}
@@ -127,16 +129,16 @@ func (s *Store) InitNodeIfEmpty(cfg NodeConfig) error {
 
 	// 仅当为空时插入
 	_, err := s.db.Exec(`
-INSERT INTO node_config(id,node_id,node_key_hash,node_key_plain,public,name,description,region,isp,tags_json,bridge_url,domain_suffix,http_enabled,https_enabled,endpoints_json,updated_at)
-VALUES(1,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+INSERT INTO node_config(id,node_id,node_key_hash,node_key_plain,public,name,description,region,isp,tags_json,bridge_url,domain_suffix,http_enabled,https_enabled,endpoints_json,admin_key,updated_at)
+VALUES(1,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 ON CONFLICT(id) DO NOTHING
-`, cfg.NodeID, hashKey(cfg.NodeKey), cfg.NodeKey, boolToInt(cfg.Public), cfg.Name, cfg.Description, cfg.Region, cfg.ISP, string(tags), cfg.BridgeURL, cfg.DomainSuffix, boolToInt(cfg.HTTPEnabled), boolToInt(cfg.HTTPSEnabled), string(eps), now)
+`, cfg.NodeID, hashKey(cfg.NodeKey), cfg.NodeKey, boolToInt(cfg.Public), cfg.Name, cfg.Description, cfg.Region, cfg.ISP, string(tags), cfg.BridgeURL, cfg.DomainSuffix, boolToInt(cfg.HTTPEnabled), boolToInt(cfg.HTTPSEnabled), string(eps), strings.TrimSpace(adminKey), now)
 	return err
 }
 
 func (s *Store) GetNodeConfig() (NodeConfig, string, error) {
 	row := s.db.QueryRow(`
-SELECT node_id,node_key_hash,node_key_plain,public,name,description,region,isp,tags_json,bridge_url,domain_suffix,http_enabled,https_enabled,endpoints_json
+SELECT node_id,node_key_hash,node_key_plain,public,name,description,region,isp,tags_json,bridge_url,domain_suffix,http_enabled,https_enabled,endpoints_json,admin_key
 FROM node_config WHERE id=1
 `)
 	var (
@@ -148,8 +150,9 @@ FROM node_config WHERE id=1
 		httpsInt      int
 		tagsJSON      string
 		endpointsJSON string
+		adminKey      string
 	)
-	if err := row.Scan(&cfg.NodeID, &keyHash, &keyPlain, &publicInt, &cfg.Name, &cfg.Description, &cfg.Region, &cfg.ISP, &tagsJSON, &cfg.BridgeURL, &cfg.DomainSuffix, &httpInt, &httpsInt, &endpointsJSON); err != nil {
+	if err := row.Scan(&cfg.NodeID, &keyHash, &keyPlain, &publicInt, &cfg.Name, &cfg.Description, &cfg.Region, &cfg.ISP, &tagsJSON, &cfg.BridgeURL, &cfg.DomainSuffix, &httpInt, &httpsInt, &endpointsJSON, &adminKey); err != nil {
 		return NodeConfig{}, "", err
 	}
 	cfg.NodeKey = strings.TrimSpace(keyPlain)
@@ -159,6 +162,27 @@ FROM node_config WHERE id=1
 	_ = json.Unmarshal([]byte(tagsJSON), &cfg.Tags)
 	_ = json.Unmarshal([]byte(endpointsJSON), &cfg.Endpoints)
 	return cfg, keyHash, nil
+}
+
+func (s *Store) GetAdminKey() (string, error) {
+	row := s.db.QueryRow(`SELECT admin_key FROM node_config WHERE id=1`)
+	var adminKey string
+	if err := row.Scan(&adminKey); err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(adminKey), nil
+}
+
+func (s *Store) UpdateAdminKey(newKey string) error {
+	now := time.Now().Unix()
+	_, err := s.db.Exec(`UPDATE node_config SET admin_key=?, updated_at=? WHERE id=1`, strings.TrimSpace(newKey), now)
+	return err
+}
+
+func (s *Store) UpdateBridgeURL(bridgeURL string) error {
+	now := time.Now().Unix()
+	_, err := s.db.Exec(`UPDATE node_config SET bridge_url=?, updated_at=? WHERE id=1`, strings.TrimSpace(bridgeURL), now)
+	return err
 }
 
 func (s *Store) UpdateNodeConfig(adminNodeKey string, patch NodeConfig) error {
@@ -201,9 +225,10 @@ func (s *Store) updateNodeConfigUnlocked(cfg NodeConfig, patch NodeConfig) error
 	if patch.Tags != nil {
 		cfg.Tags = patch.Tags
 	}
-	if patch.BridgeURL != "" {
-		cfg.BridgeURL = patch.BridgeURL
-	}
+	// BridgeURL 不允许通过 API 修改（只读）
+	// if patch.BridgeURL != "" {
+	// 	cfg.BridgeURL = patch.BridgeURL
+	// }
 	if patch.DomainSuffix != "" {
 		cfg.DomainSuffix = patch.DomainSuffix
 	}
@@ -221,9 +246,9 @@ func (s *Store) updateNodeConfigUnlocked(cfg NodeConfig, patch NodeConfig) error
 	eps, _ := json.Marshal(cfg.Endpoints)
 	_, err := s.db.Exec(`
 UPDATE node_config
-SET public=?,name=?,description=?,region=?,isp=?,tags_json=?,bridge_url=?,domain_suffix=?,http_enabled=?,https_enabled=?,endpoints_json=?,updated_at=?
+SET public=?,name=?,description=?,region=?,isp=?,tags_json=?,domain_suffix=?,http_enabled=?,https_enabled=?,endpoints_json=?,updated_at=?
 WHERE id=1
-`, boolToInt(cfg.Public), cfg.Name, cfg.Description, cfg.Region, cfg.ISP, string(tags), cfg.BridgeURL, cfg.DomainSuffix, boolToInt(cfg.HTTPEnabled), boolToInt(cfg.HTTPSEnabled), string(eps), now)
+`, boolToInt(cfg.Public), cfg.Name, cfg.Description, cfg.Region, cfg.ISP, string(tags), cfg.DomainSuffix, boolToInt(cfg.HTTPEnabled), boolToInt(cfg.HTTPSEnabled), string(eps), now)
 	return err
 }
 

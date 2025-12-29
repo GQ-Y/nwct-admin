@@ -86,7 +86,6 @@ func main() {
 
 	// 节点管理 API
 	apiAddr := getenv("TOTOTO_NODE_API_ADDR", ":18080")
-	adminKey := getenv("TOTOTO_NODE_ADMIN_KEY", "") // 建议生产设置；为空则不校验
 
 	// 本地节点状态库
 	dbPath := getenv("TOTOTO_NODE_DB", "./node.db")
@@ -96,10 +95,11 @@ func main() {
 	}
 	defer st.Close()
 
-	// 让节点“开箱即用”：
+	// 让节点"开箱即用"：
 	// - node_id：默认由 MAC 推导（稳定标识），fallback 随机
 	// - node_key：首次启动随机生成并落库（用于票据校验/桥梁签发 ticket）
-	// - bridge_url：默认使用编译内置 defaultBridgeURL（可被 TOTOTO_BRIDGE_URL 覆盖）
+	// - bridge_url：编译时从环境变量 TOTOTO_BRIDGE_URL 读取，如果没有则使用程序内置 defaultBridgeURL，写入数据库后不再修改
+	// - admin_key：默认 "admin"，可通过环境变量 TOTOTO_NODE_ADMIN_KEY 覆盖
 	firstBoot := false
 	if cfg, _, gerr := st.GetNodeConfig(); gerr != nil || strings.TrimSpace(cfg.NodeID) == "" {
 		firstBoot = true
@@ -109,14 +109,29 @@ func main() {
 			nodeID = "node_" + genRandomKey(6)
 		}
 		nodeKey := genRandomKey(32)
+		// 编译时从环境变量读取，如果没有则使用程序内置默认值
 		bridgeURL := strings.TrimSpace(getenv("TOTOTO_BRIDGE_URL", strings.TrimSpace(defaultBridgeURL)))
+		// 默认密码为 "admin"，可通过环境变量覆盖
+		defaultAdminKey := getenv("TOTOTO_NODE_ADMIN_KEY", "admin")
 		_ = st.InitNodeIfEmpty(store.NodeConfig{
 			NodeID:    nodeID,
 			NodeKey:   nodeKey,
 			Public:    false,
 			Name:      nodeID,
 			BridgeURL: bridgeURL,
-		})
+		}, defaultAdminKey)
+	} else {
+		// 如果数据库中没有 admin_key，从环境变量读取并写入（兼容旧库）
+		dbAdminKey, _ := st.GetAdminKey()
+		if strings.TrimSpace(dbAdminKey) == "" {
+			envAdminKey := getenv("TOTOTO_NODE_ADMIN_KEY", "admin")
+			_ = st.UpdateAdminKey(envAdminKey)
+		}
+		// 如果数据库中没有 bridge_url，从环境变量或默认值读取并写入（兼容旧库）
+		if strings.TrimSpace(cfg.BridgeURL) == "" {
+			bridgeURL := strings.TrimSpace(getenv("TOTOTO_BRIDGE_URL", strings.TrimSpace(defaultBridgeURL)))
+			_ = st.UpdateBridgeURL(bridgeURL)
+		}
 	}
 
 	cfg0, _, _ := st.GetNodeConfig()
@@ -286,9 +301,9 @@ func main() {
 	go runner.Run(ctx)
 	log.Printf("frps started (config=%s)", frpsCfgFile)
 
-	// 启动节点管理 API
+	// 启动节点管理 API（AdminKey 从数据库读取，不再从环境变量）
 	go func() {
-		r := nodeapi.NewRouter(st, nodeapi.Options{AdminKey: adminKey, TicketKey: []byte(nodeKey)})
+		r := nodeapi.NewRouter(st, nodeapi.Options{TicketKey: []byte(nodeKey)})
 		log.Printf("totoro-node api listening on %s (db=%s)", apiAddr, dbPath)
 		if err := r.Run(apiAddr); err != nil {
 			log.Fatalf("node api run: %v", err)

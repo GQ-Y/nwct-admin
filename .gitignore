@@ -23,3 +23,4 @@ totoro-node/node.db
 totoro-node/node.db-wal
 **/bin/**
 totoro-device/backups/*
+totoro-node/bin/totoro-node_darwin_arm64
