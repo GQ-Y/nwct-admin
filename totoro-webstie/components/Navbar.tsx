@@ -1,15 +1,17 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Menu, X, Globe, Terminal, ChevronDown } from 'lucide-react';
+import { Menu, X, Globe, ChevronDown } from 'lucide-react';
 import { Language, ViewState } from '../types';
 import { TRANSLATIONS } from '../constants';
+import TotoroLogo from './TotoroLogo';
 
 interface NavbarProps {
   lang: Language;
   setLang: (lang: Language) => void;
   onNavigate: (view: ViewState) => void;
+  currentView?: ViewState;
 }
 
-const Navbar: React.FC<NavbarProps> = ({ lang, setLang, onNavigate }) => {
+const Navbar: React.FC<NavbarProps> = ({ lang, setLang, onNavigate, currentView }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [isLangOpen, setIsLangOpen] = useState(false);
   const langDropdownRef = useRef<HTMLDivElement>(null);
@@ -33,17 +35,32 @@ const Navbar: React.FC<NavbarProps> = ({ lang, setLang, onNavigate }) => {
     setIsLangOpen(false);
   };
 
-  const NavLink = ({ label, view }: { label: string; view?: ViewState }) => (
-    <button
-      onClick={() => {
-        if (view) onNavigate(view);
-        setIsOpen(false);
-      }}
-      className="text-gray-300 hover:text-brand-green transition-colors px-3 py-2 text-sm font-medium font-mono uppercase tracking-wider text-center w-full"
-    >
-      {label}
-    </button>
-  );
+  const NavLink = ({ label, view }: { label: string; view?: ViewState }) => {
+    const isActive = currentView === view;
+    return (
+      <button
+        onClick={() => {
+          if (view) onNavigate(view);
+          setIsOpen(false);
+        }}
+        className={`relative px-3 py-2 text-sm font-medium font-mono uppercase tracking-wider transition-all duration-300 group whitespace-nowrap ${
+          isActive 
+            ? 'text-brand-green' 
+            : 'text-gray-300 hover:text-brand-green'
+        } ${view ? '' : 'text-center w-full'}`}
+      >
+        <span className="relative z-10 inline-block">{label}</span>
+        {/* Active indicator - only show if active */}
+        {isActive && view && (
+          <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-brand-green rounded-full z-20"></span>
+        )}
+        {/* Hover underline animation - only show if not active */}
+        {view && !isActive && (
+          <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-brand-green rounded-full scale-x-0 group-hover:scale-x-100 transition-transform duration-300 origin-left z-10"></span>
+        )}
+      </button>
+    );
+  };
 
   const languages: { code: Language; label: string }[] = [
     { code: 'zh', label: '简体中文' },
@@ -56,29 +73,92 @@ const Navbar: React.FC<NavbarProps> = ({ lang, setLang, onNavigate }) => {
     <nav className="fixed w-full z-50 top-0 left-0 border-b border-white/5 bg-brand-dark/80 backdrop-blur-lg">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-16">
-          <div className="flex items-center gap-2 cursor-pointer" onClick={() => onNavigate('home')}>
-            <div className="bg-brand-green/10 p-1.5 rounded-lg border border-brand-green/20">
-              <Terminal className="h-6 w-6 text-brand-green" />
+          <div className="flex items-center gap-2 cursor-pointer hover:opacity-80 transition-opacity" onClick={() => onNavigate('home')}>
+            <div className="flex items-center justify-center">
+              <TotoroLogo size={32} className="drop-shadow-lg" />
             </div>
             <span className="text-white font-bold text-xl tracking-tight">Totoro</span>
           </div>
           
           <div className="hidden md:block">
-            <div className="ml-10 flex items-baseline space-x-4">
+            <nav className="ml-10 flex items-center space-x-2">
               <NavLink label={t.home} view="home" />
               <div className="relative group">
-                <button className="text-gray-300 hover:text-brand-green px-3 py-2 text-sm font-medium font-mono uppercase tracking-wider flex items-center gap-1">
-                  {t.products} <ChevronDown className="w-3 h-3" />
+                <button className={`relative px-3 py-2 text-sm font-medium font-mono uppercase tracking-wider flex items-center gap-1.5 transition-all duration-300 rounded-md whitespace-nowrap ${
+                  currentView === 'ultra' || currentView === 'pro' || currentView === 'plus'
+                    ? 'text-brand-green' 
+                    : 'text-gray-300 hover:text-brand-green hover:bg-white/5'
+                }`}>
+                  <span className="inline-block">{t.products}</span>
+                  <ChevronDown className={`w-3 h-3 transition-transform duration-300 ${
+                    currentView === 'ultra' || currentView === 'pro' || currentView === 'plus' 
+                      ? 'rotate-180' 
+                      : 'group-hover:rotate-180'
+                  }`} />
+                  {/* Active indicator */}
+                  {(currentView === 'ultra' || currentView === 'pro' || currentView === 'plus') && (
+                    <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-brand-green rounded-full z-20"></span>
+                  )}
+                  {/* Hover underline - only show if not active */}
+                  {!(currentView === 'ultra' || currentView === 'pro' || currentView === 'plus') && (
+                    <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-brand-green rounded-full scale-x-0 group-hover:scale-x-100 transition-transform duration-300 origin-left z-10"></span>
+                  )}
                 </button>
-                <div className="absolute left-0 mt-0 w-48 bg-[#1a1a1a] border border-white/10 rounded-md shadow-lg py-1 hidden group-hover:block z-50">
-                    <button onClick={() => onNavigate('ultra')} className="block w-full text-left px-4 py-2 text-sm text-gray-300 hover:bg-white/5 hover:text-brand-green transition-colors">S1 Ultra</button>
-                    <button onClick={() => onNavigate('pro')} className="block w-full text-left px-4 py-2 text-sm text-gray-300 hover:bg-white/5 hover:text-brand-green transition-colors">S1 Pro</button>
-                    <button onClick={() => onNavigate('plus')} className="block w-full text-left px-4 py-2 text-sm text-gray-300 hover:bg-white/5 hover:text-brand-green transition-colors">S1 Plus</button>
+                {/* Invisible bridge to maintain hover state */}
+                <div className="absolute left-0 top-full w-full h-2 pointer-events-none group-hover:pointer-events-auto"></div>
+                <div className="absolute left-0 top-full mt-2 w-56 bg-[#1a1a1a] border border-white/10 rounded-lg shadow-2xl py-2 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-300 z-[60] backdrop-blur-sm transform translate-y-[-4px] group-hover:translate-y-0">
+                  <div className="px-2 space-y-0.5">
+                    <button 
+                      onClick={() => onNavigate('ultra')} 
+                      className={`w-full text-left px-4 py-2.5 text-sm rounded-md transition-all duration-200 flex items-center justify-between group/item ${
+                        currentView === 'ultra'
+                          ? 'text-brand-green bg-brand-green/10 font-medium'
+                          : 'text-gray-300 hover:bg-white/5 hover:text-brand-green'
+                      }`}
+                    >
+                      <span>S1 Ultra</span>
+                      {currentView === 'ultra' ? (
+                        <span className="w-1.5 h-1.5 bg-brand-green rounded-full"></span>
+                      ) : (
+                        <span className="w-1.5 h-1.5 bg-transparent group-hover/item:bg-brand-green/50 rounded-full transition-colors"></span>
+                      )}
+                    </button>
+                    <button 
+                      onClick={() => onNavigate('pro')} 
+                      className={`w-full text-left px-4 py-2.5 text-sm rounded-md transition-all duration-200 flex items-center justify-between group/item ${
+                        currentView === 'pro'
+                          ? 'text-brand-green bg-brand-green/10 font-medium'
+                          : 'text-gray-300 hover:bg-white/5 hover:text-brand-green'
+                      }`}
+                    >
+                      <span>S1 Pro</span>
+                      {currentView === 'pro' ? (
+                        <span className="w-1.5 h-1.5 bg-brand-green rounded-full"></span>
+                      ) : (
+                        <span className="w-1.5 h-1.5 bg-transparent group-hover/item:bg-brand-green/50 rounded-full transition-colors"></span>
+                      )}
+                    </button>
+                    <button 
+                      onClick={() => onNavigate('plus')} 
+                      className={`w-full text-left px-4 py-2.5 text-sm rounded-md transition-all duration-200 flex items-center justify-between group/item ${
+                        currentView === 'plus'
+                          ? 'text-brand-green bg-brand-green/10 font-medium'
+                          : 'text-gray-300 hover:bg-white/5 hover:text-brand-green'
+                      }`}
+                    >
+                      <span>S1 Plus</span>
+                      {currentView === 'plus' ? (
+                        <span className="w-1.5 h-1.5 bg-brand-green rounded-full"></span>
+                      ) : (
+                        <span className="w-1.5 h-1.5 bg-transparent group-hover/item:bg-brand-green/50 rounded-full transition-colors"></span>
+                      )}
+                    </button>
+                  </div>
                 </div>
               </div>
               <NavLink label={t.nodes} view="nodes" />
               <NavLink label={t.developers} />
-            </div>
+            </nav>
           </div>
 
           <div className="hidden md:flex items-center gap-4">

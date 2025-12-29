@@ -24,17 +24,22 @@ const Nodes: React.FC<NodesProps> = ({ lang }) => {
             return (
                 <div className="flex flex-col items-center">
                     <div className="bg-black border border-white/10 rounded-xl p-6 w-full max-w-3xl mx-auto font-mono text-sm md:text-base text-left group relative shadow-inner">
-                        <div className="text-gray-500 mb-2 select-none flex justify-between">
-                            <span># Install via CLI</span>
-                            <span className="text-xs border border-white/10 rounded px-2 py-0.5">Recommended</span>
+                        <div className="text-gray-500 mb-3 select-none flex items-center justify-between gap-3">
+                            <span className="flex items-center gap-2">
+                                <span># Install via CLI</span>
+                            </span>
+                            <div className="flex items-center gap-2">
+                                <span className="text-xs border border-brand-green/30 bg-brand-green/10 text-brand-green rounded-full px-2.5 py-0.5 font-medium">Recommended</span>
+                                <button 
+                                    onClick={handleCopy}
+                                    className="text-gray-500 hover:text-white transition-colors p-1.5 hover:bg-white/5 rounded-md"
+                                    title={copied ? 'Copied!' : 'Copy command'}
+                                >
+                                    {copied ? <Check size={16} className="text-brand-green"/> : <Copy size={16} />}
+                                </button>
+                            </div>
                         </div>
-                        <code className="text-brand-green break-all block pr-8">curl -fsSL https://get.totoro.link/node.sh | bash</code>
-                        <button 
-                            onClick={handleCopy}
-                            className="absolute top-4 right-4 text-gray-500 hover:text-white transition-colors"
-                        >
-                            {copied ? <Check size={18} className="text-brand-green"/> : <Copy size={18} />}
-                        </button>
+                        <code className="text-brand-green break-all block pr-2">curl -fsSL https://get.totoro.link/node.sh | bash</code>
                     </div>
                     
                     <div className="mt-6 flex flex-wrap gap-2 justify-center">

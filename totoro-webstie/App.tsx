@@ -42,7 +42,7 @@ const App: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-brand-dark text-white font-sans selection:bg-brand-green selection:text-black">
-      <Navbar lang={lang} setLang={setLang} onNavigate={setCurrentView} />
+      <Navbar lang={lang} setLang={setLang} onNavigate={setCurrentView} currentView={currentView} />
       {renderContent()}
       <Contributors lang={lang} />
       <Footer lang={lang} />
