@@ -1,6 +1,9 @@
 """
-Luckfox Pico Ultra 开发板 + 4寸屏幕 + 天线 智能家居外壳设计
-所有参数都可以在脚本顶部轻松调整
+Luckfox Pico Ultra + 4寸屏幕 - 复古电脑风格外壳 (Retro PC Style)
+特点：
+1. "大背头" (Big Back) CRT显示器造型
+2. 分体式设计：前脸 (Bezel) + 后壳 (Rear Shell)
+3. 优化：顶部封闭（无孔），所有线缆从底部导出 (Hidden Cable Routing)
 """
 
 import bpy
@@ -18,302 +21,269 @@ bpy.ops.object.delete()
 bpy.context.scene.unit_settings.system = 'METRIC'
 bpy.context.scene.unit_settings.scale_length = 0.001  # 毫米
 
-# ==================== 基础参数 ====================
-WALL = 2.0  # 外壳壁厚（mm）
+# ==================== 核心参数 ====================
+WALL = 3.0 # 壁厚
 
-# 开发板尺寸（根据官方文档：50mm x 50mm）
-PCB_SIZE = 50.0  # 开发板边长（mm）
-PCB_HEIGHT = 2.0  # 开发板厚度（mm，包含元件）
+# 屏幕尺寸
+SCREEN_W = 84.0 
+SCREEN_H = 84.0 
+SCREEN_VISIBLE_W = 72.0
+SCREEN_VISIBLE_H = 72.0
 
-# 外壳尺寸 (Box)
-BOX_HEIGHT = 25.0  # 外壳高度（mm，需覆盖开发板和天线）
-BOX_X = PCB_SIZE + WALL * 2  # 外壳X方向尺寸
-BOX_Y = PCB_SIZE + WALL * 2  # 外壳Y方向尺寸
+# 外壳整体造型尺寸
+CASE_WIDTH = 100.0
+CASE_HEIGHT = 110.0
+CASE_DEPTH = 80.0   # 后壳深度 (Y: 0 to 80)
 
-# ==================== 组装参数 ====================
-MOUNT_POST_RADIUS = 4.0   # 组装立柱半径 (mm)
-MOUNT_SCREW_DIAMETER = 3.2 # M3 螺丝通孔直径
-MOUNT_HOLE_DIAMETER = 2.5  # M3 自攻螺丝底孔直径
-MOUNT_HEAD_DIAMETER = 6.0  # 螺丝头直径
-MOUNT_HEAD_DEPTH = 3.0     # 螺丝头沉孔深度
-ALIGNMENT_RECESS_DEPTH = 1.0 # 对齐凹槽深度
+# PCB 位置参数
+PCB_SIZE = 50.0
+# PCB 安装在垂直居中，靠后壁的位置
+# Y = Back Wall Inner Face - Standoff
+STANDOFF_H = 6.0
+PCB_Y_POS = (CASE_DEPTH - WALL) - STANDOFF_H # 71.0
+# Z = 0 (Center)
+# Top Edge Z = +25, Bottom Edge Z = -25
+# Case Top Inner Z = +52, Bottom Inner Z = -52
+# Top Clearance = 27mm (Enough for Type-C loop)
 
-# ==================== 接口开孔参数 ====================
-USB_A_WIDTH = 5.12
-USB_A_HEIGHT = 14.0
-USB_A_DEPTH = 8.0
-USB_A_X = -2.0
-USB_A_Y = -BOX_Y / 2
-USB_A_Z = 12.0
+# ==================== 辅助函数 (绝对坐标版) ====================
 
-TYPE_C_WIDTH = 8.34
-TYPE_C_HEIGHT = 2.56
-TYPE_C_DEPTH = 8.0
-TYPE_C_X = 0.0
-TYPE_C_Y = BOX_Y / 2
-TYPE_C_Z = 6.0
-
-RJ45_WIDTH = 16.0
-RJ45_HEIGHT = 14.0
-RJ45_DEPTH = 18.0
-RJ45_X = -12.0
-RJ45_Y = -BOX_Y / 2
-RJ45_Z = 12.0
-
-ANTENNA_DIAMETER = 8.0
-ANTENNA_DEPTH = 15.0
-ANTENNA_X = 15.0
-ANTENNA_Y = -BOX_Y / 2
-ANTENNA_Z = 12.0
-
-# ==================== 屏幕参数 ====================
-SCREEN_OUTER = 84.0
-SCREEN_INNER = 72.0
-SCREEN_HEIGHT = 7.0
-SCREEN_LIP = 2.5 # 凹槽深度
-
-# FPC 排线板区域
-SCREEN_FPC_HEIGHT = 16.0 
-SCREEN_FPC_WIDTH = 32.0
-SCREEN_FPC_POCKET_DEPTH = 5.0
-SCREEN_CHIN = SCREEN_FPC_HEIGHT + 2.0
-
-# 屏幕与开发板外壳的连接方式
-SCREEN_MOUNT_OFFSET = 2.0
-SCREEN_SCREW_HOLE_DIAMETER = 1.6
-SCREEN_SCREW_OFFSET = 6.0
-
-# ==================== 辅助函数 ====================
-
-def create_cube(x, y, z, lx, ly, lz):
+def create_block(x_min, x_max, y_min, y_max, z_min, z_max, name="Block"):
+    """使用绝对边界坐标创建立方体"""
+    x = (x_min + x_max) / 2
+    y = (y_min + y_max) / 2
+    z = (z_min + z_max) / 2
+    lx = x_max - x_min
+    ly = y_max - y_min
+    lz = z_max - z_min
+    
     bpy.ops.mesh.primitive_cube_add(location=(x, y, z))
     obj = bpy.context.object
     obj.scale = (lx / 2, ly / 2, lz / 2)
     bpy.ops.object.transform_apply(scale=True)
+    obj.name = name
     return obj
 
-def create_cylinder(x, y, z, r, h, rot=None):
+def create_cylinder_axis(x, y, z, r, h, axis='Z', name="Cylinder"):
+    """创建圆柱"""
+    rot = (0,0,0)
+    if axis == 'X': rot = (0, math.radians(90), 0)
+    if axis == 'Y': rot = (math.radians(90), 0, 0)
+    
     bpy.ops.mesh.primitive_cylinder_add(radius=r, depth=h, location=(x, y, z))
     obj = bpy.context.object
-    if rot:
-        obj.rotation_euler = rot
-        bpy.ops.object.transform_apply(rotation=True)
+    obj.rotation_euler = rot
+    bpy.ops.object.transform_apply(rotation=True)
+    obj.name = name
     return obj
 
-def boolean_difference(target, cutter):
-    if not target or not cutter: return
+def boolean_op(target, tool, operation='DIFFERENCE'):
+    if not target or not tool: return
     mod = target.modifiers.new(name="Boolean", type='BOOLEAN')
-    mod.object = cutter
-    mod.operation = 'DIFFERENCE'
+    mod.object = tool
+    mod.operation = operation
     mod.solver = 'EXACT'
     bpy.context.view_layer.objects.active = target
     bpy.ops.object.modifier_apply(modifier=mod.name)
-    bpy.data.objects.remove(cutter, do_unlink=True)
+    bpy.data.objects.remove(tool, do_unlink=True)
 
-def boolean_union(target, joiner):
-    if not target or not joiner: return
-    mod = target.modifiers.new(name="Boolean", type='BOOLEAN')
-    mod.object = joiner
-    mod.operation = 'UNION'
-    mod.solver = 'EXACT'
-    bpy.context.view_layer.objects.active = target
-    bpy.ops.object.modifier_apply(modifier=mod.name)
-    bpy.data.objects.remove(joiner, do_unlink=True)
+def add_bevel(obj, width=1.0):
+    bev = obj.modifiers.new("Bevel", 'BEVEL')
+    bev.width = width
+    bev.segments = 3
+    bev.limit_method = 'ANGLE'
+    bpy.context.view_layer.objects.active = obj
+    bpy.ops.object.modifier_apply(modifier=bev.name)
 
-# ==================== 创建 Box ====================
-box = create_cube(0, 0, BOX_HEIGHT / 2, BOX_X, BOX_Y, BOX_HEIGHT)
+# ==================== 1. 创建后壳 (Rear Shell) ====================
+# 范围: X[-50, 50], Y[0, 80], Z[-55, 55]
 
-# 立柱
-POST_POS_X = BOX_X / 2
-POST_POS_Y = BOX_Y / 2
-post_positions = [
-    (POST_POS_X, POST_POS_Y), (-POST_POS_X, POST_POS_Y),
-    (-POST_POS_X, -POST_POS_Y), (POST_POS_X, -POST_POS_Y)
+# 实体
+rear_shell = create_block(
+    -CASE_WIDTH/2, CASE_WIDTH/2,
+    0, CASE_DEPTH,
+    -CASE_HEIGHT/2, CASE_HEIGHT/2,
+    "RearShell_Body"
+)
+
+# 锥度切削 (Taper) - CRT 风格
+taper_l = create_block(
+    -CASE_WIDTH - 20, -CASE_WIDTH/2 + 5, 
+    10, CASE_DEPTH + 10, 
+    -CASE_HEIGHT, CASE_HEIGHT,
+    "TaperL"
+)
+taper_l.rotation_euler = (0, 0, math.radians(-10))
+taper_l.location.x -= 10
+boolean_op(rear_shell, taper_l)
+
+taper_r = create_block(
+    CASE_WIDTH/2 - 5, CASE_WIDTH + 20,
+    10, CASE_DEPTH + 10,
+    -CASE_HEIGHT, CASE_HEIGHT,
+    "TaperR"
+)
+taper_r.rotation_euler = (0, 0, math.radians(10))
+taper_r.location.x += 10
+boolean_op(rear_shell, taper_r)
+
+taper_t = create_block(
+    -CASE_WIDTH, CASE_WIDTH,
+    20, CASE_DEPTH + 20,
+    CASE_HEIGHT/2 - 5, CASE_HEIGHT + 20,
+    "TaperT"
+)
+taper_t.rotation_euler = (math.radians(10), 0, 0)
+boolean_op(rear_shell, taper_t)
+
+
+# 挖空内部 (Hollow)
+# 留出 Back Wall (Y=80) 和 Top Wall (Z=55)
+# **关键修改**: 顶部不再开孔，保持 Top Wall 完整
+inner_cut = create_block(
+    -CASE_WIDTH/2 + WALL, CASE_WIDTH/2 - WALL,
+    -1.0, CASE_DEPTH - WALL,
+    -CASE_HEIGHT/2 + WALL, CASE_HEIGHT/2 - WALL,
+    "InnerCut"
+)
+boolean_op(rear_shell, inner_cut)
+
+
+# ==================== 2. 开发板安装 (PCB Mounting) ====================
+# 安装在后壁内侧
+# PCB 底部边缘 Z = -25
+# PCB 顶部边缘 Z = +25
+
+boss_spacing = 50.0 / 2 - 2.5 # 22.5
+boss_coords = [
+    (-boss_spacing, -boss_spacing), 
+    (boss_spacing, -boss_spacing),
+    (-boss_spacing, boss_spacing), 
+    (boss_spacing, boss_spacing)
 ]
-for px, py in post_positions:
-    post = create_cylinder(px, py, BOX_HEIGHT / 2, MOUNT_POST_RADIUS, BOX_HEIGHT)
-    boolean_union(box, post)
 
-# 内部挖空
-inner = create_cube(0, 0, BOX_HEIGHT / 2 + 1, PCB_SIZE, PCB_SIZE, BOX_HEIGHT - 2)
-boolean_difference(box, inner)
-
-# 散热孔
-for i in range(5):
-    offset = (i - 2) * 6.0
-    vent = create_cube(0, offset, 0, 30.0, 3.0, 4.0)
-    boolean_difference(box, vent)
-
-# 螺丝孔 (Box)
-for px, py in post_positions:
-    hole = create_cylinder(px, py, BOX_HEIGHT / 2, MOUNT_SCREW_DIAMETER / 2, BOX_HEIGHT + 2)
-    boolean_difference(box, hole)
-    head = create_cylinder(px, py, MOUNT_HEAD_DEPTH / 2, MOUNT_HEAD_DIAMETER / 2, MOUNT_HEAD_DEPTH)
-    boolean_difference(box, head)
-
-# 接口开孔
-usb_a_cut = create_cube(USB_A_X, USB_A_Y + USB_A_DEPTH / 2, USB_A_Z, USB_A_WIDTH, USB_A_DEPTH, USB_A_HEIGHT)
-boolean_difference(box, usb_a_cut)
-
-type_c_cut = create_cube(TYPE_C_X, TYPE_C_Y - TYPE_C_DEPTH / 2, TYPE_C_Z, TYPE_C_WIDTH, TYPE_C_DEPTH, TYPE_C_HEIGHT)
-boolean_difference(box, type_c_cut)
-
-rj45_cut = create_cube(RJ45_X, RJ45_Y + RJ45_DEPTH / 2, RJ45_Z, RJ45_WIDTH, RJ45_DEPTH, RJ45_HEIGHT)
-boolean_difference(box, rj45_cut)
-
-antenna_cut = create_cylinder(ANTENNA_X, ANTENNA_Y + ANTENNA_DEPTH / 2, ANTENNA_Z, ANTENNA_DIAMETER / 2, ANTENNA_DEPTH, (math.pi / 2, 0, 0))
-boolean_difference(box, antenna_cut)
-
-# ==================== 创建 Screen Box ====================
-screen_box_total_height = SCREEN_OUTER + WALL * 2 + SCREEN_CHIN
-screen_box_center_y = -SCREEN_CHIN / 2
-
-screen_box = create_cube(
-    0, 
-    screen_box_center_y, 
-    BOX_HEIGHT + SCREEN_HEIGHT / 2, 
-    SCREEN_OUTER + WALL * 2, 
-    screen_box_total_height, 
-    SCREEN_HEIGHT
-)
-
-# 屏幕区域
-screen_cut = create_cube(
-    0, 
-    0, 
-    BOX_HEIGHT + SCREEN_HEIGHT / 2 + SCREEN_LIP, 
-    SCREEN_INNER, 
-    SCREEN_INNER, 
-    SCREEN_HEIGHT
-)
-boolean_difference(screen_box, screen_cut)
-
-# 屏幕嵌入槽 (LIP)
-screen_lip = create_cube(
-    0, 
-    0, 
-    (BOX_HEIGHT + SCREEN_HEIGHT) - (SCREEN_LIP + 0.1) / 2,
-    SCREEN_OUTER - 4, 
-    SCREEN_OUTER - 4, 
-    SCREEN_LIP + 0.1
-)
-boolean_difference(screen_box, screen_lip)
-
-# FPC Pocket
-fpc_pocket_y = -SCREEN_OUTER / 2 - SCREEN_FPC_HEIGHT / 2
-fpc_pocket_z = (BOX_HEIGHT + SCREEN_HEIGHT) - SCREEN_FPC_POCKET_DEPTH / 2
-fpc_pocket = create_cube(
-    0,
-    fpc_pocket_y,
-    fpc_pocket_z,
-    SCREEN_FPC_WIDTH,
-    SCREEN_FPC_HEIGHT,
-    SCREEN_FPC_POCKET_DEPTH
-)
-boolean_difference(screen_box, fpc_pocket)
-
-# 组装结构 (Align)
-align_body = create_cube(0, 0, BOX_HEIGHT + ALIGNMENT_RECESS_DEPTH / 2, BOX_X + 0.4, BOX_Y + 0.4, ALIGNMENT_RECESS_DEPTH)
-for px, py in post_positions:
-    p = create_cylinder(px, py, BOX_HEIGHT + ALIGNMENT_RECESS_DEPTH / 2, MOUNT_POST_RADIUS + 0.2, ALIGNMENT_RECESS_DEPTH)
-    boolean_union(align_body, p)
-boolean_difference(screen_box, align_body)
-
-# 组装结构 (Screw Holes)
-for px, py in post_positions:
-    screw_hole_screen = create_cylinder(
-        px, 
-        py, 
-        BOX_HEIGHT + SCREEN_HEIGHT / 2, 
-        MOUNT_HOLE_DIAMETER / 2, 
-        SCREEN_HEIGHT - 2 
+for dx, dz in boss_coords:
+    pillar = create_cylinder_axis(
+        dx, 
+        (CASE_DEPTH - WALL) - STANDOFF_H/2, 
+        dz, 
+        3.0, 
+        STANDOFF_H, 
+        'Y',
+        "Standoff"
     )
-    boolean_difference(screen_box, screw_hole_screen)
+    boolean_op(rear_shell, pillar, 'UNION')
+    
+    hole = create_cylinder_axis(
+        dx,
+        (CASE_DEPTH - WALL) - STANDOFF_H/2,
+        dz,
+        1.2, 
+        STANDOFF_H + 2.0,
+        'Y',
+        "ScrewHole"
+    )
+    boolean_op(rear_shell, hole)
 
-# ==================== FPC排线通道 (直通 + 底部开口) ====================
-# 去除横梁 (Connect Lip and Pocket)
-# 位于 Screen Lip 底部边缘 (-40) 和 FPC Pocket 顶部边缘 (-42) 之间
-# 创建一个连接体打通两者
+# ==================== 3. 底部接口与走线 (Bottom IO) ====================
+# 所有接口都在 PCB 竖直平面上 (Y=71)
+# 顶部 Type-C (Z=+25): 需要内部留空，线缆向下走
+# 底部 USB/RJ45 (Z=-25): 直接向下开口
 
-# 连接体参数
-connector_width = SCREEN_FPC_WIDTH # 32.0
-connector_y = -SCREEN_OUTER / 2 # -42 (Approx border)
-connector_len = 6.0 # Enough to bridge the gap
-connector_z = fpc_pocket_z # Same depth as pocket
+# 底部大开口 (Cable Bay)
+# 打通底部，覆盖 USB, RJ45 以及 额外的 Type-C 走线空间
+# X range: Covers PCB width (-25 to +25) plus extra space
+# Y range: Around PCB plane
+# Z range: Through floor
 
-fpc_connector = create_cube(
-    0,
-    connector_y,
-    connector_z,
-    connector_width,
-    connector_len,
-    SCREEN_FPC_POCKET_DEPTH
+cable_bay = create_block(
+    -35, 35, # 70mm wide opening
+    PCB_Y_POS - 15, PCB_Y_POS + 15, # 30mm deep opening around PCB
+    -CASE_HEIGHT/2 - 5, -CASE_HEIGHT/2 + WALL + 5, # Through floor
+    "CableBay"
 )
-boolean_difference(screen_box, fpc_connector)
+boolean_op(rear_shell, cable_bay)
 
-# 垂直开口 (仅在 Box 内部区域打开底部)
-# 连接 Pocket (now extended) 和 Box 内部
-drop_y_start = -PCB_SIZE / 2 # -25 (Box Wall)
-drop_y_end = -SCREEN_OUTER / 2 - 5 # Inside Pocket area
-drop_len = abs(drop_y_end - drop_y_start)
-drop_center_y = (drop_y_start + drop_y_end) / 2
+# 顶部 Type-C **不** 开孔
+# 内部空间高度: Case Height 110. Inner Height ~104. Half ~52.
+# PCB Top Edge = +25.
+# Clearance = 52 - 25 = 27mm.
+# 这足够插入直头或弯头 Type-C 线并向下弯曲。
 
-# 底部保留厚度
-floor_thickness = 1.0
-drop_z_pos = BOX_HEIGHT + floor_thickness / 2
 
-wire_drop = create_cube(
-    0,
-    drop_center_y,
-    drop_z_pos,
-    SCREEN_FPC_WIDTH - 4, # Slightly narrower drop hole
-    drop_len,
-    floor_thickness + 0.1
+# ==================== 4. 前脸 (Front Bezel) ====================
+BEZEL_DEPTH = 10.0
+front_bezel = create_block(
+    -CASE_WIDTH/2, CASE_WIDTH/2,
+    -BEZEL_DEPTH, 0,
+    -CASE_HEIGHT/2, CASE_HEIGHT/2,
+    "FrontBezel"
 )
-boolean_difference(screen_box, wire_drop)
 
-# 屏幕固定螺丝孔
-for x, y in [
-    (SCREEN_OUTER/2 - 6, SCREEN_OUTER/2 - 6),
-    (-SCREEN_OUTER/2 + 6, SCREEN_OUTER/2 - 6),
-    (-SCREEN_OUTER/2 + 6, -SCREEN_OUTER/2 + 6),
-    (SCREEN_OUTER/2 - 6, -SCREEN_OUTER/2 + 6)
-]:
-    screw_hole = create_cylinder(x, y, BOX_HEIGHT + SCREEN_HEIGHT/2, 0.8, SCREEN_HEIGHT)
-    boolean_difference(screen_box, screw_hole)
+screen_hole = create_block(
+    -SCREEN_VISIBLE_W/2, SCREEN_VISIBLE_W/2,
+    -BEZEL_DEPTH - 1, 1,
+    -SCREEN_VISIBLE_H/2, SCREEN_VISIBLE_H/2,
+    "ScreenHole"
+)
+boolean_op(front_bezel, screen_hole)
 
-# 设置父子关系
-if screen_box and box:
-    try:
-        screen_box.parent = box
-    except:
-        pass
+screen_recess = create_block(
+    -SCREEN_W/2, SCREEN_W/2,
+    -5.0, 0.1, 
+    -SCREEN_H/2, SCREEN_H/2,
+    "ScreenRecess"
+)
+boolean_op(front_bezel, screen_recess)
+
+# 组装卡扣
+lip = create_block(
+    -CASE_WIDTH/2 + WALL - 0.2, CASE_WIDTH/2 - WALL + 0.2,
+    0, 3.0,
+    -CASE_HEIGHT/2 + WALL - 0.2, CASE_HEIGHT/2 - WALL + 0.2,
+    "AssemblyLip"
+)
+lip_inner = create_block(
+    -CASE_WIDTH/2 + WALL + 2, CASE_WIDTH/2 - WALL - 2,
+    -1, 4,
+    -CASE_HEIGHT/2 + WALL + 2, CASE_HEIGHT/2 - WALL - 2,
+    "LipInner"
+)
+boolean_op(lip, lip_inner)
+boolean_op(front_bezel, lip, 'UNION')
+
+# ==================== 5. 装饰与后处理 ====================
+# 侧面散热孔 (Side Vents)
+for i in range(3):
+    z = (i - 1) * 15
+    vent = create_block(
+        -CASE_WIDTH/2 - 1, -CASE_WIDTH/2 + 5,
+        20, 60,
+        z - 2, z + 2,
+        "VentL"
+    )
+    boolean_op(rear_shell, vent)
+    
+    vent2 = create_block(
+        CASE_WIDTH/2 - 5, CASE_WIDTH/2 + 1,
+        20, 60,
+        z - 2, z + 2,
+        "VentR"
+    )
+    boolean_op(rear_shell, vent2)
 
 # 倒角
-if box:
-    bev1 = box.modifiers.new("bevel", 'BEVEL')
-    bev1.width = 2.0
-    bev1.segments = 4
-    bev1.limit_method = 'ANGLE'
-    bev1.angle_limit = math.radians(35)
-    bpy.context.view_layer.objects.active = box
-    bpy.ops.object.modifier_apply(modifier=bev1.name)
+add_bevel(front_bezel, 1.5)
+add_bevel(rear_shell, 2.0)
 
-if screen_box:
-    bev2 = screen_box.modifiers.new("bevel", 'BEVEL')
-    bev2.width = 0.6
-    bev2.segments = 2
-    bev2.limit_method = 'ANGLE'
-    bpy.context.view_layer.objects.active = screen_box
-    bpy.ops.object.modifier_apply(modifier=bev2.name)
+front_bezel.parent = rear_shell
 
-# 平滑
 bpy.ops.object.select_all(action='SELECT')
 bpy.ops.object.shade_smooth()
 
 print("=" * 60)
-print("外壳设计完成！(去横梁直通版)")
-print("=" * 60)
-print(f"已打通屏幕凹槽与FPC口袋之间的横梁")
-print(f"保留了进入Box内部的垂直落孔")
+print("复古外壳 V3 (底部走线版) 生成完毕！")
+print("顶部：完全封闭 (无开孔)")
+print("底部：设有大型线缆舱 (Cable Bay)，支持 USB/RJ45 及 Type-C 走线")
+print("内部：顶部预留 27mm 空间，供 Type-C 线缆内部回旋")
 print("=" * 60)
