@@ -39,7 +39,7 @@ const Navbar: React.FC<NavbarProps> = ({ lang, setLang, onNavigate }) => {
         if (view) onNavigate(view);
         setIsOpen(false);
       }}
-      className="text-gray-300 hover:text-brand-green transition-colors px-3 py-2 text-sm font-medium font-mono uppercase tracking-wider"
+      className="text-gray-300 hover:text-brand-green transition-colors px-3 py-2 text-sm font-medium font-mono uppercase tracking-wider text-center w-full"
     >
       {label}
     </button>
@@ -128,22 +128,35 @@ const Navbar: React.FC<NavbarProps> = ({ lang, setLang, onNavigate }) => {
       {/* Mobile menu */}
       {isOpen && (
         <div className="md:hidden bg-[#0f0f0f] border-b border-white/10">
-          <div className="px-2 pt-2 pb-3 space-y-1 sm:px-3 flex flex-col">
+          <div className="px-3 pt-3 pb-4 space-y-1 flex flex-col items-center">
             <NavLink label={t.home} view="home" />
-            <button 
-              onClick={() => setIsLangOpen(!isLangOpen)} 
-              className="text-left text-gray-300 px-3 py-2 text-sm font-mono uppercase flex items-center justify-between"
-            >
-              <span>Language: {lang}</span>
-              <ChevronDown className="w-4 h-4" />
-            </button>
-            {isLangOpen && (
-              <div className="pl-6 space-y-1 border-l border-white/10 ml-3 mb-2">
-                 {languages.map(l => (
-                   <button key={l.code} onClick={() => { changeLang(l.code); setIsOpen(false); }} className="block w-full text-left text-gray-400 py-1 text-sm">{l.label}</button>
-                 ))}
-              </div>
-            )}
+            <div className="w-full">
+              <button 
+                onClick={() => setIsLangOpen(!isLangOpen)} 
+                className="w-full text-center text-gray-300 hover:text-brand-green px-3 py-2.5 text-sm font-medium transition-colors flex items-center justify-center gap-2 rounded-md hover:bg-white/5"
+              >
+                <Globe className="w-4 h-4 opacity-70" />
+                <span>{languages.find(l => l.code === lang)?.label || lang.toUpperCase()}</span>
+                <ChevronDown className={`w-4 h-4 transition-transform ${isLangOpen ? 'rotate-180' : ''}`} />
+              </button>
+              {isLangOpen && (
+                <div className="mt-1 space-y-0.5 flex flex-col items-center">
+                   {languages.map(l => (
+                     <button 
+                       key={l.code} 
+                       onClick={() => { changeLang(l.code); setIsOpen(false); }} 
+                       className={`w-full text-center text-sm py-2 px-3 rounded-md transition-colors ${
+                         lang === l.code 
+                           ? 'text-brand-green bg-brand-green/10 font-medium' 
+                           : 'text-gray-400 hover:text-white hover:bg-white/5'
+                       }`}
+                     >
+                       {l.label}
+                     </button>
+                   ))}
+                </div>
+              )}
+            </div>
             <NavLink label="S1 Ultra" view="ultra" />
             <NavLink label="S1 Pro" view="pro" />
             <NavLink label="S1 Plus" view="plus" />

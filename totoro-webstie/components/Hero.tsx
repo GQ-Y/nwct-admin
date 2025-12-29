@@ -65,16 +65,16 @@ const Hero: React.FC<HeroProps> = ({ lang, onNavigate }) => {
       {/* Background Effects */}
       <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[1000px] h-[600px] bg-brand-green/5 blur-[120px] rounded-full pointer-events-none animate-pulse-slow"></div>
       
-      <main className="flex-grow flex flex-col items-center justify-center px-4 sm:px-6 lg:px-8 relative z-10 text-center">
+      <main className="flex-grow flex flex-col items-center px-4 sm:px-6 lg:px-8 relative z-10 text-center pt-8 md:pt-16 md:justify-center">
         
         {/* Badge */}
-        <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-brand-green/30 bg-brand-green/5 text-brand-green text-xs font-mono tracking-wider uppercase mb-8">
+        <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-brand-green/30 bg-brand-green/5 text-brand-green text-xs font-mono tracking-wider uppercase mb-6 md:mb-8">
           <span className="w-2 h-2 rounded-full bg-brand-green animate-pulse"></span>
           {t.badge}
         </div>
 
         {/* Title */}
-        <h1 className="text-5xl md:text-7xl lg:text-8xl font-bold tracking-tighter text-white mb-6 max-w-5xl mx-auto leading-tight">
+        <h1 className="text-5xl md:text-7xl lg:text-8xl font-bold tracking-tighter text-white mb-4 md:mb-6 max-w-5xl mx-auto leading-tight">
           {t.title}
         </h1>
 
