@@ -2,8 +2,9 @@ package api
 
 import (
 	"net/http"
-	"totoro-device/utils"
 	"strings"
+	"totoro-device/models"
+	"totoro-device/utils"
 
 	"github.com/gin-gonic/gin"
 )
@@ -40,10 +41,7 @@ func (s *Server) authMiddleware() gin.HandlerFunc {
 		// 从Header获取Token
 		authHeader := c.GetHeader("Authorization")
 		if authHeader == "" {
-			c.JSON(http.StatusUnauthorized, gin.H{
-				"code":    401,
-				"message": "未授权",
-			})
+			c.JSON(http.StatusUnauthorized, models.ErrorResponse(401, "未授权"))
 			c.Abort()
 			return
 		}
@@ -51,23 +49,18 @@ func (s *Server) authMiddleware() gin.HandlerFunc {
 		// 提取Token
 		parts := strings.Split(authHeader, " ")
 		if len(parts) != 2 || parts[0] != "Bearer" {
-			c.JSON(http.StatusUnauthorized, gin.H{
-				"code":    401,
-				"message": "Token格式错误",
-			})
+			c.JSON(http.StatusUnauthorized, models.ErrorResponse(401, "Token格式错误"))
 			c.Abort()
 			return
 		}
 
 		token := parts[1]
 
-		// 验证JWT Token
+		// 验证JWT Token（包括过期检查）
 		claims, err := utils.VerifyJWT(token)
 		if err != nil {
-			c.JSON(http.StatusUnauthorized, gin.H{
-				"code":    401,
-				"message": "Token无效",
-			})
+			// JWT 验证失败（包括过期、签名错误等）
+			c.JSON(http.StatusUnauthorized, models.ErrorResponse(401, "Token无效或已过期"))
 			c.Abort()
 			return
 		}
@@ -80,4 +73,3 @@ func (s *Server) authMiddleware() gin.HandlerFunc {
 		c.Next()
 	}
 }
-

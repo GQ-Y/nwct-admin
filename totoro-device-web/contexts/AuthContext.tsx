@@ -1,5 +1,5 @@
-import React, { createContext, useContext, useMemo, useState } from "react";
-import { api, clearToken, getToken, setToken } from "../lib/api";
+import React, { createContext, useContext, useMemo, useState, useEffect } from "react";
+import { api, clearToken, getToken, setToken, setTokenExpiredCallback } from "../lib/api";
 
 type AuthState = {
   token: string | null;
@@ -14,6 +14,27 @@ const Ctx = createContext<AuthState | null>(null);
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [token, setTokenState] = useState<string | null>(getToken());
   const [initialized, setInitialized] = useState<boolean | null>(null);
+
+  // 监听 token 清除事件
+  useEffect(() => {
+    const handleTokenCleared = () => {
+      setTokenState(null);
+      setInitialized(null);
+    };
+
+    window.addEventListener("token-cleared", handleTokenCleared);
+    return () => {
+      window.removeEventListener("token-cleared", handleTokenCleared);
+    };
+  }, []);
+
+  // 设置 token 失效回调
+  useEffect(() => {
+    setTokenExpiredCallback(() => {
+      setTokenState(null);
+      setInitialized(null);
+    });
+  }, []);
 
   const refreshInitStatus = async () => {
     const st = await api.initStatus();

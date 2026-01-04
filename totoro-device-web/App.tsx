@@ -1,6 +1,6 @@
 
-import React from 'react';
-import { BrowserRouter, Routes, Route, Navigate, Outlet } from 'react-router-dom';
+import React, { useEffect } from 'react';
+import { BrowserRouter, Routes, Route, Navigate, Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { MainLayout } from './components/Layout';
 import { Login } from './pages/Login';
 import { InitWizard } from './pages/InitWizard';
@@ -17,14 +17,40 @@ import { RealtimeProvider } from './contexts/RealtimeContext';
 // Protected Route Wrapper
 const ProtectedRoute = () => {
   const { token } = useAuth();
-  return token ? (
+  const navigate = useNavigate();
+  const location = useLocation();
+
+  // 监听 token 变化，当 token 失效时自动跳转到登录页
+  useEffect(() => {
+    if (!token && location.pathname !== '/login' && location.pathname !== '/init') {
+      navigate('/login', { replace: true });
+    }
+  }, [token, navigate, location.pathname]);
+
+  // 监听 token 清除事件
+  useEffect(() => {
+    const handleTokenCleared = () => {
+      if (location.pathname !== '/login' && location.pathname !== '/init') {
+        navigate('/login', { replace: true });
+      }
+    };
+
+    window.addEventListener('token-cleared', handleTokenCleared);
+    return () => {
+      window.removeEventListener('token-cleared', handleTokenCleared);
+    };
+  }, [navigate, location.pathname]);
+
+  if (!token) {
+    return <Navigate to="/login" replace />;
+  }
+
+  return (
     <RealtimeProvider enabled={true}>
       <MainLayout>
         <Outlet />
       </MainLayout>
     </RealtimeProvider>
-  ) : (
-    <Navigate to="/login" replace />
   );
 };
 

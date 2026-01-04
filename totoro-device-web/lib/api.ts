@@ -55,6 +55,15 @@ export function setToken(token: string) {
 
 export function clearToken() {
   localStorage.removeItem("token");
+  // 触发自定义事件，通知 token 已清除
+  window.dispatchEvent(new CustomEvent("token-cleared"));
+}
+
+// Token 失效回调函数
+let onTokenExpired: (() => void) | null = null;
+
+export function setTokenExpiredCallback(callback: () => void) {
+  onTokenExpired = callback;
 }
 
 async function request<T>(
@@ -80,6 +89,17 @@ async function request<T>(
   } catch {
     // 非 JSON：直接抛
     throw new Error(sanitizeErrorMessage(text || `HTTP ${res.status}`));
+  }
+
+  // 处理 401 未授权错误（token 失效）
+  if (res.status === 401 || (json && typeof json.code === "number" && json.code === 401)) {
+    // 清除 token
+    clearToken();
+    // 触发 token 失效回调
+    if (onTokenExpired) {
+      onTokenExpired();
+    }
+    throw new Error("登录已过期，请重新登录");
   }
 
   if (!res.ok || (json && typeof json.code === "number" && json.code !== 200)) {
